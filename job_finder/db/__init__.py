@@ -57,7 +57,6 @@ from ._jobs import upsert_job as upsert_job
 
 # DB write paths — runs log + per-row persistence + pipeline state machine.
 from ._persistence import log_run as log_run
-from ._persistence import persist_job_archetype as persist_job_archetype
 from ._persistence import persist_job_assessment as persist_job_assessment
 from ._persistence import persist_job_expiry_state as persist_job_expiry_state
 from ._persistence import update_pipeline_status as update_pipeline_status

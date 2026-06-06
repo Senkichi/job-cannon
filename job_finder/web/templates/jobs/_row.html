@@ -54,7 +54,7 @@
     ">
   {% with oob=false %}{% include "jobs/_score_cell.html" %}{% endwith %}
   <td class="px-2 py-1.5 text-slate-100 font-medium truncate">
-    {{ job.title }}{% if job.is_stale %} <span class="text-xs text-amber-500 border border-amber-500/50 rounded px-1">Stale</span>{% endif %}{% if job.job_archetype %} <span class="text-xs text-cyan-400 border border-cyan-500/50 rounded px-1">{{ job.job_archetype | replace('_', ' ') }}</span>{% endif %}{% if _needs_review %} <a href="{{ url_for('admin.review') }}#job-{{ job.dedup_key | urlencode | replace('%', '') }}" hx-on:click="event.stopPropagation()" title="Flagged for review: {{ _review_labels | join(', ') }}" class="text-xs text-amber-400 border border-amber-500/60 bg-amber-500/10 rounded px-1 hover:bg-amber-500/20">review</a>{% endif %}
+    {{ job.title }}{% if job.is_stale %} <span class="text-xs text-amber-500 border border-amber-500/50 rounded px-1">Stale</span>{% endif %}{% if _needs_review %} <a href="{{ url_for('admin.review') }}#job-{{ job.dedup_key | urlencode | replace('%', '') }}" hx-on:click="event.stopPropagation()" title="Flagged for review: {{ _review_labels | join(', ') }}" class="text-xs text-amber-400 border border-amber-500/60 bg-amber-500/10 rounded px-1 hover:bg-amber-500/20">review</a>{% endif %}
   </td>
   <td class="px-2 py-1.5 text-slate-300 truncate">{{ job.company }}</td>
   {% set canonical = job.locations_structured | format_canonical_location %}

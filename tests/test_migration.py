@@ -355,21 +355,21 @@ class TestMigration27:
         conn.close()
         assert "expiry_status" in cols, "expiry_status column missing from jobs"
 
-    def test_migration27_adds_eval_blocks(self, tmp_db_path):
-        """Migration 27 adds eval_blocks column to jobs table."""
+    def test_eval_blocks_dropped_by_m083(self, tmp_db_path):
+        """eval_blocks (added m027) is dropped by m083 — absent after full chain."""
         run_migrations(tmp_db_path)
         conn = sqlite3.connect(tmp_db_path)
-        cols = {row[1] for row in conn.execute("PRAGMA table_info(jobs)").fetchall()}
+        cols = {row[1] for row in conn.execute("PRAGMA table_xinfo(jobs)").fetchall()}
         conn.close()
-        assert "eval_blocks" in cols, "eval_blocks column missing from jobs"
+        assert "eval_blocks" not in cols, "eval_blocks should be dropped by m083"
 
-    def test_migration27_adds_job_archetype(self, tmp_db_path):
-        """Migration 27 adds job_archetype column to jobs table."""
+    def test_job_archetype_dropped_by_m083(self, tmp_db_path):
+        """job_archetype (added m027) is dropped by m083 — absent after full chain."""
         run_migrations(tmp_db_path)
         conn = sqlite3.connect(tmp_db_path)
-        cols = {row[1] for row in conn.execute("PRAGMA table_info(jobs)").fetchall()}
+        cols = {row[1] for row in conn.execute("PRAGMA table_xinfo(jobs)").fetchall()}
         conn.close()
-        assert "job_archetype" in cols, "job_archetype column missing from jobs"
+        assert "job_archetype" not in cols, "job_archetype should be dropped by m083"
 
     def test_migration27_expiry_status_default_null(self, tmp_db_path):
         """expiry_status defaults to NULL for existing rows."""
@@ -382,13 +382,13 @@ class TestMigration27:
                     '2026-04-01', '2026-04-01')"""
         )
         conn.commit()
+        # eval_blocks / job_archetype (also added by m027) were dropped in m083
+        # (Phase 49.06); only expiry_status survives the full migration chain.
         row = conn.execute(
-            "SELECT expiry_status, eval_blocks, job_archetype FROM jobs WHERE dedup_key = 'test|mig27'"
+            "SELECT expiry_status FROM jobs WHERE dedup_key = 'test|mig27'"
         ).fetchone()
         conn.close()
         assert row[0] is None, f"Expected expiry_status=NULL, got: {row[0]}"
-        assert row[1] is None, f"Expected eval_blocks=NULL, got: {row[1]}"
-        assert row[2] is None, f"Expected job_archetype=NULL, got: {row[2]}"
 
 
 class TestMigration13:
@@ -1019,14 +1019,14 @@ class TestMigration41DestructiveShape:
         conn = sqlite3.connect(tmp_db_path)
         cols = {row[1] for row in conn.execute("PRAGMA table_info(jobs)").fetchall()}
         conn.close()
+        # NOTE: eval_blocks / opus_score / job_archetype were preserved by m41 but
+        # later dropped by m083 (Phase 49.06), so they are absent after the full
+        # chain and intentionally excluded from this preservation check.
         for preserved in (
             "fit_analysis",
             "scoring_provider",
             "scoring_model",
-            "eval_blocks",
-            "opus_score",
             "score",
-            "job_archetype",
             "legitimacy_note",
             "classification",
             "sub_scores_json",

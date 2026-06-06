@@ -26,7 +26,7 @@ class BaselineSample:
 
     dev and holdout are tuples of dicts (each row carries dedup_key, title,
     company, jd_full, location, salary, sonnet_score, haiku_score,
-    scoring_provider, legitimacy_note, job_archetype).
+    scoring_provider, legitimacy_note).
 
     quartile_counts records how many rows were drawn from each quartile —
     recorded in the matrix methodology section for audit.
@@ -45,7 +45,7 @@ _BASELINE_POOL_SQL: str = """
     SELECT j.dedup_key, j.title, j.company, j.jd_full, j.location,
            j.salary_min, j.salary_max,
            j.sonnet_score, j.haiku_score, j.scoring_provider,
-           j.legitimacy_note, j.job_archetype
+           j.legitimacy_note
     FROM jobs j
     WHERE j.scoring_provider = 'anthropic'
       AND j.sonnet_score IS NOT NULL

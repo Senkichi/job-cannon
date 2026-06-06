@@ -54,7 +54,6 @@ _DB_DIRECT_SYMBOLS: tuple[str, ...] = (
     "log_run",
     "persist_job_assessment",
     "persist_job_expiry_state",
-    "persist_job_archetype",
     "update_pipeline_status",
     # Read-only filter queries
     "get_distinct_sources",

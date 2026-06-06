@@ -19,12 +19,12 @@ Categories:
   - ``scoring`` — written by the scoring pipeline (LLM or heuristic).
   - ``user``    — set via UI actions.
   - ``eval``    — gold labels set by the eval workflow.
-  - ``dead``    — vestigial; slated for removal (Phase 49 m082).
+  - ``dead``    — vestigial; removed in Phase 49.06 (m083).
 
-Some entries below correspond to columns that do not exist yet — they are added
-in Phase 49 (``source_urls_raw``, ``salary_currency``, ``salary_period`` in m080;
-``computed_status`` in m081). Categorizing them ahead of time is harmless: the
-test only requires live-columns ⊆ categorized, not the reverse.
+The Phase 49 columns are now live: ``source_urls_raw`` (m080), ``salary_currency``
++ ``salary_period`` (m081), and the VIRTUAL ``computed_status`` (m082). The
+schema-correspondence test only requires live-columns ⊆ categorized, so the
+mapping stays the source of truth as the schema evolves.
 
 Reference: .planning/specs/2026-05-29-ingestion-contract-enforcement.md §8.2.1.
 """
@@ -83,10 +83,9 @@ COLUMN_CATEGORIES: dict[str, str] = {
     "gold_notes": "eval",
     "gold_labeled_at": "eval",
     "gold_no_signal_axes": "eval",
-    # ── dead (Phase 49 drops these via m082) ──────────────────────────────
-    "opus_score": "dead",
-    "eval_blocks": "dead",
-    "job_archetype": "dead",
+    # Phase 49.06 (m083) dropped the dead columns opus_score / eval_blocks /
+    # job_archetype. They are intentionally absent here — the schema-correspondence
+    # test (live ⊆ categorized) would flag them if the drop were ever reverted.
 }
 
 # ParsedJob fields that intentionally do NOT map to a parser-owned column.

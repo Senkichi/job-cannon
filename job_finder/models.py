@@ -8,7 +8,15 @@ from datetime import datetime
 
 @dataclass
 class Job:
-    """Normalized job representation across all sources."""
+    """Normalized job representation across all sources.
+
+    description vs jd_full split (D-13): ``description`` is the parser-supplied
+    short text (present when a source exposes a summary); the canonical full body
+    lives in the jobs table's ``jd_full`` column (often fetched separately and
+    promoted via ``set_jd_full``). The split exists because some sources only
+    expose short text while others provide the full body via a second fetch.
+    ``Job`` itself carries only ``description``; ``jd_full`` is a DB-side column.
+    """
 
     title: str
     company: str
