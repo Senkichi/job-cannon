@@ -945,6 +945,15 @@ ensure you removed any redeclaration), and likewise leave sub-tier C assigning
 
 > Do NOT use `locals().get(...)` — edit (a) makes both names unconditionally
 > bound, so reference them directly.
+>
+> **Placement matters:** the capture block in (b) must be at the same
+> indentation as the sub-tier comments — i.e. *outside* the `if careers_result:`
+> guard (and outside the sub-tier B/C `company_id` guards). This is deliberate:
+> a promotion-only job (no `company_id`, empty `ats_result`/`careers_result`)
+> must still capture its direct link from `source_urls`. Likewise the capture
+> guard is `job_row.get("dedup_key")`, NOT `company_id` — do not "consistency-fix"
+> it to `company_id`, or promotion-only jobs (covered by
+> `test_enrich_job_promotes_existing_ats_source_url`) would be skipped.
 
 - [ ] **Step 4: Run the test to verify it passes**
 
