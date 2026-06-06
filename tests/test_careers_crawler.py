@@ -70,6 +70,8 @@ def tmp_db_path():
             source_id TEXT DEFAULT '',
             salary_min INTEGER,
             salary_max INTEGER,
+            salary_currency TEXT NOT NULL DEFAULT 'USD',
+            salary_period TEXT NOT NULL DEFAULT 'unknown',
             description TEXT,
             first_seen TEXT NOT NULL DEFAULT (datetime('now')),
             last_seen TEXT NOT NULL DEFAULT (datetime('now')),

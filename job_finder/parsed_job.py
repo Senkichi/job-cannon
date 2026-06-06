@@ -367,6 +367,11 @@ class ParsedJob:
             "source_id": source_id,
             "salary_min": job.salary_min,
             "salary_max": job.salary_max,
+            # Salary metadata (Phase 49.02): sourced from the Job (parsers set it
+            # where determinable; defaults USD/unknown). source_meta may override
+            # for direct ParsedJob construction paths.
+            "salary_currency": sm.get("salary_currency", job.salary_currency),
+            "salary_period": sm.get("salary_period", job.salary_period),
             "description": job.description,
             "jd_full": clean_jd_full,
             "posted_date": job.posted_date,

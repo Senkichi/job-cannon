@@ -63,6 +63,39 @@ def _resolve_salary(value: int | None, interval: str | None) -> int | None:
     return value
 
 
+# Salary-period mapping (Phase 49.02). Maps Greenhouse's unit/interval value to
+# the m081 salary_period CHECK allowlist; anything unrecognized → 'unknown'.
+_INTERVAL_TO_PERIOD: dict[str, str] = {
+    "year": "annual",
+    "annual": "annual",
+    "yearly": "annual",
+    "hour": "hourly",
+    "hourly": "hourly",
+    "month": "monthly",
+    "monthly": "monthly",
+}
+
+# m081 salary_currency CHECK allowlist.
+_CURRENCY_ALLOWLIST: frozenset[str] = frozenset(
+    {"USD", "GBP", "EUR", "CAD", "AUD", "INR", "SGD", "UNKNOWN"}
+)
+
+
+def _interval_to_period(interval: str | None) -> str:
+    """Map a Greenhouse unit/interval to the salary_period allowlist."""
+    if not interval:
+        return "unknown"
+    return _INTERVAL_TO_PERIOD.get(interval.strip().lower(), "unknown")
+
+
+def _normalize_currency(currency: str | None) -> str:
+    """Map a Greenhouse currency code to the salary_currency allowlist (default USD)."""
+    if not currency:
+        return "USD"
+    code = currency.strip().upper()
+    return code if code in _CURRENCY_ALLOWLIST else "USD"
+
+
 def _to_canonical(posting: dict) -> list:
     """Layer-1 mapping for Greenhouse posting → list[JobLocation].
 
@@ -95,6 +128,8 @@ def _posting_to_job(posting: dict, _slug: str) -> dict:
     salary_min = None
     salary_max = None
     comp_json = None
+    salary_currency = "USD"
+    salary_period = "unknown"
     pay_ranges = posting.get("pay_input_ranges") or []
     if pay_ranges:
         first_range = pay_ranges[0]
@@ -105,6 +140,11 @@ def _posting_to_job(posting: dict, _slug: str) -> dict:
         salary_min = _resolve_salary(min_val, interval)
         salary_max = _resolve_salary(max_val, interval)
         comp_json = json.dumps(pay_ranges)
+        # Phase 49.02: emit currency + period where Greenhouse provides them.
+        salary_period = _interval_to_period(interval)
+        salary_currency = _normalize_currency(
+            first_range.get("currency_type") or first_range.get("currency")
+        )
 
     # ── Location (flat string + structured Layer-1 emission) ─────────────────
     location_obj = posting.get("location") or {}
@@ -133,6 +173,8 @@ def _posting_to_job(posting: dict, _slug: str) -> dict:
         "source_url": posting.get("absolute_url") or "",
         "salary_min": salary_min,
         "salary_max": salary_max,
+        "salary_currency": salary_currency,
+        "salary_period": salary_period,
         "comp_json": comp_json,
         "source_id": source_id,
         "posted_date": posted_date,

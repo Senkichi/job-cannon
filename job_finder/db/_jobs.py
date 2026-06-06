@@ -38,7 +38,7 @@ if TYPE_CHECKING:
 # templates and callers. Single source of truth for the projection contract.
 JOBS_ALL_COLUMNS = (
     "dedup_key, title, company, location, sources, source_urls, source_id, "
-    "salary_min, salary_max, description, first_seen, last_seen, score, "
+    "salary_min, salary_max, salary_currency, salary_period, description, first_seen, last_seen, score, "
     "score_breakdown, user_interest, pipeline_status, posted_date, notes, "
     "fit_analysis, classification, sub_scores_json, scoring_model, "
     "jd_full, is_stale, "
@@ -415,6 +415,8 @@ def upsert_job(
                     score = ?, score_breakdown = ?,
                     salary_min = COALESCE(?, salary_min),
                     salary_max = COALESCE(?, salary_max),
+                    salary_currency = CASE WHEN ? = 1 THEN ? ELSE salary_currency END,
+                    salary_period = CASE WHEN ? = 1 THEN ? ELSE salary_period END,
                     description = ?,
                     locations_raw = ?,
                     location = ?,
@@ -432,6 +434,13 @@ def upsert_job(
                     json.dumps(_score_breakdown),
                     norm_salary_min,
                     norm_salary_max,
+                    # Salary metadata follows a genuine new salary (first-seen-wins
+                    # for salary is enforced upstream; here a NULL salary leaves
+                    # currency/period untouched).
+                    1 if (norm_salary_min is not None or norm_salary_max is not None) else 0,
+                    parsed.salary_currency,
+                    1 if (norm_salary_min is not None or norm_salary_max is not None) else 0,
+                    parsed.salary_period,
                     merged_description,
                     json.dumps(locs_list),
                     merged_location,
@@ -498,12 +507,13 @@ def upsert_job(
             conn.execute(
                 """INSERT INTO jobs
                     (dedup_key, title, company, location, sources, source_urls,
-                     source_id, salary_min, salary_max, description,
+                     source_id, salary_min, salary_max, salary_currency, salary_period,
+                     description,
                      first_seen, last_seen, score, score_breakdown, locations_raw,
                      jd_full, scoring_provider,
                      locations_structured, workplace_type, primary_country_code,
                      company_id, posted_date, unresolved_reasons)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     parsed.dedup_key,
                     parsed.title,
@@ -514,6 +524,8 @@ def upsert_job(
                     parsed.source_id,
                     norm_salary_min,
                     norm_salary_max,
+                    parsed.salary_currency,
+                    parsed.salary_period,
                     parsed.description,
                     first_seen,
                     now,

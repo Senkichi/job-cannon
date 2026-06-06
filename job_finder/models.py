@@ -19,6 +19,11 @@ class Job:
 
     salary_min: int | None = None
     salary_max: int | None = None
+    # Salary metadata (Phase 49.02). Defaults match the m081 column defaults so
+    # legacy Job() construction stays backward-compatible; per-source parsers set
+    # them where determinable. CHECK allowlists are enforced at the DB boundary.
+    salary_currency: str = "USD"
+    salary_period: str = "unknown"
     description: str | None = None
     posted_date: datetime | None = None
     fetched_date: datetime = field(default_factory=datetime.now)
