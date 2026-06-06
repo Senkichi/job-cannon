@@ -224,6 +224,8 @@ def upsert_job(
     """
     from job_finder.parsed_job import (
         ParsedJob as _ParsedJob,
+    )
+    from job_finder.parsed_job import (
         UnresolvedParsedJob as _UnresolvedParsedJob,
     )
 
