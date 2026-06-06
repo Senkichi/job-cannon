@@ -29,7 +29,10 @@
         All
       </button>
       {% set active_statuses = filters.getlist('status') if filters.getlist is defined else ([filters.get('status')] if filters.get('status') else []) %}
-      {% for s in pipeline_statuses %}
+      {# Phase 49.05: surface the unified computed_status values — pipeline states
+         plus the computed-only states (active/stale/expired) the /jobs filter
+         now resolves against the computed_status VIRTUAL column. #}
+      {% for s in pipeline_statuses + ('active', 'stale', 'expired') %}
         <label class="flex items-center gap-1 cursor-pointer">
           <input type="checkbox" name="status" value="{{ s }}"
                  {% if s in active_statuses %}checked{% endif %}

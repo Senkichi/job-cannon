@@ -267,12 +267,18 @@ def get_filtered_jobs(
     params: list = []
 
     if status:
+        # Phase 49.05 (I-15 / F-10): the explicit status filter resolves against
+        # the unified computed_status VIRTUAL column so 'stale'/'expired' and the
+        # pipeline states all filter from one canonical value (no more three-way
+        # pipeline_status/is_stale/expiry_status drift at the UI). The default
+        # hidden-status exclusion below stays on pipeline_status — it reflects a
+        # user action (archived/dismissed/...), orthogonal to computed status.
         if isinstance(status, list):
             placeholders = ", ".join("?" * len(status))
-            conditions.append(f"pipeline_status IN ({placeholders})")
+            conditions.append(f"computed_status IN ({placeholders})")
             params.extend(status)
         else:
-            conditions.append("pipeline_status = ?")
+            conditions.append("computed_status = ?")
             params.append(status)
     elif not show_hidden:
         hidden_placeholders = ", ".join("?" * len(_HIDDEN_STATUSES))

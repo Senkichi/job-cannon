@@ -199,51 +199,12 @@ class TestPersistJobExpiryState:
         assert result["expiry_status"] == "inconclusive"
 
 
-class TestPersistJobArchetype:
-    """Tests for persist_job_archetype helper."""
-
-    def test_writes_job_archetype(self, migrated_conn):
-        """persist_job_archetype writes job_archetype to jobs table."""
-        from job_finder.db import get_job, persist_job_archetype
-
-        _insert_job(migrated_conn, "acme|archetype-test")
-        persist_job_archetype(migrated_conn, "acme|archetype-test", "platform_engineering")
-        result = get_job(migrated_conn, "acme|archetype-test")
-        assert result is not None
-        assert result["job_archetype"] == "platform_engineering"
-
-    def test_overwrites_existing_archetype(self, migrated_conn):
-        """persist_job_archetype overwrites a previously set archetype."""
-        from job_finder.db import get_job, persist_job_archetype
-
-        _insert_job(migrated_conn, "acme|archetype-overwrite")
-        persist_job_archetype(migrated_conn, "acme|archetype-overwrite", "ml_engineering")
-        persist_job_archetype(migrated_conn, "acme|archetype-overwrite", "analytics_lead")
-        result = get_job(migrated_conn, "acme|archetype-overwrite")
-        assert result["job_archetype"] == "analytics_lead"
-
-    def test_job_archetype_in_jobs_all_columns(self, migrated_conn):
-        """get_job() returns job_archetype — confirms JOBS_ALL_COLUMNS includes it."""
-        from job_finder.db import get_job, persist_job_archetype
-
-        _insert_job(migrated_conn, "acme|archetype-columns-test")
-        persist_job_archetype(migrated_conn, "acme|archetype-columns-test", "platform_engineering")
-        result = get_job(migrated_conn, "acme|archetype-columns-test")
-        assert "job_archetype" in result
-        assert result["job_archetype"] == "platform_engineering"
+# NOTE: TestPersistJobArchetype removed in Phase 49.06 (m083) — the
+# job_archetype column and its dead writer persist_job_archetype were dropped.
 
 
-class TestOpusScoreInAllColumns:
-    """Confirm JOBS_ALL_COLUMNS includes opus_score (pre-existing omission fix)."""
-
-    def test_opus_score_in_get_job(self, migrated_conn):
-        """get_job() returns opus_score column."""
-        from job_finder.db import get_job
-
-        _insert_job(migrated_conn, "acme|opus-score-test")
-        result = get_job(migrated_conn, "acme|opus-score-test")
-        assert result is not None
-        assert "opus_score" in result
+# NOTE: TestOpusScoreInAllColumns removed in Phase 49.06 (m083) — the opus_score
+# column was dropped, so get_job() no longer returns it.
 
 
 # ---------------------------------------------------------------------------

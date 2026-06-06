@@ -505,6 +505,8 @@ def _upsert_one_ats_api_job(
             source_id=job_dict.get("source_id") or "",
             salary_min=salary_min,
             salary_max=salary_max,
+            salary_currency=job_dict.get("salary_currency") or "USD",
+            salary_period=job_dict.get("salary_period") or "unknown",
             description=job_dict.get("description") or "",
             posted_date=job_dict.get("posted_date"),
         )

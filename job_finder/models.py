@@ -8,7 +8,15 @@ from datetime import datetime
 
 @dataclass
 class Job:
-    """Normalized job representation across all sources."""
+    """Normalized job representation across all sources.
+
+    description vs jd_full split (D-13): ``description`` is the parser-supplied
+    short text (present when a source exposes a summary); the canonical full body
+    lives in the jobs table's ``jd_full`` column (often fetched separately and
+    promoted via ``set_jd_full``). The split exists because some sources only
+    expose short text while others provide the full body via a second fetch.
+    ``Job`` itself carries only ``description``; ``jd_full`` is a DB-side column.
+    """
 
     title: str
     company: str
@@ -19,6 +27,11 @@ class Job:
 
     salary_min: int | None = None
     salary_max: int | None = None
+    # Salary metadata (Phase 49.02). Defaults match the m081 column defaults so
+    # legacy Job() construction stays backward-compatible; per-source parsers set
+    # them where determinable. CHECK allowlists are enforced at the DB boundary.
+    salary_currency: str = "USD"
+    salary_period: str = "unknown"
     description: str | None = None
     posted_date: datetime | None = None
     fetched_date: datetime = field(default_factory=datetime.now)
