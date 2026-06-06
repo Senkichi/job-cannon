@@ -22,6 +22,7 @@ import pytest
 
 from job_finder.db import upsert_job
 from job_finder.models import Job
+from job_finder.parsed_job import ParsedJob, UnresolvedParsedJob
 from job_finder.web.db_migrate import run_migrations
 
 
@@ -42,7 +43,14 @@ def conn() -> Iterator[sqlite3.Connection]:
 
 def _make_job(
     *, source: str = "lever", url: str = "https://ex.co/1", salary_min: int | None = None
-) -> Job:
+) -> ParsedJob | UnresolvedParsedJob:
+    """Build a ParsedJob via from_job — the post-48.07 caller boundary.
+
+    The score (formerly carried on Job and persisted via the shim) is no
+    longer part of the upsert_job contract; callers that score forward it
+    via the dedicated kwargs. Tests in this module cover the touch/update
+    branches, not scoring, so the score is dropped intentionally.
+    """
     j = Job(
         title="Staff Engineer",
         company="AcmeCo",
@@ -51,10 +59,9 @@ def _make_job(
         source_url=url,
         description="x" * 250,
     )
-    j.score = 50.0
     if salary_min is not None:
         j.salary_min = salary_min
-    return j
+    return ParsedJob.from_job(j)
 
 
 def _read(conn: sqlite3.Connection, dedup_key: str, col: str):

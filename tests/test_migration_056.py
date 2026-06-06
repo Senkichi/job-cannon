@@ -144,6 +144,7 @@ def test_upsert_job_post_migration_does_not_reintroduce_leak(tmp_db_path):
     """
     from job_finder.db import upsert_job
     from job_finder.models import Job
+    from job_finder.parsed_job import ParsedJob
 
     run_migrations(tmp_db_path)
 
@@ -159,7 +160,7 @@ def test_upsert_job_post_migration_does_not_reintroduce_leak(tmp_db_path):
     conn = sqlite3.connect(tmp_db_path)
     conn.row_factory = sqlite3.Row
     try:
-        upsert_job(conn, job)
+        upsert_job(conn, ParsedJob.from_job(job))
         row = conn.execute(
             "SELECT scoring_provider FROM jobs WHERE dedup_key = ?",
             (job.dedup_key,),

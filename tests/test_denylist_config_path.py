@@ -1,19 +1,14 @@
-"""upsert_job honors config-loaded company denylist (Phase 47.08 / F-08).
+"""ParsedJob.from_job honors config-loaded company denylist (Phase 47.08 / F-08).
 
-Before this fix, the ``upsert_job`` shim-path denylist guard imported the bare
-``COMPANY_DENYLIST`` frozenset, so anything a user added to
-``config.yaml > filters.company_denylist`` was silently ignored at the job
-ingestion boundary (while ``upsert_company`` correctly read the config-loaded
-set). The fix swaps the bare constant for ``get_company_denylist(load_config())``
-— the same single source the I-10 ``ParsedJob`` validator uses.
+Originally Phase 47.08 fixed F-08 at two parallel sites:
+- The shim path inside ``upsert_job`` (using ``normalize_company`` + config).
+- ``ParsedJob.from_job``'s I-10 validator (using raw ``.lower().strip()`` + config).
 
-The denylist guard at the ``_jobs.py`` site applies ``normalize_company`` (which
-strips legal suffixes) before the membership test, whereas ``from_job``'s I-10
-check uses raw ``.lower().strip()``. ``test_config_entry_rejected_at_jobs_site``
-exploits that difference to isolate *this* site: a suffixed company name plus a
-suffix-stripped config entry matches only via ``normalize_company`` at line ~246,
-never via ``from_job`` — so the test fails if the fix is reverted to the bare
-constant (the stripped form is not among the hardcoded defaults).
+Phase 48.07 removed the shim entirely; ``ParsedJob.from_job`` is now the
+single ingestion-boundary guard, and the test reflects that. A config
+entry that matches the raw lowercased company name still rejects the
+ingest — by raising ``DenylistedCompanyError`` at the typed-construction
+boundary, before ``upsert_job`` ever sees the row.
 """
 
 from __future__ import annotations
@@ -29,6 +24,7 @@ import job_finder.config as config_mod
 import job_finder.parsed_job as parsed_job_mod
 from job_finder.db import upsert_job
 from job_finder.models import Job
+from job_finder.parsed_job import DenylistedCompanyError, ParsedJob
 from job_finder.web.db_migrate import run_migrations
 
 
@@ -47,8 +43,9 @@ def conn() -> Iterator[sqlite3.Connection]:
         path.unlink(missing_ok=True)
 
 
-def _make_job(*, company: str, title: str = "Senior Engineer") -> Job:
-    j = Job(
+def _make_raw_job(*, company: str, title: str = "Senior Engineer") -> Job:
+    """Raw Job — the typed boundary (ParsedJob.from_job) is what we're testing."""
+    return Job(
         title=title,
         company=company,
         location="San Francisco, CA",
@@ -56,16 +53,13 @@ def _make_job(*, company: str, title: str = "Senior Engineer") -> Job:
         source_url=f"https://example.com/j/{company}/{title}",
         description="x" * 250,
     )
-    j.score = 50.0
-    return j
 
 
 def _patch_denylist(monkeypatch: pytest.MonkeyPatch, entries: list[str]) -> None:
-    """Force both denylist-reading sites to see a controlled config.
+    """Force the denylist-reading site to see a controlled config.
 
-    ``_jobs.py`` imports ``load_config`` locally (resolves from
-    ``job_finder.config`` at call time); ``parsed_job.py`` binds it at module
-    import. Patch both so no test ever touches the real config.yaml.
+    ``parsed_job.py`` binds ``load_config`` at module import. Patch it so no
+    test ever touches the real config.yaml.
     """
     fake_config = {"filters": {"company_denylist": entries}}
 
@@ -82,55 +76,37 @@ def _row_exists(conn: sqlite3.Connection, dedup_key: str) -> bool:
     )
 
 
-def test_config_entry_rejected_at_jobs_site(
-    conn: sqlite3.Connection, monkeypatch: pytest.MonkeyPatch
-):
-    """A config-only denylist entry rejects the upsert at the _jobs.py guard.
-
-    "Sketchy Corp" normalizes to "sketchy" (legal suffix stripped). With
-    config denylist ["sketchy"], only the normalize_company-based guard at the
-    _jobs.py site matches — from_job's raw "sketchy corp" check would not — so
-    this exercises the F-08 fix in isolation.
-    """
-    _patch_denylist(monkeypatch, ["sketchy"])
-    result = upsert_job(conn, _make_job(company="Sketchy Corp"))
-    conn.commit()
-
-    assert result.kind == "unchanged"
-    assert not _row_exists(conn, result.dedup_key)
-
-
 def test_config_entry_full_name_rejected(
     conn: sqlite3.Connection, monkeypatch: pytest.MonkeyPatch
 ):
-    """A suffix-free company named exactly in config is rejected (natural case)."""
-    _patch_denylist(monkeypatch, ["Aggregatorhub"])
-    result = upsert_job(conn, _make_job(company="Aggregatorhub"))
-    conn.commit()
-
-    assert result.kind == "unchanged"
-    assert not _row_exists(conn, result.dedup_key)
+    """A suffix-free company named exactly in config is rejected at from_job."""
+    _patch_denylist(monkeypatch, ["aggregatorhub"])
+    job = _make_raw_job(company="Aggregatorhub")
+    with pytest.raises(DenylistedCompanyError):
+        ParsedJob.from_job(job)
+    assert not _row_exists(conn, job.dedup_key)
 
 
 def test_clean_company_passes(conn: sqlite3.Connection, monkeypatch: pytest.MonkeyPatch):
     """A company absent from the denylist ingests normally."""
-    _patch_denylist(monkeypatch, ["Aggregatorhub"])
-    result = upsert_job(conn, _make_job(company="Acme Robotics"))
+    _patch_denylist(monkeypatch, ["aggregatorhub"])
+    job = _make_raw_job(company="Acme Robotics")
+    parsed = ParsedJob.from_job(job)
+    result = upsert_job(conn, parsed)
     conn.commit()
 
     assert result.kind == "inserted"
     assert _row_exists(conn, result.dedup_key)
 
 
-def test_jobs_site_no_longer_imports_bare_constant():
-    """Acceptance-criterion guard: _jobs.py must not import COMPANY_DENYLIST.
+def test_from_job_denylist_uses_config_loader():
+    """Acceptance-criterion guard: parsed_job.py reads the denylist via the
+    config helper, not the bare constant.
 
-    The denylist must come from get_company_denylist(load_config()) so config
-    entries are honored. A reintroduced bare-constant import would silently
-    bypass config again.
+    A reintroduced bare-constant import (or a stale ``COMPANY_DENYLIST``
+    membership test) would silently bypass user config additions again.
     """
-    src = (Path(__file__).resolve().parents[1] / "job_finder" / "db" / "_jobs.py").read_text(
+    src = (Path(__file__).resolve().parents[1] / "job_finder" / "parsed_job.py").read_text(
         encoding="utf-8"
     )
-    assert "import COMPANY_DENYLIST" not in src
-    assert "get_company_denylist(load_config())" in src
+    assert "get_company_denylist(config)" in src or "get_company_denylist(load_config())" in src

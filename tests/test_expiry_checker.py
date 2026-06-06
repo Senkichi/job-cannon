@@ -662,6 +662,7 @@ class TestAutoReopen:
 
         from job_finder.db import upsert_job
         from job_finder.models import Job
+        from job_finder.parsed_job import ParsedJob
         from job_finder.web.db_migrate import run_migrations
 
         run_migrations(tmp_db_path)
@@ -676,7 +677,7 @@ class TestAutoReopen:
             source="linkedin",
             source_url="https://linkedin.com/jobs/1",
         )
-        upsert_job(conn, job)
+        upsert_job(conn, ParsedJob.from_job(job))
         conn.execute(
             "UPDATE jobs SET pipeline_status = 'archived' WHERE dedup_key = ?",
             (job.dedup_key,),
@@ -684,7 +685,7 @@ class TestAutoReopen:
         conn.commit()
 
         # Re-ingest the same job (simulates re-appearance in Gmail/SerpAPI)
-        result = upsert_job(conn, job)
+        result = upsert_job(conn, ParsedJob.from_job(job))
         assert result.kind != "inserted"  # existing job, not new
 
         row = conn.execute(
@@ -709,6 +710,7 @@ class TestAutoReopen:
 
         from job_finder.db import upsert_job
         from job_finder.models import Job
+        from job_finder.parsed_job import ParsedJob
         from job_finder.web.db_migrate import run_migrations
 
         run_migrations(tmp_db_path)
@@ -722,14 +724,14 @@ class TestAutoReopen:
             source="linkedin",
             source_url="https://linkedin.com/jobs/1",
         )
-        upsert_job(conn, job)
+        upsert_job(conn, ParsedJob.from_job(job))
         conn.execute(
             "UPDATE jobs SET pipeline_status = 'reviewing' WHERE dedup_key = ?",
             (job.dedup_key,),
         )
         conn.commit()
 
-        upsert_job(conn, job)
+        upsert_job(conn, ParsedJob.from_job(job))
 
         row = conn.execute(
             "SELECT pipeline_status FROM jobs WHERE dedup_key = ?",

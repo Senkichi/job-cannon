@@ -511,11 +511,25 @@ def _upsert_one_ats_api_job(
             posted_date=job_dict.get("posted_date"),
         )
         from job_finder.db import upsert_job
+        from job_finder.parsed_job import DenylistedCompanyError, ParsedJob
+
+        # Phase 48.07: construct ParsedJob explicitly. The structured
+        # locations from the ATS payload ride in via source_meta — they
+        # would otherwise be lost (ParsedJob.from_job carries no Job→
+        # locations_structured pathway of its own).
+        _source_meta = {
+            "locations_structured": job_dict.get("locations_structured") or [],
+        }
+        try:
+            parsed = ParsedJob.from_job(job, source_meta=_source_meta)
+        except DenylistedCompanyError:
+            # Preserve the pre-48.07 shim early-return semantics: a
+            # denylisted company is skipped silently.
+            return
 
         result = upsert_job(
             scan_conn,
-            job,
-            locations_structured=job_dict.get("locations_structured"),
+            parsed,
             company_id=company_id,
         )
 

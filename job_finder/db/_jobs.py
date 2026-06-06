@@ -19,7 +19,6 @@ from typing import TYPE_CHECKING, Literal
 
 from job_finder.config import JD_STORAGE_MAX_CHARS
 from job_finder.json_utils import safe_json_load, utc_now_iso
-from job_finder.models import Job
 from job_finder.web.location_canonical import JobLocation
 from job_finder.web.location_canonical import to_json as _locations_to_json
 
@@ -201,20 +200,24 @@ def merge_description(existing: str | None, new: str | None) -> str | None:
 
 def upsert_job(
     conn: sqlite3.Connection,
-    parsed: ParsedJob | UnresolvedParsedJob | Job,
+    parsed: ParsedJob | UnresolvedParsedJob,
     *,
-    locations_structured: list[JobLocation] | None = None,  # SHIM — removed in Phase 48.07
     company_id: int | None = None,
+    score: float = 0.0,
+    score_breakdown: dict | None = None,
 ) -> UpsertResult:
     """Insert or update a job. Returns UpsertResult with kind in {"inserted","updated","unchanged"}.
 
-    Accepts ParsedJob, UnresolvedParsedJob, or Job (via shim).
+    Accepts ONLY ParsedJob or UnresolvedParsedJob. The legacy ``Job`` shim
+    was removed in Phase 48.07 — callers MUST construct a ParsedJob via
+    ``ParsedJob.from_job(job, source_meta=...)`` before calling. Passing
+    any other type raises ``TypeError``.
 
-    The Job shim is removed in Phase 48.07 — at that point callers must
-    pass ParsedJob/UnresolvedParsedJob directly.  The ``locations_structured``
-    kwarg exists only for the shim period; it is forwarded to
-    ``ParsedJob.from_job`` via ``source_meta`` and has no meaning for
-    direct ParsedJob callers.
+    ``score`` / ``score_breakdown`` are persistence-only decorations applied
+    to the row write — they are not part of the parser contract. Callers
+    that score before persist (e.g. the ingestion runner's heuristic JobScorer)
+    pass them; everyone else gets the default 0.0 / {} written on INSERT and
+    the UPDATE-branch overwrite that has always existed.
 
     Merges sources, locations (Remote/Hybrid first), and descriptions
     (keep longer; append divergent content with separator). Keeps first_seen
@@ -227,63 +230,30 @@ def upsert_job(
           - kind="unchanged" when existing dedup_key matched but no column changed.
 
     ``UpsertResult.__bool__`` raises TypeError — callers must use result.kind.
-
-    Phase 47.04 TODO: catch sqlite3.IntegrityError and re-raise as
-    IngestionRejected once m078 triggers are live.
     """
-    from job_finder.parsed_job import (
-        DenylistedCompanyError as _DenylistedCompanyError,
-    )
     from job_finder.parsed_job import (
         ParsedJob as _ParsedJob,
     )
+    from job_finder.parsed_job import (
+        UnresolvedParsedJob as _UnresolvedParsedJob,
+    )
 
-    # ── SHIM — removed in Phase 48.07 ───────────────────────────────────────
-    # Accept legacy Job objects by converting them to ParsedJob internally.
-    # Score / score_breakdown are not parser-owned fields so they are
-    # extracted here before the conversion and applied to the SQL writes.
-    _score: float = 0.0
-    _score_breakdown: dict = {}
-    if isinstance(parsed, Job):
-        _score = parsed.score
-        _score_breakdown = parsed.score_breakdown
-
-        # Denylist guard — preserve the exact early-return boundary that
-        # existed before Phase 47.02. Read the denylist from config so
-        # user-added `filters.company_denylist` entries are honored here, not
-        # just the hardcoded defaults (F-08). Single source: the same
-        # get_company_denylist(load_config()) the I-10 ParsedJob validator uses.
-        from job_finder.config import get_company_denylist, load_config
-        from job_finder.normalizers import normalize_company as _norm_company
-
-        if _norm_company(parsed.company).lower() in get_company_denylist(load_config()):
-            return UpsertResult(
-                kind="unchanged",
-                dedup_key=parsed.dedup_key,
-                unresolved_reasons=[],
-            )
-
-        _source_meta: dict | None = (
-            {"locations_structured": locations_structured}
-            if locations_structured is not None
-            else None
+    # Phase 48.07: narrow input type — Job shim removed. The TypeError
+    # below is the structural enforcement point for the acceptance gate
+    # (passing a Job instance to this function raises).
+    if not isinstance(parsed, (_ParsedJob, _UnresolvedParsedJob)):
+        raise TypeError(
+            "upsert_job requires ParsedJob or UnresolvedParsedJob; "
+            f"got {type(parsed).__name__}. "
+            "Construct one via ParsedJob.from_job(job, source_meta=...) first."
         )
-        try:
-            parsed = _ParsedJob.from_job(parsed, source_meta=_source_meta)
-        except _DenylistedCompanyError:
-            # from_job re-checks denylist; catch the redundant raise.
-            return UpsertResult(
-                kind="unchanged",
-                dedup_key=parsed.dedup_key,  # type: ignore[union-attr]
-                unresolved_reasons=[],
-            )
-        locations_structured = None  # already embedded in parsed.locations_structured
-    # ── End shim ─────────────────────────────────────────────────────────────
+
+    _score: float = score
+    _score_breakdown: dict = score_breakdown if score_breakdown is not None else {}
 
     # Resolve structured locations:
-    # - Direct ParsedJob path: parsed.locations_structured was set by the caller.
-    # - Shim path (Job → ParsedJob via from_job): locations_structured was forwarded
-    #   through source_meta, so parsed.locations_structured is populated.
+    # - parsed.locations_structured was set by the caller (directly or via
+    #   ParsedJob.from_job(source_meta={"locations_structured": ...})).
     # If still empty, fall back to Layer 2 (parse_locations).
     _locs_structured: list[JobLocation] = parsed.locations_structured
     if not _locs_structured:

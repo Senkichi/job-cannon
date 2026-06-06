@@ -24,6 +24,7 @@ import pytest
 
 from job_finder.db import upsert_job
 from job_finder.models import Job
+from job_finder.parsed_job import DenylistedCompanyError, ParsedJob, UnresolvedParsedJob
 from job_finder.web.db_migrate import run_migrations
 
 
@@ -42,14 +43,19 @@ def conn() -> Iterator[sqlite3.Connection]:
         path.unlink(missing_ok=True)
 
 
-def _make_job(*, title: str = "Senior Eng", company: str = "TestCo") -> Job:
-    return Job(
-        title=title,
-        company=company,
-        location="San Francisco, CA",
-        source="lever",
-        source_url=f"https://example.com/j/{title}",
-        description="x" * 250,
+def _make_job(
+    *, title: str = "Senior Eng", company: str = "TestCo"
+) -> ParsedJob | UnresolvedParsedJob:
+    """Build a ParsedJob via from_job — the post-48.07 caller boundary."""
+    return ParsedJob.from_job(
+        Job(
+            title=title,
+            company=company,
+            location="San Francisco, CA",
+            source="lever",
+            source_url=f"https://example.com/j/{title}",
+            description="x" * 250,
+        )
     )
 
 
@@ -112,10 +118,12 @@ class TestDenylistRejects:
         ],
     )
     def test_denylisted_company_drops_at_boundary(self, conn: sqlite3.Connection, name: str):
-        result = upsert_job(conn, _make_job(title="x", company=name))
-        # No insert.
-        assert result.kind != "inserted"
-        # Verify no row landed.
+        # Phase 48.07: the denylist guard moved to ParsedJob.from_job;
+        # constructing the typed input is what fails fast now. upsert_job
+        # itself never sees the denylisted row.
+        with pytest.raises(DenylistedCompanyError):
+            _make_job(title="x", company=name)
+        # And nothing landed in the jobs table.
         assert not _job_exists(conn, Job.normalized_dedup_key(name, "x"))
 
     def test_real_company_persists(self, conn: sqlite3.Connection):
