@@ -439,8 +439,21 @@ def add_from_listing():
             200,
         )
 
+    from job_finder.parsed_job import DenylistedCompanyError, ParsedJob
+
     try:
-        upsert_result = upsert_job(conn, job)
+        parsed = ParsedJob.from_job(job)
+    except DenylistedCompanyError:
+        return (
+            render_template(
+                "jobs/_add_listing_manual_result.html",
+                error="This company is on the denylist and cannot be added.",
+            ),
+            200,
+        )
+
+    try:
+        upsert_result = upsert_job(conn, parsed)
     except Exception as e:
         logger.error("add_from_listing: upsert failed: %s", e, exc_info=True)
         return (
@@ -454,11 +467,11 @@ def add_from_listing():
     if upsert_result.unresolved_reasons:
         logger.info(
             "add_from_listing: job %s saved with unresolved reasons: %s",
-            job.dedup_key,
+            parsed.dedup_key,
             upsert_result.unresolved_reasons,
         )
 
-    dedup_key = job.dedup_key
+    dedup_key = parsed.dedup_key
     row = get_job(conn, dedup_key)
     if row is None:
         return (

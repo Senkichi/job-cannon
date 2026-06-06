@@ -511,11 +511,18 @@ def _upsert_one_ats_api_job(
             posted_date=job_dict.get("posted_date"),
         )
         from job_finder.db import upsert_job
+        from job_finder.parsed_job import DenylistedCompanyError, ParsedJob
+
+        _locs = job_dict.get("locations_structured")
+        _source_meta = {"locations_structured": _locs} if _locs is not None else None
+        try:
+            parsed = ParsedJob.from_job(job, source_meta=_source_meta)
+        except DenylistedCompanyError:
+            return  # silently skip denylisted companies
 
         result = upsert_job(
             scan_conn,
-            job,
-            locations_structured=job_dict.get("locations_structured"),
+            parsed,
             company_id=company_id,
         )
 
@@ -527,25 +534,25 @@ def _upsert_one_ats_api_job(
         if clean_desc:
             try:
                 existing_jd = conn.execute(
-                    "SELECT jd_full FROM jobs WHERE dedup_key = ?", (job.dedup_key,)
+                    "SELECT jd_full FROM jobs WHERE dedup_key = ?", (parsed.dedup_key,)
                 ).fetchone()
                 if existing_jd is not None and not existing_jd[0]:
                     _set_jd_full(
                         conn,
-                        job.dedup_key,
+                        parsed.dedup_key,
                         clean_desc[:JD_STORAGE_MAX_CHARS],
                         source="ats_scanner_run",
                     )
             except Exception as e:
                 logger.warning(
                     "Failed to promote ATS description to jd_full for %s: %s",
-                    job.dedup_key,
+                    parsed.dedup_key,
                     e,
                 )
 
         if result.kind == "inserted":
             summary["jobs_new"] += 1
-            all_new_job_keys.append(job.dedup_key)
+            all_new_job_keys.append(parsed.dedup_key)
 
             # Store comp_json for new jobs only (first-seen wins)
             comp_json = job_dict.get("comp_json")
@@ -553,13 +560,13 @@ def _upsert_one_ats_api_job(
                 try:
                     conn.execute(
                         "UPDATE jobs SET comp_data_json = ? WHERE dedup_key = ?",
-                        (comp_json, job.dedup_key),
+                        (comp_json, parsed.dedup_key),
                     )
                     conn.commit()
                 except Exception as e:
                     logger.warning(
                         "Failed to store comp_data_json for %s: %s",
-                        job.dedup_key,
+                        parsed.dedup_key,
                         e,
                     )
 

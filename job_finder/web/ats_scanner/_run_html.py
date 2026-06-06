@@ -132,6 +132,7 @@ def _scan_one_company_via_html(
         # Step 3: Create Job objects and upsert
         from job_finder.db import upsert_job
         from job_finder.models import Job
+        from job_finder.parsed_job import DenylistedCompanyError, ParsedJob
 
         with standalone_connection(db_path) as html_conn:
             for scraped_job in scraped_jobs:
@@ -146,10 +147,14 @@ def _scan_one_company_via_html(
                         salary_max=None,
                         description=scraped_job.get("description", ""),
                     )
-                    result = upsert_job(html_conn, job, company_id=miss_company_id)
+                    try:
+                        parsed = ParsedJob.from_job(job)
+                    except DenylistedCompanyError:
+                        continue  # silently skip denylisted companies
+                    result = upsert_job(html_conn, parsed, company_id=miss_company_id)
                     if result.kind == "inserted":
                         summary["jobs_new"] += 1
-                        all_new_job_keys.append(job.dedup_key)
+                        all_new_job_keys.append(parsed.dedup_key)
                     summary["html_scraped"] += 1
                 except Exception as job_err:
                     error_msg = f"{miss_company_name} HTML job error: {job_err}"
