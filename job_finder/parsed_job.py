@@ -35,6 +35,7 @@ from job_finder.config import get_company_denylist, load_config
 from job_finder.normalizers import normalize_company, normalize_title
 from job_finder.web.careers_crawler._title_filters import clean_title, is_metadata_blob
 from job_finder.web.location_canonical import JobLocation
+from job_finder.web.url_canonical import canonicalize_url
 
 if TYPE_CHECKING:
     from job_finder.models import Job
@@ -267,8 +268,16 @@ class ParsedJob:
         locations_structured: list[JobLocation] = sm.get("locations_structured", [])
         jd_full: str | None = sm.get("jd_full")
         sources: list[str] = sm.get("sources", [job.source])
-        source_urls: list[str] = sm.get("source_urls", [job.source_url])
-        source_urls_raw: list[str] = sm.get("source_urls_raw", [job.source_url])
+
+        # ── Source-URL canonicalization (Phase 49.01, D-06/F-05) ────────────
+        # Canonicalize at construction so every ingestion path — including the
+        # "touched" branch of upsert_job — stores canonical source_urls with
+        # the raw originals preserved in source_urls_raw for forensics. The
+        # caller may pre-supply source_urls_raw; otherwise the pre-canonical
+        # input IS the forensic original.
+        raw_source_urls: list[str] = sm.get("source_urls", [job.source_url])
+        source_urls: list[str] = [canonicalize_url(u)[0] for u in raw_source_urls]
+        source_urls_raw: list[str] = sm.get("source_urls_raw", list(raw_source_urls))
 
         unresolved_reasons: list[str] = []
         raw_title: str = job.title
