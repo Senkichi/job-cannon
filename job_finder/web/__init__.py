@@ -11,6 +11,7 @@ import logging
 import os
 import secrets
 import sys
+from datetime import datetime
 from logging.handlers import RotatingFileHandler
 
 from dotenv import load_dotenv
@@ -107,6 +108,10 @@ def create_app(config_path: str = "config.yaml", config: dict | None = None) -> 
     # (~/Library/Application Support/JobCannon doesn't exist by default).
     # See UAT 2026-05-21 finding F1.
     user_data_dirs.ensure_user_data_dir()
+
+    # Stamp the app-start wall-clock time for the /__jc_health endpoint.
+    # Stored as a naive UTC ISO string (Store-UTC-render-local invariant).
+    app.config["_JF_START_TIME_UTC"] = datetime.utcnow().isoformat() + "Z"
 
     # --- Configuration ---
     if config is None:
@@ -373,6 +378,30 @@ def create_app(config_path: str = "config.yaml", config: dict | None = None) -> 
 
     app.register_blueprint(onboarding_bp)
     app.before_request(gate_onboarding)
+
+    # --- Health / identity endpoint (registered directly on app, not via blueprint) ---
+    # This endpoint is the load-bearing identity marker for already-running
+    # detection in __main__.py: probe_existing_jc() checks data["app"] == "job-cannon".
+    # Registered BEFORE blueprints guard conditions so it is reachable the instant
+    # the app object exists. Do NOT move this into a Blueprint — the launcher's
+    # HTTP probe must reach it even if some blueprint fails to register.
+    @app.route("/__jc_health")
+    def __jc_health():
+        try:
+            from importlib.metadata import version as _pkg_version
+
+            _version = _pkg_version("job-cannon")
+        except Exception:
+            _version = "0.0.0+dev"
+        return (
+            {
+                "app": "job-cannon",
+                "version": _version,
+                "pid": os.getpid(),
+                "start_time_utc": app.config.get("_JF_START_TIME_UTC", ""),
+            },
+            200,
+        )
 
     # --- Root redirect: / -> /jobs (Job Board is the default landing page) ---
     @app.route("/")
