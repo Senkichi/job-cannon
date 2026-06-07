@@ -141,18 +141,6 @@ def clear_candidate_context_cache() -> None:
         _CONTEXT_CACHE.clear()
 
 
-def _resolve_scoring_model(config: dict, provider: str | None) -> str | None:
-    """Pull the active model ID for the scoring tier from config.
-
-    Reads providers.scoring.model per Phase 34 CONTEXT D-01 / D-10. Falls back
-    to None when the block is absent — persist writes NULL, which COALESCE
-    preserves any previously-captured model in the column.
-    """
-    providers_cfg = config.get("providers") or {}
-    scoring_cfg = providers_cfg.get("scoring") or {}
-    return scoring_cfg.get("model")
-
-
 def score_and_persist_job(
     job: dict,
     conn: sqlite3.Connection,
@@ -207,12 +195,8 @@ def score_and_persist_job(
 
     assessment = result.data
     provider = result.provider
-    # Prefer the cascade-reported model (set by call_model → ModelResult.model).
-    # Falls back to the static config path for legacy callers / tests that
-    # stub ScoringResult without a model field. Without this preference the
-    # real-config path (providers.overrides.<name>.score) writes scoring_model
-    # NULL because _resolve_scoring_model reads providers.scoring.model only.
-    model = getattr(result, "model", None) or _resolve_scoring_model(config, provider)
+    # ScoringResult.model is always populated by the cascade (job_scorer.py).
+    model = getattr(result, "model", None)
 
     persist_job_assessment(
         conn,
