@@ -363,40 +363,6 @@
 
         <hr class="border-slate-700">
 
-        <!-- JSearch (free RapidAPI tier) -->
-        <div>
-          <h3 class="text-sm font-semibold text-slate-200 mb-3 flex items-center gap-2">
-            <span class="w-2 h-2 rounded-full bg-pink-400 inline-block"></span>
-            JSearch <span class="text-slate-500 font-normal text-xs">— RapidAPI Google Jobs alternative</span>
-          </h3>
-          <p class="text-xs text-slate-500 mb-3">
-            Free tier via <a href="https://rapidapi.com/letscrape-6bRBa3QguO5/api/jsearch"
-            target="_blank" rel="noreferrer" class="text-violet-400 hover:text-violet-300">RapidAPI</a>.
-            Independent of portal_search above — uses your target_titles directly.
-          </p>
-          <div class="grid grid-cols-2 gap-4">
-            <div class="flex items-center gap-3">
-              <label class="flex items-center gap-2 cursor-pointer">
-                <input type="hidden" name="jsearch_enabled" value="">
-                <input type="checkbox" name="jsearch_enabled" value="on"
-                       class="w-4 h-4 accent-violet-500"
-                       {% if config.get('sources', {}).get('jsearch', {}).get('enabled', False) %}checked{% endif %}>
-                <span class="text-sm text-slate-300">Enabled</span>
-              </label>
-            </div>
-            <div>
-              <label class="block text-xs font-medium text-slate-400 mb-1">RapidAPI Key</label>
-              <input type="password" name="jsearch_rapidapi_key"
-                     value=""
-                     placeholder="{% if secret_set and secret_set.get('sources.jsearch.rapidapi_key') %}(set — type to replace){% else %}(not set){% endif %}"
-                     autocomplete="off"
-                     class="w-full bg-slate-900 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:border-violet-500 focus:outline-none font-mono">
-            </div>
-          </div>
-        </div>
-
-        <hr class="border-slate-700">
-
         <!-- Stage 6: Advanced — paid SERP providers (collapsed by default) -->
         <details class="bg-slate-900/40 border border-slate-700 rounded p-4 space-y-6">
           <summary class="cursor-pointer text-sm font-semibold text-slate-200 select-none flex items-center gap-2">

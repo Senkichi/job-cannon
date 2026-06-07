@@ -82,7 +82,6 @@ job-cannon
 flowchart LR
   Gmail[Gmail Alerts<br/>LinkedIn / Glassdoor / ZipRecruiter] --> Parser
   SerpAPI --> Parser
-  JSearch --> Parser
   Thordata --> Parser
   DataForSEO --> Parser
   ATS[ATS Scanners<br/>Greenhouse / Lever / Ashby / Workday / SmartRecruiters] --> Parser
@@ -105,7 +104,7 @@ For deeper subsystem detail, see [`docs/architecture/`](docs/architecture/).
 | Storage | SQLite (WAL mode) — raw SQL, no ORM |
 | Frontend | Jinja2 + jinja2-fragments, HTMX 2.x, Tailwind (CDN), SortableJS |
 | AI | Multi-provider cascade: Ollama (qwen2.5:14b primary) → Groq → Cerebras → Gemini → Anthropic CLI ($0 via Claude.ai subscription, dispatched through `claude -p`) |
-| Sources | Gmail API v1 (OAuth), SerpAPI, JSearch, Thordata, DataForSEO |
+| Sources | Gmail API v1 (OAuth), SerpAPI, Thordata, DataForSEO |
 | Tooling | uv (canonical), ruff, pre-commit, gitleaks, commitizen, pytest |
 | CI | GitHub Actions (Ubuntu + Windows matrix), Codecov upload |
 
@@ -115,7 +114,7 @@ For deeper subsystem detail, see [`docs/architecture/`](docs/architecture/).
 job_finder/
 |-- web/                    # Flask app (11 blueprints, scheduler, AI clients, ATS)
 |-- parsers/                # Email parsers (LinkedIn, Glassdoor, ZipRecruiter, Indeed stub)
-|-- sources/                # Data sources (Gmail, SerpAPI, JSearch, Thordata, DataForSEO)
+|-- sources/                # Data sources (Gmail, SerpAPI, Thordata, DataForSEO)
 |-- scoring/                # Single-tier ordinal scoring + six-axis rubric helpers
 |-- eval/                   # Eval harness + bootstrap CIs
 |-- models.py               # Job dataclass with dedup_key
@@ -152,7 +151,7 @@ in the cascade — in practice, the OpenRouter judge used by the
 cascade-audit harness. All members of `claude_client.FREE_PROVIDERS`
 (including the Anthropic CLI fallback) are excluded from the gate.
 
-**Optional SERP sources:** SerpAPI, JSearch, Thordata, and DataForSEO
+**Optional SERP sources:** SerpAPI, Thordata, and DataForSEO
 are all opt-in. Each has its own pricing tier — see
 `config.example.yaml` for details.
 

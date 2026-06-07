@@ -106,14 +106,13 @@ Manual path: enable [2-Step Verification](https://myaccount.google.com/security)
 
 The app password is stored in your OS keyring. Rotating it: delete in Google's app-password dashboard, generate a new one, paste into Settings — never edit `config.yaml` directly.
 
-### SerpAPI / JSearch / Thordata / DataForSEO
+### SerpAPI / Thordata / DataForSEO
 
 Optional paid SERP-based sources. Each has its own key field in `config.yaml` and an env override. Pricing notes are in `config.example.yaml`.
 
 | Source | Where to get a key |
 |---|---|
 | SerpAPI | [serpapi.com/manage-api-key](https://serpapi.com/manage-api-key) |
-| JSearch | [rapidapi.com/letscrape-6bRBa3QguO5/api/jsearch](https://rapidapi.com/letscrape-6bRBa3QguO5/api/jsearch) |
 | Thordata | [thordata.com](https://www.thordata.com/) |
 | DataForSEO | [app.dataforseo.com/api-access](https://app.dataforseo.com/api-access) (base64 `login:password`) |
 

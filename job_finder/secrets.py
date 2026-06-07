@@ -40,7 +40,6 @@ SECRET_ENV_VARS: dict[str, tuple[str, ...]] = {
     "sources.serpapi.api_key": ("SERPAPI_API_KEY",),
     "sources.thordata.api_key": ("THORDATA_API_KEY",),
     "sources.dataforseo.api_key": ("DATAFORSEO_API_KEY",),
-    "sources.jsearch.rapidapi_key": ("JSEARCH_RAPIDAPI_KEY", "RAPIDAPI_KEY"),
     # Stage 2 free-portal credentials. USAJobs/Adzuna require both halves;
     # Jooble is single-key. The user_agent_email field for USAJobs is the
     # required User-Agent header value (an email address) rather than a

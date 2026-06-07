@@ -1419,7 +1419,6 @@ class TestSettingsAtsScanSection:
                 "gmail_enabled": "",
                 "gmail_lookback_days": "7",
                 "serpapi_enabled": "",
-                "jsearch_enabled": "",
                 "weight_title_match": "0.30",
                 "weight_seniority_alignment": "0.20",
                 "weight_location_fit": "0.15",
