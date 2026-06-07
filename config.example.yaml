@@ -74,10 +74,6 @@ sources:
     queries:
       - query: Data Scientist
         location: San Francisco Bay Area
-  jsearch:
-    # Optional: JSearch via RapidAPI (alternative job search)
-    enabled: false
-    rapidapi_key: ""
   thordata:
     # Optional: Thordata Google Jobs SERP API (cheaper alternative to SerpAPI)
     enabled: false

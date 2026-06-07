@@ -147,8 +147,6 @@ The `'scoring'` tier dispatches through `job_finder/web/model_provider.py:call_m
 - `sources.serpapi.enabled` - Enable SerpAPI searches (default: False)
 - `sources.serpapi.api_key` - SerpAPI key (free tier: 100/month)
 - `sources.serpapi.queries` - List of {query, location} dicts
-- `sources.jsearch.enabled` - Enable JSearch (not yet implemented)
-- `sources.jsearch.rapidapi_key` - RapidAPI key for JSearch
 - `scoring.monthly_budget_usd` - Monthly Claude budget cap (default: $25.00)
 - `scoring.candidate_score_threshold` - Minimum candidate score (0-100) required to spend an LLM call on full v3 scoring; pre-filter gate (default: 55).
 

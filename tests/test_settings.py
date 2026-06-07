@@ -129,7 +129,7 @@ class TestSettingsWipeGuard:
 
 
 class TestSettingsKeyringWrite:
-    """Commit 3.5: SerpAPI / JSearch keys submitted via the Settings form
+    """Commit 3.5: SerpAPI keys submitted via the Settings form
     land in the OS keyring; the plaintext field in config.yaml is cleared on
     success; empty submissions leave existing secrets alone (no clobber)."""
 
@@ -564,13 +564,13 @@ class TestSettingsStage7FreePortalsTile:
     """Stage 7 (2026-05-22): Settings UI tiles for the free job portals.
 
     The portal_search master + Jobicy/YC/USAJobs/Adzuna/Jooble sub-portals
-    + JSearch are now editable from the Settings page. Credentials for
+    are now editable from the Settings page. Credentials for
     USAJobs/Adzuna/Jooble are persisted to config.yaml plaintext (under
     0600 perms) — the keyring path is NOT wired for these because the
     secrets.py canonical names use a top-level layout while the read
     site at job_finder.sources.portal_search_source expects nested
     portal_search.<name>.* — addressing that mismatch is out of Stage 7
-    scope. JSearch keeps its existing keyring routing.
+    scope.
     """
 
     def test_index_renders_with_portal_tile(self, settings_client):
@@ -586,9 +586,6 @@ class TestSettingsStage7FreePortalsTile:
         assert "portal_search_usajobs_enabled" in body
         assert "portal_search_adzuna_enabled" in body
         assert "portal_search_jooble_enabled" in body
-        # JSearch tile (new — was wired in parser but had no UI)
-        assert "jsearch_enabled" in body
-        assert "jsearch_rapidapi_key" in body
         # Stage 7.4 — keywords-fallback hint copy (Finding #3). Production
         # _fetch_portal_search falls back to profile.target_titles when
         # keywords is empty; this hint surfaces that contract in the UI.
@@ -825,36 +822,6 @@ class TestSettingsStage7FreePortalsTile:
                     keyring.delete_password("job-cannon", name)
                 except Exception:
                     pass
-
-    def test_save_jsearch_settings_persists_keyring(self, settings_client, settings_app):
-        """JSearch already routed through keyring in save(); the new tile feeds it."""
-        import keyring
-
-        resp = settings_client.post(
-            "/settings/save",
-            data={
-                "target_titles": "Staff Data Scientist\nSenior Data Scientist",
-                "profile_skills": "Python\nSQL\nSpark",
-                "jsearch_enabled": "on",
-                "jsearch_rapidapi_key": "jsearch-test-key",
-            },
-        )
-        assert resp.status_code == 302
-        try:
-            assert (
-                keyring.get_password("job-cannon", "sources.jsearch.rapidapi_key")
-                == "jsearch-test-key"
-            )
-            with open(settings_app._test_config_path, encoding="utf-8") as f:
-                saved = yaml.safe_load(f)
-            assert saved["sources"]["jsearch"]["enabled"] is True
-            # Keyring captured the secret; config.yaml plaintext is wiped.
-            assert saved["sources"]["jsearch"].get("rapidapi_key", "") == ""
-        finally:
-            try:
-                keyring.delete_password("job-cannon", "sources.jsearch.rapidapi_key")
-            except Exception:
-                pass
 
     def test_adzuna_country_lowercased(self, settings_client, settings_app):
         """ISO country codes are case-insensitive on input — normalize to lowercase."""
@@ -1124,7 +1091,7 @@ class TestSettingsCheckboxBrowserShape:
     def test_all_checkbox_names_persist_true_via_browser_shape(
         self, settings_client, settings_app
     ):
-        """Exhaustive: every checkbox in the form (16 names) must persist
+        """Exhaustive: every checkbox in the form (15 names) must persist
         True when posted in the browser's hidden+checkbox shape.
         """
         names_and_paths = [
@@ -1133,7 +1100,6 @@ class TestSettingsCheckboxBrowserShape:
             ("thordata_enabled", ["sources", "thordata", "enabled"]),
             ("dataforseo_enabled", ["sources", "dataforseo", "enabled"]),
             ("google_cse_enabled", ["sources", "google_cse", "enabled"]),
-            ("jsearch_enabled", ["sources", "jsearch", "enabled"]),
             ("portal_search_enabled", ["sources", "portal_search", "enabled"]),
             (
                 "portal_search_jobicy_enabled",

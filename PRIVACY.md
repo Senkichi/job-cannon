@@ -92,7 +92,7 @@ Per-provider list of API endpoints called and what payload reaches them:
 - **Anthropic / Groq / Cerebras / Gemini / Ollama** — job titles,
   descriptions, and your rubric/profile excerpt sent as scoring prompts.
   Ollama is local-only (no network).
-- **SerpAPI / JSearch / Thordata / DataForSEO** — your configured search
+- **SerpAPI / Thordata / DataForSEO** — your configured search
   queries, plus your API key.
 - **GitHub Releases API** (`api.github.com/repos/Senkichi/job-cannon/releases/latest`)
   — unauthenticated, sent once per 24 hours to check for app updates.
