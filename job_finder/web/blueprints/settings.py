@@ -549,17 +549,6 @@ def _parse_form_to_config(form) -> dict:
     if _has("db_path"):
         config["db"] = {"path": form["db_path"]}
 
-    # --- Notifications (checkboxes with hidden companion inputs) ---
-    notifications = {}
-    if _has("notification_high_score"):
-        notifications["high_score"] = _checked("notification_high_score")
-    if _has("notification_pipeline_change"):
-        notifications["pipeline_change"] = _checked("notification_pipeline_change")
-    if _has("notification_budget_alert"):
-        notifications["budget_alert"] = _checked("notification_budget_alert")
-    if notifications:
-        config["notifications"] = notifications
-
     # --- ATS ---
     ats = {}
     if _has("ats_scan_enabled"):

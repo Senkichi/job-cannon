@@ -1121,18 +1121,6 @@ class TestSettingsCheckboxBrowserShape:
                 "portal_search_jooble_enabled",
                 ["sources", "portal_search", "jooble", "enabled"],
             ),
-            (
-                "notification_high_score",
-                ["notifications", "high_score"],
-            ),
-            (
-                "notification_pipeline_change",
-                ["notifications", "pipeline_change"],
-            ),
-            (
-                "notification_budget_alert",
-                ["notifications", "budget_alert"],
-            ),
             ("ats_scan_enabled", ["ats", "scan_enabled"]),
         ]
         fields = []
