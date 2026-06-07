@@ -305,6 +305,145 @@ class TestScanWorkday:
 
 
 # ---------------------------------------------------------------------------
+# Tests: _fetch_postings_with_completeness
+# ---------------------------------------------------------------------------
+
+
+@patch("job_finder.web.ats_platforms._fetch_workday_description", return_value="")
+class TestFetchPostingsWithCompleteness:
+    """Tests for the completeness signal returned by _fetch_postings_with_completeness.
+
+    Completeness rules:
+      - complete=True  when total_fetched >= total (including genuine empty board).
+      - complete=False when total > _MAX_RESULTS (board too large to fully paginate).
+      - complete=False when a network/HTTP error prevents any page from arriving.
+      - complete=False when pagination stops before total_fetched >= total.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _no_sleeps(self):
+        with (
+            patch("job_finder.web.ats_platforms._platforms_workday._PAGE_FETCH_SLEEP_S", 0),
+            patch("job_finder.web.ats_platforms._platforms_workday._DETAIL_FETCH_SLEEP_S", 0),
+        ):
+            yield
+
+    @patch("job_finder.web.ats_platforms._platforms_workday.requests.post")
+    def test_fully_fetched_board_is_complete(self, mock_post, _mock_detail):
+        """total=3, one page of 3 postings → complete=True."""
+        from job_finder.web.ats_platforms._platforms_workday import (
+            _fetch_postings_with_completeness,
+        )
+
+        mock_resp = MagicMock(status_code=200)
+        mock_resp.json.return_value = {
+            "total": 3,
+            "jobPostings": [
+                {"title": f"Job {i}", "externalPath": f"/job/Job-{i}_R-{i}"} for i in range(3)
+            ],
+        }
+        mock_post.return_value = mock_resp
+
+        postings, complete = _fetch_postings_with_completeness("acme.wd5/AcmeExternal")
+        assert complete is True
+        assert len(postings) == 3
+
+    @patch("job_finder.web.ats_platforms._platforms_workday.requests.post")
+    def test_board_over_cap_is_incomplete(self, mock_post, _mock_detail):
+        """total=500 > _MAX_RESULTS → complete=False; postings list may be empty."""
+        from job_finder.web.ats_platforms._platforms_workday import (
+            _fetch_postings_with_completeness,
+        )
+
+        mock_resp = MagicMock(status_code=200)
+        mock_resp.json.return_value = {
+            "total": 500,
+            "jobPostings": [
+                {"title": f"Job {i}", "externalPath": f"/job/Job-{i}_R-{i}"} for i in range(20)
+            ],
+        }
+        mock_post.return_value = mock_resp
+
+        _postings, complete = _fetch_postings_with_completeness("acme.wd5/AcmeExternal")
+        assert complete is False
+
+    @patch("job_finder.web.ats_platforms._platforms_workday.requests.post")
+    def test_empty_board_is_complete(self, mock_post, _mock_detail):
+        """total=0, no postings → complete=True (genuine empty board)."""
+        from job_finder.web.ats_platforms._platforms_workday import (
+            _fetch_postings_with_completeness,
+        )
+
+        mock_resp = MagicMock(status_code=200)
+        mock_resp.json.return_value = {"total": 0, "jobPostings": []}
+        mock_post.return_value = mock_resp
+
+        postings, complete = _fetch_postings_with_completeness("acme.wd5/AcmeExternal")
+        assert complete is True
+        assert postings == []
+
+    @patch("job_finder.web.ats_platforms._platforms_workday.requests.post")
+    def test_first_page_error_is_incomplete(self, mock_post, _mock_detail):
+        """Network exception on first page → complete=False."""
+        from job_finder.web.ats_platforms._platforms_workday import (
+            _fetch_postings_with_completeness,
+        )
+
+        mock_post.side_effect = Exception("connection refused")
+
+        postings, complete = _fetch_postings_with_completeness("acme.wd5/AcmeExternal")
+        assert complete is False
+        assert postings == []
+
+    @patch("job_finder.web.ats_platforms._platforms_workday.requests.post")
+    def test_early_pagination_stop_is_incomplete(self, mock_post, _mock_detail):
+        """Server error on page 2 before total_fetched >= total → complete=False."""
+        from job_finder.web.ats_platforms._platforms_workday import (
+            _fetch_postings_with_completeness,
+        )
+
+        page1_resp = MagicMock(status_code=200)
+        page1_resp.json.return_value = {
+            "total": 25,
+            "jobPostings": [
+                {"title": f"Job {i}", "externalPath": f"/job/Job-{i}_R-{i}"} for i in range(20)
+            ],
+        }
+        page2_resp = MagicMock(status_code=500)
+        mock_post.side_effect = [page1_resp, page2_resp]
+
+        postings, complete = _fetch_postings_with_completeness("acme.wd5/AcmeExternal")
+        assert complete is False
+        assert len(postings) == 20  # page 1 landed; page 2 failed
+
+    def test_invalid_slug_is_incomplete(self, _mock_detail):
+        """Slug without '/' → complete=False, empty list."""
+        from job_finder.web.ats_platforms._platforms_workday import (
+            _fetch_postings_with_completeness,
+        )
+
+        postings, complete = _fetch_postings_with_completeness("no-slash")
+        assert complete is False
+        assert postings == []
+
+    @patch("job_finder.web.ats_platforms._platforms_workday.requests.post")
+    def test_fetch_postings_thin_wrapper_returns_list(self, mock_post, _mock_detail):
+        """_fetch_postings is a thin wrapper that discards the completeness flag."""
+        from job_finder.web.ats_platforms._platforms_workday import _fetch_postings
+
+        mock_resp = MagicMock(status_code=200)
+        mock_resp.json.return_value = {
+            "total": 1,
+            "jobPostings": [{"title": "Data Scientist", "externalPath": "/job/DS_R-1"}],
+        }
+        mock_post.return_value = mock_resp
+
+        result = _fetch_postings("acme.wd5/AcmeExternal")
+        assert isinstance(result, list)
+        assert len(result) == 1
+
+
+# ---------------------------------------------------------------------------
 # Tests: _fetch_workday_description (per-job detail fetch)
 # ---------------------------------------------------------------------------
 

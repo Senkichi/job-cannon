@@ -9,7 +9,7 @@ Architecture:
 - Posting-ID set-diff (robust to URL variance: trailing slashes, tracking params).
 - Safety guards:
     * Scan exception or empty result → SKIP company (no mass-expire).
-    * Workday pagination cap hit → SKIP (can't distinguish truncation from expired).
+    * Workday incomplete board (total > fetch cap) → SKIP (completeness gate).
     * Unknown platform → SKIP silently (iCIMS, Phenom, UKG, custom — Phase C handles).
     * Scan returned postings but none had parseable IDs → SKIP (scan format drift).
 - Live jobs: last_seen refreshed + is_stale cleared (prevents downstream false-stale).
@@ -31,11 +31,6 @@ logger = logging.getLogger(__name__)
 EXPIRED = "expired"
 LIVE = "live"
 INCONCLUSIVE = "inconclusive"
-
-# Pagination cap used inside scan_workday (ats_platforms._platforms_workday).
-# If a scan returns this many postings the board is truncated and
-# reconciliation would falsely expire everything past the cap.
-_WORKDAY_CAP = 200
 
 # Posting-ID extraction patterns. Applied to BOTH sides of the set-diff
 # (scan output source_url, and stored source_urls entries) so the same
@@ -83,21 +78,18 @@ _SMARTRECRUITERS_POSTING_RE = re.compile(
 _SIMPLE_POSTING_ID_PATTERNS: dict[str, re.Pattern] = {
     "lever": _LEVER_POSTING_RE,
     "ashby": _ASHBY_POSTING_RE,
-    # Workday regex is kept for potential Phase C use, but Workday is
-    # intentionally excluded from _RECONCILABLE_PLATFORMS below — see note.
+    # Workday: used by _extract_posting_id on stored source_urls (both sides of
+    # the set-diff must use the same normalization rule).
     "workday": _WORKDAY_POSTING_RE,
     "smartrecruiters": _SMARTRECRUITERS_POSTING_RE,
 }
 
-# Platforms safe to batch-reconcile. Workday is intentionally excluded:
-# scan_workday's pagination can terminate early (observed in e2e returning
-# 40 postings for Walmart, which has thousands), leaving live_id_set
-# incomplete and causing false-expires. The 200-cap guard only catches the
-# upper bound. Workday jobs fall to Phase C per-URL HTTP GET instead.
-# TODO: re-enable once scan_workday exposes total-vs-fetched so we can
-# skip incomplete scans safely.
+# Platforms safe to batch-reconcile.
+# Workday is included but uses a completeness-gated path in reconcile_company
+# (_workday_live_id_set) instead of run_platform_scan, so boards too large to
+# fully paginate are skipped rather than falsely expiring unseen postings.
 _RECONCILABLE_PLATFORMS: frozenset[str] = frozenset(
-    {"lever", "ashby", "smartrecruiters", "greenhouse"}
+    {"lever", "ashby", "smartrecruiters", "greenhouse", "workday"}
 )
 
 
@@ -130,6 +122,37 @@ def _scan_open_postings(platform: str, slug: str) -> list[dict]:
     if platform not in _RECONCILABLE_PLATFORMS:
         return []
     return run_platform_scan(SCANNERS_BY_NAME[platform], slug, [], [])
+
+
+def _workday_live_id_set(slug: str) -> tuple[set[str], bool]:
+    """Fetch Workday postings and derive the set of live posting IDs.
+
+    Uses the completeness-aware CXS list fetch directly — does **not** trigger
+    per-posting description GETs, which are unnecessary for set-diff
+    reconciliation and would waste significant HTTP budget on large boards.
+
+    Returns:
+        ``(live_ids, complete)`` where ``complete`` is ``False`` when the
+        board is too large to fully paginate or the scan encountered an error
+        before the first page arrived.  IDs are the last path-segment of
+        ``externalPath`` (e.g. ``"Senior-Data-Scientist_R-12345"``), which
+        matches what ``_extract_posting_id(stored_url, "workday")`` returns
+        from stored ``source_urls``.
+    """
+    from job_finder.web.ats_platforms._platforms_workday import _fetch_postings_with_completeness
+
+    postings, complete = _fetch_postings_with_completeness(slug)
+    live_ids: set[str] = set()
+    for posting in postings:
+        external_path = posting.get("externalPath", "")
+        if external_path:
+            # externalPath is "/job/Title_R-12345" or bare "Title_R-12345";
+            # the last segment is the stable per-posting identifier that
+            # matches what _WORKDAY_POSTING_RE extracts from stored source_urls.
+            segment = external_path.rstrip("/").rsplit("/", 1)[-1]
+            if segment:
+                live_ids.add(segment)
+    return live_ids, complete
 
 
 def reconcile_company(conn, company_row: dict) -> dict:
@@ -176,49 +199,67 @@ def reconcile_company(conn, company_row: dict) -> dict:
         result["skip_reason"] = "unsupported_platform"
         return result
 
-    try:
-        postings = _scan_open_postings(platform, slug)
-    except Exception as e:
-        logger.warning("reconcile_company: %s/%s scan raised %s", platform, slug, e)
-        result["skipped"] = True
-        result["skip_reason"] = f"scan_exception:{type(e).__name__}"
-        return result
-
-    if not postings:
-        logger.debug("reconcile_company: %s/%s scan returned empty", platform, slug)
-        result["skipped"] = True
-        result["skip_reason"] = "scan_empty"
-        return result
-
-    if platform == "workday" and len(postings) >= _WORKDAY_CAP:
-        logger.warning(
-            "reconcile_company: workday '%s' returned %d postings (cap %d) — "
-            "skipping to avoid false-expire on truncated board",
-            slug,
-            len(postings),
-            _WORKDAY_CAP,
-        )
-        result["skipped"] = True
-        result["skip_reason"] = "workday_truncated"
-        return result
-
+    # Build live_id_set.  Strategy differs by platform:
+    # - Workday: completeness-aware direct fetch (no description GETs needed).
+    # - Others:  standard run_platform_scan, IDs extracted from source_urls.
     live_id_set: set[str] = set()
-    for posting in postings:
-        pid = _extract_posting_id(posting.get("source_url", ""), platform)
-        if pid:
-            live_id_set.add(pid)
 
-    if not live_id_set:
-        logger.warning(
-            "reconcile_company: %s/%s scan returned %d postings but 0 parseable IDs — "
-            "skipping (scan URL format may have drifted)",
-            platform,
-            slug,
-            len(postings),
-        )
-        result["skipped"] = True
-        result["skip_reason"] = "no_parseable_live_ids"
-        return result
+    if platform == "workday":
+        try:
+            live_id_set, complete = _workday_live_id_set(slug)
+        except Exception as e:
+            logger.warning("reconcile_company: %s/%s scan raised %s", platform, slug, e)
+            result["skipped"] = True
+            result["skip_reason"] = f"scan_exception:{type(e).__name__}"
+            return result
+
+        if not complete:
+            logger.warning(
+                "reconcile_company: workday '%s' board incomplete — "
+                "skipping to avoid false-expire",
+                slug,
+            )
+            result["skipped"] = True
+            result["skip_reason"] = "workday_incomplete"
+            return result
+
+        if not live_id_set:
+            logger.debug("reconcile_company: workday '%s' scan returned empty", slug)
+            result["skipped"] = True
+            result["skip_reason"] = "scan_empty"
+            return result
+
+    else:
+        try:
+            postings = _scan_open_postings(platform, slug)
+        except Exception as e:
+            logger.warning("reconcile_company: %s/%s scan raised %s", platform, slug, e)
+            result["skipped"] = True
+            result["skip_reason"] = f"scan_exception:{type(e).__name__}"
+            return result
+
+        if not postings:
+            logger.debug("reconcile_company: %s/%s scan returned empty", platform, slug)
+            result["skipped"] = True
+            result["skip_reason"] = "scan_empty"
+            return result
+
+        for posting in postings:
+            pid = _extract_posting_id(posting.get("source_url", ""), platform)
+            if pid:
+                live_id_set.add(pid)
+
+        if not live_id_set:
+            logger.warning(
+                "reconcile_company: %s/%s scan returned %d postings but 0 parseable IDs — "
+                "skipping (scan URL format may have drifted)",
+                platform,
+                slug,
+                len(postings),
+            )
+            result["skipped"] = True
+            result["skip_reason"] = "no_parseable_live_ids"
+            return result
 
     rows = conn.execute(
         """
