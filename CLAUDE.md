@@ -44,8 +44,8 @@ uv sync --extra dev --extra eval                  # Install pyproject deps + dev
 job_finder/
 ├── web/
 │   ├── __init__.py              # Flask app factory (create_app)
-│   ├── blueprints/              # 11 blueprints: admin, batch_scoring, companies, costs, dashboard, detections, jobs, pipeline, profile, settings, sync
-│   ├── templates/               # 36 Jinja2 templates (base.html + partials)
+│   ├── blueprints/              # 14 blueprints: admin, batch_scoring, companies, costs, dashboard, detections, events, jobs, onboarding, pipeline, profile, settings, sync, updates
+│   ├── templates/               # 54 Jinja2 templates (base.html + partials)
 │   ├── claude_client.py         # Anthropic SDK wrapper + cost tracking + budget gating (paid-fallback path)
 │   ├── model_provider.py        # Multi-provider cascade dispatcher (call_model + tier resolution)
 │   ├── providers/               # Per-provider implementations (anthropic, gemini, ollama)
@@ -55,14 +55,14 @@ job_finder/
 │   ├── pipeline_detector/       # Multi-signal email classification (split S7b 2026-05-06: __init__ + _constants + _gmail + _signals + _db + _processing)
 │   ├── ats_platforms/           # ATS platform scanners + registry (promoted from flat ats_platforms.py + ats_platforms_internal/ in H3 2026-05-28: __init__ re-exports + _registry + _title_match + _detail_fetchers + 16 _platforms_*)
 │   ├── ats_scanner/             # ATS platform scanner (split S7c 2026-05-06: __init__ + _upsert + _probe + _promote + _run + _run_html)
-│   ├── careers_crawler/         # Multi-tier careers-page crawler (split S7e 2026-05-06: __init__ + _title_filters + _api_cache + _static_tier + _playwright_tier + _ai_nav_tier + _tier_cache + _persistence + _scoring)
+│   ├── careers_crawler/         # Multi-tier careers-page crawler (split S7e 2026-05-06: __init__ + _title_filters + _api_cache + _static_tier + _sitemap_tier + _playwright_tier + _ai_nav_tier + _tier_cache + _persistence + _scoring)
 │   ├── migrations/              # Per-version migration modules (split S6 2026-05-06; m001..m051 + _gate, _runner, _post_hooks, types)
 │   ├── _http_constants.py       # Shared HTTP _HEADERS / _TIMEOUT (extracted S7e onset; consumed by careers_crawler + enrichment_tiers)
 │   ├── pipeline_runner.py       # Orchestrates ingestion + scoring + detection
 │   ├── db_helpers.py            # Per-request g.db pattern
 │   ├── db_migrate.py            # Migrations driver (slim post-S6: discovers + applies modules from migrations/)
 │   └── stale_detector.py        # Nightly stale job detection (own DB connection)
-├── parsers/                     # Email parsers: linkedin, glassdoor, indeed (stub), ziprecruiter
+├── parsers/                     # Email parsers: linkedin, glassdoor, indeed, ziprecruiter, monster, trueup, greenhouse
 ├── sources/                     # gmail_source.py, serpapi_source.py, thordata_source.py, dataforseo_source.py, portal_search_source.py
 ├── models.py                    # Job dataclass with dedup_key
 ├── db/                          # CLI-era DB module split into a package by Reconciliation R3 / S7d (2026-05-06): __init__ lifecycle + _queries (read-only filters + sort_by allowlist) + _jobs (CRUD) + _persistence (writes + pipeline state machine) + _classification (JobAssessment + derive_classification). Tag portfolio/s7d-db-split.
@@ -185,7 +185,7 @@ These files contain personal data and API keys. They are `.gitignore`d and must 
 ## Environment Variables
 
 - `JOB_CANNON_USER_DATA_DIR` (optional) — absolute path to user data directory. For local development, set this to the project root if you want config.yaml and jobs.db to stay in the repository directory instead of the OS user-data directory.
-- `OLLAMA_EXE` (optional) — absolute path to `ollama.exe`. Only needed if Ollama is installed somewhere other than the Windows default (`%LOCALAPPDATA%\Programs\Ollama\ollama.exe`) and not on PATH. The scheduler auto-starts Ollama at app boot so the nightly agentic backfill (3:30 AM) has a live service.
+- `OLLAMA_EXE` (optional) — absolute path to `ollama.exe`. Only needed if Ollama is installed somewhere other than the Windows default (`%LOCALAPPDATA%\Programs\Ollama\ollama.exe`) and not on PATH. The scheduler auto-starts Ollama at app boot so the nightly agentic backfill (4:15 AM) has a live service.
 
 ## Don't
 
