@@ -23,6 +23,7 @@ from flask import (
 from job_finder import secrets as jf_secrets
 from job_finder.config import (
     DEFAULT_CANDIDATE_SCORE_THRESHOLD,
+    DEFAULT_DAILY_BUDGET_USD,
     DEFAULT_LOOKBACK_DAYS,
     DEFAULT_MAX_RESULTS,
     DEFAULT_MIN_SCORE_THRESHOLD,
@@ -550,6 +551,10 @@ def _parse_form_to_config(form) -> dict:
     if _has("candidate_score_threshold"):
         scoring["candidate_score_threshold"] = safe_int(
             form["candidate_score_threshold"], DEFAULT_CANDIDATE_SCORE_THRESHOLD
+        )
+    if _has("daily_budget_usd"):
+        scoring["daily_budget_usd"] = safe_float(
+            form["daily_budget_usd"], DEFAULT_DAILY_BUDGET_USD
         )
     if scoring:
         config["scoring"] = scoring
