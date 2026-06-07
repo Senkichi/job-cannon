@@ -328,12 +328,39 @@ def _install_terminal_shutdown(app) -> None:
 
     # Windows: SetConsoleCtrlHandler covers CTRL_CLOSE_EVENT (terminal close),
     # which does NOT trigger Python signal handlers.
+    #
+    # CRITICAL: console handlers run in LIFO order, and returning True means
+    # "handled — do not call the next handler in the chain." CPython installs
+    # its own console handler at startup that converts CTRL_C_EVENT /
+    # CTRL_BREAK_EVENT into SIGINT (→ _signal_handler above → sys.exit). Our
+    # handler is registered later, so it runs FIRST; if it returned True for
+    # Ctrl+C it would suppress CPython's handler, runtime_shutdown() would run
+    # but sys.exit() never would, and the Werkzeug server would keep serving
+    # forever — an orphan process holding the port. So we ONLY claim the events
+    # that genuinely bypass Python signals (close / logoff / shutdown) and let
+    # Ctrl+C / Ctrl+Break fall through to CPython's SIGINT path by returning False.
     try:
         import win32api  # type: ignore[import]  # pywin32 transitive dep
+        import win32con  # type: ignore[import]  # pywin32 transitive dep
+
+        # Events delivered to the process before the OS terminates it, which do
+        # NOT raise a Python signal — cleanup must happen here or not at all.
+        _CONSOLE_TERMINATION_EVENTS = frozenset(
+            {
+                win32con.CTRL_CLOSE_EVENT,
+                win32con.CTRL_LOGOFF_EVENT,
+                win32con.CTRL_SHUTDOWN_EVENT,
+            }
+        )
 
         def _ctrl_handler(ctrl_type):
-            runtime_shutdown()
-            return True  # tell Windows we handled it
+            if ctrl_type in _CONSOLE_TERMINATION_EVENTS:
+                runtime_shutdown()
+                return True  # we handled the terminal/session teardown
+            # CTRL_C_EVENT / CTRL_BREAK_EVENT: defer to CPython's handler so the
+            # normal SIGINT path (signal handler → sys.exit) runs and the
+            # process actually exits.
+            return False
 
         win32api.SetConsoleCtrlHandler(_ctrl_handler, True)
     except ImportError:
