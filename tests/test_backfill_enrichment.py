@@ -609,3 +609,83 @@ def test_offline_providers_use_fallback_chain_not_fallback():
             f"{tier!r} still uses the singular fallback key; "
             "call_model cascade path won't activate"
         )
+
+
+# ---------------------------------------------------------------------------
+# Issue #150: scoring_model provenance — sr.model, not providers.scoring.model
+# ---------------------------------------------------------------------------
+
+
+def test_scoring_backfill_persists_model_from_scoring_result(migrated_db):
+    """run_scoring_backfill must pass sr.model to persist_job_assessment.
+
+    Regression guard for issue #150: the old code read the model name from
+    providers.scoring.model (a dead Phase-40 key) which is always None.
+    The correct value lives on ScoringResult.model, populated by the cascade.
+    """
+    from job_finder.db import JobAssessment
+    from job_finder.web.job_scorer import ScoringResult as JSResult
+
+    path, conn = migrated_db
+
+    insert_job(
+        conn,
+        "job_provenance",
+        jd_full="About the role you will design build and operate data and ML systems at scale partnering with cross functional teams to ship reliable features end to end Requirements strong Python and SQL plus hands on cloud infrastructure testing and production observability experience",
+        sonnet_score=None,
+    )
+
+    assessment = JobAssessment(
+        sub_scores={
+            "title_fit": 4,
+            "location_fit": 3,
+            "comp_fit": 4,
+            "domain_match": 5,
+            "seniority_match": 4,
+            "skills_match": 3,
+        },
+        classification="",
+        rationale={
+            "strengths": [],
+            "gaps": [],
+            "talking_points": [],
+            "resume_priority_skills": [],
+        },
+        provider="ollama",
+    )
+    mock_score_job = MagicMock(
+        return_value=JSResult(
+            status="ok",
+            data=assessment,
+            provider="ollama",
+            model="qwen2.5:14b",
+        )
+    )
+
+    with (
+        patch.object(be_module, "score_job", mock_score_job),
+        patch.object(be_module, "persist_job_assessment") as mock_persist,
+    ):
+        be_module.run_scoring_backfill(conn, config={})
+
+    assert mock_persist.call_count == 1
+    _, kwargs = mock_persist.call_args
+    assert kwargs.get("model") == "qwen2.5:14b", (
+        f"Expected model='qwen2.5:14b' but persist_job_assessment received model={kwargs.get('model')!r}. "
+        "run_scoring_backfill must pass sr.model, not a config-derived value."
+    )
+
+
+def test_scoring_backfill_no_providers_scoring_read():
+    """backfill_enrichment.py must not read providers.scoring.model (dead Phase-40 key).
+
+    Regression guard: if this assertion fails, the scoring_model=NULL bug has
+    been re-introduced (issue #150).
+    """
+    import inspect
+
+    source = inspect.getsource(be_module)
+    assert 'providers", {}).get("scoring"' not in source, (
+        "backfill_enrichment.py reads providers.scoring — a dead Phase-40 config key. "
+        "Use sr.model from the ScoringResult instead."
+    )
