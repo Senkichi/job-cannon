@@ -821,62 +821,6 @@
       </div>
     </div>
 
-    <!-- Desktop Notifications section -->
-    <div class="bg-slate-800 rounded-lg overflow-hidden">
-      <button type="button" onclick="toggleSection(this)"
-              class="w-full flex items-center justify-between px-6 py-4 text-left hover:bg-slate-750 transition-colors">
-        <div class="flex items-center gap-3">
-          <svg class="w-5 h-5 text-sky-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                  d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/>
-          </svg>
-          <span class="font-semibold text-slate-100">Desktop Notifications</span>
-        </div>
-        <svg class="section-chevron w-4 h-4 text-slate-400 transition-transform duration-200 rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
-        </svg>
-      </button>
-      <div class="section-body border-t border-slate-700 p-6 space-y-4">
-        <p class="text-xs text-slate-500">Notifications appear as Windows 11 toasts. Click a notification to open the relevant page.</p>
-
-        {% set notif_cfg = config.get('notifications', {}) %}
-        <div class="space-y-3">
-          <label class="flex items-start gap-3 cursor-pointer">
-            <input type="hidden" name="notification_high_score" value="">
-            <input type="checkbox" name="notification_high_score" value="on"
-                   class="w-4 h-4 mt-0.5 accent-violet-500"
-                   {% if notif_cfg.get('high_score', True) %}checked{% endif %}>
-            <div>
-              <span class="text-sm font-medium text-slate-200">High Score Jobs</span>
-              <p class="text-xs text-slate-500 mt-0.5">Notify when a new job scores above the candidate threshold</p>
-            </div>
-          </label>
-
-          <label class="flex items-start gap-3 cursor-pointer">
-            <input type="hidden" name="notification_pipeline_change" value="">
-            <input type="checkbox" name="notification_pipeline_change" value="on"
-                   class="w-4 h-4 mt-0.5 accent-violet-500"
-                   {% if notif_cfg.get('pipeline_change', True) %}checked{% endif %}>
-            <div>
-              <span class="text-sm font-medium text-slate-200">Pipeline Changes</span>
-              <p class="text-xs text-slate-500 mt-0.5">Notify when pipeline status changes are auto-detected (rejection, interview, confirmation)</p>
-            </div>
-          </label>
-
-          <label class="flex items-start gap-3 cursor-pointer">
-            <input type="hidden" name="notification_budget_alert" value="">
-            <input type="checkbox" name="notification_budget_alert" value="on"
-                   class="w-4 h-4 mt-0.5 accent-violet-500"
-                   {% if notif_cfg.get('budget_alert', True) %}checked{% endif %}>
-            <div>
-              <span class="text-sm font-medium text-slate-200">Budget Alerts</span>
-              <p class="text-xs text-slate-500 mt-0.5">Notify at 80% and 100% of daily API budget</p>
-            </div>
-          </label>
-        </div>
-      </div>
-    </div>
-
     <!-- Output section -->
     <div class="bg-slate-800 rounded-lg overflow-hidden">
       <button type="button" onclick="toggleSection(this)"
