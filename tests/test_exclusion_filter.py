@@ -274,3 +274,34 @@ class TestCountScorable:
         self._insert_job(conn, "job-2", pipeline_status="dismissed")
         self._insert_job(conn, "job-3", pipeline_status="archived")
         assert count_scorable(conn, {}) == 1
+
+    def test_failure_returns_zero_and_logs_warning(self, caplog):
+        """DB error must return 0 AND emit a WARNING with traceback attached."""
+        import logging
+        from unittest.mock import MagicMock
+
+        bad_conn = MagicMock()
+        bad_conn.execute.side_effect = Exception("simulated DB failure")
+
+        with caplog.at_level(logging.WARNING, logger="job_finder.web.exclusion_filter"):
+            result = count_scorable(bad_conn, {})
+
+        assert result == 0
+        warning_records = [r for r in caplog.records if r.levelno == logging.WARNING]
+        assert warning_records, "expected a WARNING log record on DB failure"
+        assert warning_records[0].exc_info is not None, "exc_info must be set (traceback attached)"
+
+    def test_happy_path_no_warning(self, migrated_db, caplog):
+        """Healthy connection returns correct count without emitting any WARNING."""
+        import logging
+
+        _, conn = migrated_db
+        self._insert_job(conn, "job-happy-1")
+        self._insert_job(conn, "job-happy-2")
+
+        with caplog.at_level(logging.WARNING, logger="job_finder.web.exclusion_filter"):
+            result = count_scorable(conn, {})
+
+        assert result == 2
+        warning_records = [r for r in caplog.records if r.levelno == logging.WARNING]
+        assert not warning_records, "no WARNING should be emitted on a successful query"

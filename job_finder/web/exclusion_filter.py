@@ -127,6 +127,7 @@ def count_scorable(conn, config: dict) -> int:
         where = " AND ".join(conditions)
         return conn.execute(f"SELECT COUNT(*) FROM jobs WHERE {where}", params).fetchone()[0]
     except Exception:
+        logger.warning("count_scorable failed; returning 0", exc_info=True)
         return 0
 
 
