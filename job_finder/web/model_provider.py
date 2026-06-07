@@ -39,6 +39,11 @@ _VALID_WORKLOADS: frozenset[str] = frozenset({"quick", "score", "triage"})
 # - triage: pre-scoring gate; uses the `quick` model with a triage-specific prompt.
 #
 # Triage entries are absent here (resolved as identical to `quick` at lookup time).
+#
+# NOTE: `openrouter` is intentionally absent from this dict. It is registered in
+# _SUPPORTED_PROVIDERS (so _make_adapter can dispatch it) but is eval-judge only —
+# it is not part of the production scoring cascade. Adding an openrouter entry here
+# would silently enable it as a cascade fallback. See providers/openrouter_provider.py.
 _PROVIDER_DEFAULTS: dict[str, dict[str, str]] = {
     "claude_code_cli": {"quick": "claude-haiku-4-5", "score": "claude-sonnet-4-6"},
     "anthropic": {"quick": "claude-haiku-4-5", "score": "claude-sonnet-4-6"},
