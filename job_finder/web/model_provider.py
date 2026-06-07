@@ -39,6 +39,11 @@ _VALID_WORKLOADS: frozenset[str] = frozenset({"quick", "score", "triage"})
 # - triage: pre-scoring gate; uses the `quick` model with a triage-specific prompt.
 #
 # Triage entries are absent here (resolved as identical to `quick` at lookup time).
+#
+# NOTE: `openrouter` is intentionally absent from this dict even though it appears
+# in `_SUPPORTED_PROVIDERS`.  It is an eval-judge-only adapter (see
+# openrouter_provider.py) and must never be placed in the production cascade.
+# Adding a defaults entry here would silently enable it as a prod provider.
 _PROVIDER_DEFAULTS: dict[str, dict[str, str]] = {
     "claude_code_cli": {"quick": "claude-haiku-4-5", "score": "claude-sonnet-4-6"},
     "anthropic": {"quick": "claude-haiku-4-5", "score": "claude-sonnet-4-6"},
@@ -46,8 +51,9 @@ _PROVIDER_DEFAULTS: dict[str, dict[str, str]] = {
     "gemini_cli": {"quick": "gemini-2.5-flash", "score": "gemini-2.5-pro"},
     "ollama": {"quick": "qwen2.5:14b", "score": "qwen2.5:14b"},
     "local_bundled": {"quick": "Qwen2.5-3B-Instruct-Q4_K_M", "score": None},
-    "groq": {"quick": "llama-3.1-8b-instant", "score": "llama-3.3-70b-versatile"},
-    "cerebras": {"quick": "llama3.1-8b", "score": "llama-3.3-70b"},
+    # groq / cerebras: defaults intentionally absent — adapter modules not yet
+    # implemented (_make_adapter has no dispatch branch for these providers).
+    # Add entries here only after wiring the full adapter + _SUPPORTED_PROVIDERS.
 }
 
 
