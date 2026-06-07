@@ -61,6 +61,9 @@ def test_main_sets_timer_daemon(monkeypatch):
         captured_timer.append(t)
         return t
 
+    acquired = MagicMock()
+    acquired.acquired = True
+
     with (
         patch("job_finder.config.load_config", return_value={}),
         patch("job_finder.web.create_app", return_value=fake_app),
@@ -68,6 +71,12 @@ def test_main_sets_timer_daemon(monkeypatch):
         patch("job_finder.__main__._install_terminal_shutdown"),
         patch("job_finder.__main__.threading.Timer", side_effect=_capturing_timer),
         patch("job_finder.__main__.sys.argv", ["job-cannon"]),
+        # Hermetic: don't let a live instance on :5000 short-circuit main()
+        # before the Timer is created (the assertion target).
+        patch("job_finder.__main__.probe_existing_jc", return_value=None),
+        patch("job_finder.__main__._port_is_listening", return_value=False),
+        patch("job_finder.__main__.acquire_pidfile", return_value=acquired),
+        patch("job_finder.web._process_lifecycle.install_kill_on_exit"),
     ):
         import job_finder.__main__ as main_mod
 
@@ -230,6 +239,61 @@ def test_set_console_ctrl_handler_install_succeeds():
 
     except ImportError:
         pytest.skip("pywin32 not installed — skipping SetConsoleCtrlHandler test")
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows-only test")
+def test_console_ctrl_handler_lets_ctrl_c_fall_through():
+    """Regression: the win32 console handler must return False for CTRL_C_EVENT /
+    CTRL_BREAK_EVENT so CPython's SIGINT path (→ sys.exit) still runs, and True
+    only for terminal/session-teardown events that bypass Python signals.
+
+    Returning True for Ctrl+C suppresses CPython's console handler, leaving the
+    Werkzeug server serving forever — the orphan-process bug this guards against.
+    """
+    try:
+        import win32api  # type: ignore[import]
+        import win32con  # type: ignore[import]
+    except ImportError:
+        pytest.skip("pywin32 not installed — skipping console ctrl handler test")
+
+    import job_finder.__main__ as main_mod
+
+    captured_handler: list = []
+
+    def _capture_set(handler, add):
+        captured_handler.append(handler)
+        return None  # do not actually register during the test
+
+    shutdown_calls: list[int] = []
+    with (
+        patch.object(win32api, "SetConsoleCtrlHandler", side_effect=_capture_set),
+        patch(
+            "job_finder.web._runtime.runtime_shutdown",
+            side_effect=lambda: shutdown_calls.append(1),
+        ),
+    ):
+        main_mod._install_terminal_shutdown(MagicMock())
+
+    assert captured_handler, "console ctrl handler was not registered"
+    handler = captured_handler[0]
+
+    # Ctrl+C / Ctrl+Break must fall through (return False) and NOT run cleanup —
+    # CPython's SIGINT path owns that teardown via the Python signal handler.
+    assert handler(win32con.CTRL_C_EVENT) is False
+    assert handler(win32con.CTRL_BREAK_EVENT) is False
+    assert shutdown_calls == [], "Ctrl+C/Break must not trigger runtime_shutdown here"
+
+    # Terminal close / logoff / shutdown bypass Python signals — handler must
+    # run cleanup and claim the event (return True).
+    for event in (
+        win32con.CTRL_CLOSE_EVENT,
+        win32con.CTRL_LOGOFF_EVENT,
+        win32con.CTRL_SHUTDOWN_EVENT,
+    ):
+        reset_for_testing()
+        shutdown_calls.clear()
+        assert handler(event) is True, f"event {event} must be claimed"
+        assert shutdown_calls == [1], f"event {event} must run runtime_shutdown"
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="Non-Windows: verify graceful skip")
