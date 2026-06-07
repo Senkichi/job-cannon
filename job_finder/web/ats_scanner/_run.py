@@ -408,6 +408,23 @@ def _scan_one_company_via_ats_api(
         company_jobs_found = len(job_dicts)
         summary["jobs_discovered"] += company_jobs_found
 
+        # --- Autoheal Phase A: capture ATS extraction baseline (detect=False) ---
+        # Raw API response isn't reachable here; capture the post-filter count only.
+        # Detection (break-rule) is Phase B when raw artifact capture lands.
+        try:
+            from job_finder.web.autoheal.health_monitor import record_extraction as _rec_ext
+
+            _rec_ext(
+                conn,
+                f"ats:{platform}",
+                "ats",
+                f"matched={company_jobs_found} slug={slug}",
+                job_count=company_jobs_found,
+                detect=False,
+            )
+        except Exception:
+            pass  # observability must never break ingestion
+
         # Upsert each matched job (uses inner standalone_connection per Phase A semantics).
         with standalone_connection(db_path) as scan_conn:
             for job_dict in job_dicts:

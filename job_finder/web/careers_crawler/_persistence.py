@@ -90,6 +90,23 @@ def _upsert_and_log(
                VALUES (?, ?, ?, ?)""",
             (company_id, now, company_jobs_new, company_jobs_found),
         )
+
+        # --- Autoheal Phase A: capture careers extraction baseline (detect=False) ---
+        # Post-filter count only; raw HTML capture is Phase B.
+        try:
+            from job_finder.web.autoheal.health_monitor import record_extraction as _rec_ext
+
+            _rec_ext(
+                ts_conn,
+                "careers",
+                "careers",
+                f"tier={tier_used} found={company_jobs_found}",
+                job_count=company_jobs_found,
+                detect=False,
+            )
+        except Exception:
+            pass  # observability must never break ingestion
+
         ts_conn.commit()
 
     summary["companies_crawled"] += 1

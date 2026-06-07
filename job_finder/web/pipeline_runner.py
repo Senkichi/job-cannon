@@ -48,9 +48,11 @@ from job_finder.web.ingestion_runner import (  # noqa: F401
     _fetch_thordata,
     _log_to_email_parse_log,
     _prune_stale_data,
+    _record_email_extractions,
     _score_and_persist,
     _submit_dataforseo_tasks,
     _upsert_job_company,
+    _user_identifiers,
 )
 
 logger = logging.getLogger(__name__)
@@ -134,7 +136,7 @@ def run_ingestion(
 
         # --- Email ingestion: IMAP (default) or Gmail (opt-in) ---
         if config.get("sources", {}).get("imap", {}).get("enabled", False):
-            imap_jobs = _fetch_imap(config, summary)
+            imap_jobs = _fetch_imap(config, summary, db_path)
             gmail_jobs = []
         else:
             gmail_jobs = _fetch_gmail(config, runner_conn, summary)
@@ -221,6 +223,13 @@ def run_ingestion(
         summary["classified_reject"] = scoring_summary.get("classified_reject", 0)
 
     summary["duration_seconds"] = (datetime.now() - start_time).total_seconds()
+
+    # --- Post-ingestion detection pass (email-only in Phase A) ---
+    # Runs after the standalone_connection block has closed, so run_detection
+    # opening its own connection cannot self-lock.
+    from job_finder.web.autoheal.health_monitor import run_detection
+
+    summary["degraded_sources"] = run_detection(db_path)
 
     total_fetched = (
         summary["gmail_fetched"]

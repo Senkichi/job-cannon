@@ -21,6 +21,7 @@ from job_finder.json_utils import utc_now_iso
 from job_finder.models import Job
 from job_finder.scoring.scorer import JobScorer
 from job_finder.secrets import get_secret
+from job_finder.web.db_helpers import standalone_connection
 
 try:
     from job_finder.sources.gmail_source import GmailSource
@@ -74,6 +75,43 @@ def _apply_title_gate(jobs: list[Job], config: dict, source_label: str) -> list[
             len(exclusions),
         )
     return filtered
+
+
+def _user_identifiers(config: dict) -> tuple[str, ...]:
+    """Personal identifiers to redact from captured email bodies, sourced from config.
+
+    sources.imap.email is the verified real key (ingestion_runner.py:293). profile.name
+    is included when present. Returns () when neither exists.
+    """
+    idents: list[str] = []
+    email = config.get("sources", {}).get("imap", {}).get("email")
+    if email:
+        idents.append(email)
+    name = config.get("profile", {}).get("name")
+    if name:
+        idents.append(name)
+    return tuple(idents)
+
+
+def _record_email_extractions(source, conn, config: dict) -> None:
+    """Drain a source's accumulated extraction_records into the health monitor.
+
+    Never raises (record_extraction swallows its own errors); observability must
+    not break ingestion.
+    """
+    from job_finder.web.autoheal.health_monitor import record_extraction
+
+    idents = _user_identifiers(config)
+    for rec in getattr(source, "extraction_records", []):
+        record_extraction(
+            conn,
+            rec["label"],
+            "email",
+            rec["raw_text"],
+            rec["job_count"],
+            scrub_identifiers=idents,
+            detect=True,
+        )
 
 
 def _fetch_gmail(config: dict, conn: sqlite3.Connection, summary: dict) -> list[Job]:
@@ -175,6 +213,9 @@ def _fetch_gmail(config: dict, conn: sqlite3.Connection, summary: dict) -> list[
             except Exception as e:
                 logger.warning("Failed to log parse failure to runs: %s", e)
 
+        # --- Drain per-email extraction records into the health monitor ---
+        _record_email_extractions(source, conn, config)
+
         # Apply title-gate AFTER message-level dedup writes (above) so the
         # email_parse_log message-ID inserts still cover every fetched message
         # — gate filters Job objects, not message tracking. summary +
@@ -221,13 +262,18 @@ class SourceSpec:
     validate_config: Callable[[dict], str | None] = field(default=lambda _: None)
 
 
-def _run_simple_source(spec: SourceSpec, config: dict, summary: dict) -> list[Job]:
+def _run_simple_source(
+    spec: SourceSpec, config: dict, summary: dict, post_extract=None
+) -> list[Job]:
     """Fetch from a simple source with the standard enabled/secret/error envelope.
 
     Mirrors the original inline shape of ``_fetch_serpapi``/``_fetch_thordata``/
     ``_fetch_imap``: enabled-check → validate_config → secret → queries → build →
-    extract → title-gate → summary update. Errors during build/extract are
-    isolated per-source (caught, appended to ``summary[f"{spec.name}_errors"]``).
+    extract → post_extract hook → title-gate → summary update. Errors during
+    build/extract are isolated per-source (caught, appended to
+    ``summary[f"{spec.name}_errors"]``). The optional ``post_extract(source)``
+    hook is invoked after extract; its errors are swallowed so observability
+    never breaks ingestion.
     """
     source_cfg = config.get("sources", {}).get(spec.name, {})
     if not source_cfg.get("enabled", False):
@@ -258,6 +304,11 @@ def _run_simple_source(spec: SourceSpec, config: dict, summary: dict) -> list[Jo
     try:
         source = spec.build_source(source_cfg, secret)
         jobs = spec.extract_jobs(source, source_cfg)
+        if post_extract is not None:
+            try:
+                post_extract(source)
+            except Exception:
+                logger.exception("post_extract hook failed for %s", spec.name)
         jobs = _apply_title_gate(jobs, config, spec.name)
         summary[f"{spec.name}_fetched"] = len(jobs)
         logger.info("%s: fetched %d jobs", spec.name, len(jobs))
@@ -329,7 +380,20 @@ def _fetch_thordata(config: dict, summary: dict) -> list[Job]:
     return _run_simple_source(_THORDATA_SPEC, config, summary)
 
 
-def _fetch_imap(config: dict, summary: dict) -> list[Job]:
+def _fetch_imap(config: dict, summary: dict, db_path: str = "") -> list[Job]:
+    """Fetch IMAP jobs and drain extraction_records into the health monitor.
+
+    db_path is passed explicitly to avoid the config-path divergence hazard —
+    standalone_connection here uses the same db_path as the pipeline caller,
+    not whatever the config's db section says.
+    """
+    if db_path:
+
+        def _drain(source):
+            with standalone_connection(db_path) as c:
+                _record_email_extractions(source, c, config)
+
+        return _run_simple_source(_IMAP_SPEC, config, summary, post_extract=_drain)
     return _run_simple_source(_IMAP_SPEC, config, summary)
 
 

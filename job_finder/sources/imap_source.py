@@ -13,6 +13,7 @@ from imapclient import IMAPClient
 
 from job_finder.models import Job
 from job_finder.sources.gmail_source import (
+    SENDER_LABEL,
     SENDER_PARSERS,
     _archive_parse_failure,
     _should_archive_failure,
@@ -47,6 +48,7 @@ class ImapSource:
         self.app_password = app_password
         self.folder = folder
         self.parse_failures: list[dict] = []
+        self.extraction_records: list[dict] = []
 
     def fetch_jobs(
         self, lookback_days: int = 7, processed_message_ids: set[str] | None = None
@@ -114,6 +116,13 @@ class ImapSource:
                     try:
                         jobs = parser_fn(body, email_date)
                         all_jobs.extend(jobs)
+                        self.extraction_records.append(
+                            {
+                                "label": SENDER_LABEL.get(sender, sender),
+                                "raw_text": body,
+                                "job_count": len(jobs),
+                            }
+                        )
 
                         # Archive parse failures if needed
                         if _should_archive_failure(body, jobs, sender):
