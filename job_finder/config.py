@@ -38,6 +38,10 @@ DEFAULT_MIN_SCORE_THRESHOLD = 40
 def resolve_triage_enabled(config: dict) -> bool:
     """Resolve 'auto' string to bool based on primary provider.
 
+    NOTE: Reserved/unwired — the pre-scoring triage gate has no production callers.
+    ``providers.triage`` is absent from config.example.yaml; only called from tests.
+    Do not wire without a product decision.
+
     Returns:
         True when primary is claude_code_cli, gemini, gemini_cli, or anthropic.
         False when primary is ollama or local_bundled.
