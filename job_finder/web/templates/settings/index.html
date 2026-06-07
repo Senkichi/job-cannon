@@ -736,7 +736,7 @@
         </svg>
       </button>
       <div class="section-body border-t border-slate-700 p-6 space-y-4">
-        <p class="text-xs text-slate-500">Control API spending. Mid/High-tier calls are paused when monthly spend reaches the cap. Low-tier is always allowed.</p>
+        <p class="text-xs text-slate-500">Control API spending. Mid/High-tier calls are paused when daily spend reaches the cap. Low-tier is always allowed.</p>
 
         <div class="grid grid-cols-2 gap-4">
           <div>
@@ -870,7 +870,7 @@
                    {% if notif_cfg.get('budget_alert', True) %}checked{% endif %}>
             <div>
               <span class="text-sm font-medium text-slate-200">Budget Alerts</span>
-              <p class="text-xs text-slate-500 mt-0.5">Notify at 80% and 100% of monthly API budget</p>
+              <p class="text-xs text-slate-500 mt-0.5">Notify at 80% and 100% of daily API budget</p>
             </div>
           </label>
         </div>

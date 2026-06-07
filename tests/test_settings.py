@@ -1184,3 +1184,70 @@ class TestSettingsCheckboxBrowserShape:
                 assert key in node, f"missing path {path} for {name}: got {saved}"
                 node = node[key]
             assert node is True, f"{name} (path {path}) persisted as {node!r}, expected True"
+
+
+class TestSettingsDailyBudgetPersistence:
+    """Regression: daily_budget_usd field was rendered in the UI but never
+    parsed in _parse_form_to_config, so saving it silently did nothing.
+    Issue #151.
+    """
+
+    def test_daily_budget_usd_saves_and_loads(self, settings_client, settings_app):
+        """POST daily_budget_usd=7 → GET /settings/ shows 7 and config has 7.0."""
+        resp = settings_client.post(
+            "/settings/save",
+            data={
+                "target_titles": "Staff Data Scientist\nSenior Data Scientist",
+                "profile_skills": "Python\nSQL\nSpark",
+                "daily_budget_usd": "7",
+            },
+        )
+        assert resp.status_code == 302
+
+        with open(settings_app._test_config_path, encoding="utf-8") as f:
+            saved = yaml.safe_load(f)
+
+        assert saved["scoring"]["daily_budget_usd"] == 7.0
+
+    def test_daily_budget_usd_non_numeric_falls_back_to_default(
+        self, settings_client, settings_app
+    ):
+        """Non-numeric budget input falls back to DEFAULT_DAILY_BUDGET_USD via safe_float."""
+        from job_finder.config import DEFAULT_DAILY_BUDGET_USD
+
+        resp = settings_client.post(
+            "/settings/save",
+            data={
+                "target_titles": "Staff Data Scientist\nSenior Data Scientist",
+                "profile_skills": "Python\nSQL\nSpark",
+                "daily_budget_usd": "not-a-number",
+            },
+        )
+        assert resp.status_code == 302
+
+        with open(settings_app._test_config_path, encoding="utf-8") as f:
+            saved = yaml.safe_load(f)
+
+        assert saved["scoring"]["daily_budget_usd"] == DEFAULT_DAILY_BUDGET_USD
+
+    def test_other_scoring_fields_still_save(self, settings_client, settings_app):
+        """Regression: weights and thresholds still persist alongside daily_budget_usd."""
+        resp = settings_client.post(
+            "/settings/save",
+            data={
+                "target_titles": "Staff Data Scientist\nSenior Data Scientist",
+                "profile_skills": "Python\nSQL\nSpark",
+                "daily_budget_usd": "15",
+                "min_score_threshold": "45",
+                "candidate_score_threshold": "60",
+            },
+        )
+        assert resp.status_code == 302
+
+        with open(settings_app._test_config_path, encoding="utf-8") as f:
+            saved = yaml.safe_load(f)
+
+        sc = saved["scoring"]
+        assert sc["daily_budget_usd"] == 15.0
+        assert sc["min_score_threshold"] == 45
+        assert sc["candidate_score_threshold"] == 60
