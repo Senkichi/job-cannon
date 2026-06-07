@@ -29,6 +29,7 @@ from job_finder.db import (
     get_job,
     get_pipeline_events,
     load_job_context,
+    persist_job_notes,
     update_pipeline_status,
     upsert_job,
 )
@@ -37,6 +38,7 @@ from job_finder.models import Job
 from job_finder.secrets import get_secret
 from job_finder.web._http_constants import _HEADERS, _TIMEOUT
 from job_finder.web.activity_tracker import (
+    ACTION_EDIT_NOTES,
     ACTION_EXPAND_JOB,
     ACTION_PASTE_JD,
     ACTION_RESCORE,
@@ -956,6 +958,41 @@ def save_jd(dedup_key: str):
         pipeline_statuses=PIPELINE_STATUSES,
         jd_saved=True,
     )
+
+
+@jobs_bp.route("/<path:dedup_key>/notes", methods=["POST"], strict_slashes=False)
+def save_notes(dedup_key: str):
+    """HTMX POST -- save user notes for a job without triggering scoring."""
+    db_path = current_app.config["DB_PATH"]
+    conn = get_db(db_path)
+
+    ctx = load_job_context(conn, dedup_key)
+    if ctx is None:
+        return "", 404
+
+    notes = request.form.get("notes", "").strip()[:32000]
+
+    persist_job_notes(conn, dedup_key, notes)
+
+    try:
+        log_activity(
+            db_path,
+            ACTION_EDIT_NOTES,
+            entity_id=dedup_key,
+            metadata={
+                "title": ctx["job"].get("title"),
+                "company": ctx["job"].get("company"),
+                "notes_length": len(notes),
+                "status": "success",
+            },
+        )
+    except Exception:
+        logger.debug("log_activity failed in save_notes", exc_info=True)
+
+    ctx = load_job_context(conn, dedup_key)
+    if ctx is None:
+        return "", 404
+    return render_template("jobs/_notes_panel.html", job=ctx["job"], notes_saved=True)
 
 
 @jobs_bp.route("/<path:dedup_key>/jd-edit-form", strict_slashes=False)

@@ -59,6 +59,7 @@ from ._jobs import upsert_job as upsert_job
 from ._persistence import log_run as log_run
 from ._persistence import persist_job_assessment as persist_job_assessment
 from ._persistence import persist_job_expiry_state as persist_job_expiry_state
+from ._persistence import persist_job_notes as persist_job_notes
 from ._persistence import update_pipeline_status as update_pipeline_status
 
 # Pipeline-detection + dashboard read queries (formerly job_finder/db_pipeline.py

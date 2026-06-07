@@ -3259,3 +3259,123 @@ class TestCompositeScoreCell:
         cell = html[idx : idx + 1500]
         assert "Strength:" not in cell
         assert "Gap:" not in cell
+
+
+# ---------------------------------------------------------------------------
+# Notes persistence tests (Issue #152)
+# ---------------------------------------------------------------------------
+
+
+class TestSaveNotes:
+    """Tests for POST /jobs/<key>/notes route.
+
+    Mirrors TestSaveJD (~line 2445); fixture ``jobs_client`` seeds
+    ``acme|data-scientist|remote``, ``tmp_db_path`` for DB assertions.
+    """
+
+    def test_save_notes_returns_200(self, jobs_client):
+        response = jobs_client.post(
+            "/jobs/acme%7Cdata-scientist%7Cremote/notes",
+            data={"notes": "Great company, reach out Monday."},
+        )
+        assert response.status_code == 200
+
+    def test_save_notes_writes_to_db(self, jobs_client, tmp_db_path):
+        import sqlite3
+
+        jobs_client.post(
+            "/jobs/acme%7Cdata-scientist%7Cremote/notes",
+            data={"notes": "Interview scheduled for Thursday."},
+        )
+        conn = sqlite3.connect(tmp_db_path)
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT notes FROM jobs WHERE dedup_key = ?",
+            ("acme|data-scientist|remote",),
+        ).fetchone()
+        conn.close()
+        assert row["notes"] == "Interview scheduled for Thursday."
+
+    def test_save_notes_empty_clears_column(self, jobs_client, tmp_db_path):
+        """Empty notes POST succeeds and clears the column."""
+        import sqlite3
+
+        # First write something
+        jobs_client.post(
+            "/jobs/acme%7Cdata-scientist%7Cremote/notes",
+            data={"notes": "Initial notes."},
+        )
+        # Then clear it
+        response = jobs_client.post(
+            "/jobs/acme%7Cdata-scientist%7Cremote/notes",
+            data={"notes": ""},
+        )
+        assert response.status_code == 200
+        conn = sqlite3.connect(tmp_db_path)
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT notes FROM jobs WHERE dedup_key = ?",
+            ("acme|data-scientist|remote",),
+        ).fetchone()
+        conn.close()
+        # strip() on empty string is still empty
+        assert row["notes"] == ""
+
+    def test_save_notes_caps_at_32000_chars(self, jobs_client, tmp_db_path):
+        """Notes longer than 32 000 chars are silently truncated."""
+        import sqlite3
+
+        oversized = "x" * 40000
+        jobs_client.post(
+            "/jobs/acme%7Cdata-scientist%7Cremote/notes",
+            data={"notes": oversized},
+        )
+        conn = sqlite3.connect(tmp_db_path)
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT notes FROM jobs WHERE dedup_key = ?",
+            ("acme|data-scientist|remote",),
+        ).fetchone()
+        conn.close()
+        assert len(row["notes"]) == 32000
+
+    def test_save_notes_logs_edit_notes_activity(self, jobs_client, tmp_db_path):
+        import sqlite3
+
+        jobs_client.post(
+            "/jobs/acme%7Cdata-scientist%7Cremote/notes",
+            data={"notes": "Activity log test."},
+        )
+        conn = sqlite3.connect(tmp_db_path)
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT action FROM user_activity WHERE entity_id = ? ORDER BY id DESC LIMIT 1",
+            ("acme|data-scientist|remote",),
+        ).fetchone()
+        conn.close()
+        assert row is not None
+        assert row["action"] == "edit_notes"
+
+    def test_save_notes_unknown_key_returns_404(self, jobs_client):
+        response = jobs_client.post(
+            "/jobs/nonexistent-key/notes",
+            data={"notes": "Some notes."},
+        )
+        assert response.status_code == 404
+
+    def test_save_notes_fragment_contains_name_notes(self, jobs_client):
+        """Rendered fragment must contain name=\"notes\" so HTMX re-include works."""
+        response = jobs_client.post(
+            "/jobs/acme%7Cdata-scientist%7Cremote/notes",
+            data={"notes": "Fragment check."},
+        )
+        assert b'name="notes"' in response.data
+
+    def test_save_notes_button_is_type_button(self, jobs_client):
+        """Save Notes button must be type=button to prevent native form submission."""
+        response = jobs_client.get(
+            "/jobs/acme%7Cdata-scientist%7Cremote/expand", headers={"HX-Request": "true"}
+        )
+        data = response.data.decode()
+        assert 'type="button"' in data
+        assert 'hx-include="closest form"' in data
