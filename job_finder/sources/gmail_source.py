@@ -35,6 +35,21 @@ SENDER_PARSERS = {
     "monster@notifications.monster.com": parse_monster_alert,
 }
 
+# Canonical label per sender — health rows key on label (one-per-parser, not per-address).
+# Both LinkedIn addresses map to a single "linkedin" label. Every SENDER_PARSERS key
+# must appear here (enforced by tests/test_autoheal_email_capture.py).
+SENDER_LABEL: dict[str, str] = {
+    "jobalerts-noreply@linkedin.com": "linkedin",
+    "jobs-noreply@linkedin.com": "linkedin",
+    "noreply@glassdoor.com": "glassdoor",
+    "alert@indeed.com": "indeed",
+    "donotreply@match.indeed.com": "indeed",
+    "no-reply@ziprecruiter.com": "ziprecruiter",
+    "no-reply@us.greenhouse-jobs.com": "greenhouse",
+    "hello@trueup.io": "trueup",
+    "monster@notifications.monster.com": "monster",
+}
+
 TOKEN_PATH = "token.json"
 SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
 
@@ -108,6 +123,7 @@ class GmailSource:
     def __init__(self, token_path: str = TOKEN_PATH):
         self.service = self._authenticate(token_path)
         self.parse_failures: list[dict] = []
+        self.extraction_records: list[dict] = []
 
     def _authenticate(self, token_path: str):
         """Load saved OAuth credentials and build the Gmail service."""
@@ -176,6 +192,13 @@ class GmailSource:
                     newly_processed.append(msg_id)
                     jobs = parser_fn(body, email_date)
                     all_jobs.extend(jobs)
+                    self.extraction_records.append(
+                        {
+                            "label": SENDER_LABEL.get(sender, sender),
+                            "raw_text": body,
+                            "job_count": len(jobs),
+                        }
+                    )
 
                     if _should_archive_failure(body, jobs, sender):
                         _archive_parse_failure(sender, body)

@@ -133,8 +133,10 @@ def test_email_fixtures_do_not_contain_obvious_pii():
             if line.strip().startswith("To:"):
                 pytest.fail(f"Fixture contains To: header: {fixture_path}")
 
-        # Check for personal identifiers
-        denylist = ["senki", "senkichi", "@users.noreply.github.com"]
+        # Check for personal identifiers (kept in sync with job_finder/sources/_pii_scrub.py)
+        from job_finder.sources._pii_scrub import DEFAULT_DENYLIST
+
+        denylist = list(DEFAULT_DENYLIST)
         for identifier in denylist:
             if identifier.lower() in content.lower():
                 pytest.fail(
