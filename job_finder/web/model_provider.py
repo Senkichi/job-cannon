@@ -247,12 +247,14 @@ def resolve_provider_config(tier: str, config: dict) -> dict:
 _SUPPORTED_PROVIDERS: frozenset[str] = frozenset(
     {
         "anthropic",
+        "cerebras",
+        "claude_code_cli",
         "gemini",
+        "gemini_cli",
+        "groq",
+        "local_bundled",
         "ollama",
         "openrouter",
-        "claude_code_cli",
-        "gemini_cli",
-        "local_bundled",
     }
 )
 
@@ -524,6 +526,14 @@ def _make_adapter(
         from job_finder.web.providers.openrouter_provider import OpenRouterProvider
 
         return OpenRouterProvider(config=config)
+    if provider_name == "groq":
+        from job_finder.web.providers.groq_provider import GroqProvider
+
+        return GroqProvider(config=config)
+    if provider_name == "cerebras":
+        from job_finder.web.providers.cerebras_provider import CerebrasProvider
+
+        return CerebrasProvider(config=config)
     if provider_name == "claude_code_cli":
         from job_finder.web.providers.claude_code_cli import ClaudeCodeCLIProvider
 

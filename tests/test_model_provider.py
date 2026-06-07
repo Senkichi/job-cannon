@@ -1063,6 +1063,21 @@ from job_finder.web.model_provider import (
 )
 
 
+def test_provider_defaults_subset_of_supported_providers():
+    """Invariant: set(_PROVIDER_DEFAULTS) <= _SUPPORTED_PROVIDERS.
+
+    Every provider that has a default model mapping must also be registered in
+    ``_SUPPORTED_PROVIDERS`` so that ``_make_adapter()`` can dispatch it.
+    Violating this invariant means the provider appears in routing defaults but
+    has no adapter — the cascade silently skips it on every call.
+    """
+    missing = set(_PROVIDER_DEFAULTS) - _SUPPORTED_PROVIDERS
+    assert not missing, (
+        f"Providers in _PROVIDER_DEFAULTS but not in _SUPPORTED_PROVIDERS: {missing}. "
+        f"Add the provider to _SUPPORTED_PROVIDERS and implement an adapter."
+    )
+
+
 def test_is_supported_provider_name_typo():
     assert is_supported_provider_name("gorq") is False
 
