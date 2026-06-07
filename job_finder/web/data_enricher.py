@@ -37,13 +37,12 @@ Exports:
     run_enrichment_backfill: Backfill unenriched jobs from the DB.
 """
 
-import json
 import logging
 from typing import Any
 
 from job_finder.config import JD_STORAGE_MAX_CHARS
 from job_finder.db._jd_full import set_jd_full as _set_jd_full
-from job_finder.web.enrichment_sources import merge_apply_urls
+from job_finder.web.enrichment_sources import merge_apply_urls, parse_source_urls
 from job_finder.web.enrichment_tiers import (
     fetch_ddg_jds,
     fetch_direct_jd,
@@ -123,6 +122,11 @@ FIELD_TIER_CEILINGS = {
 # but already filters auth walls).
 MIN_FETCH_JD_CHARS = 200
 
+# Minimum character length for jd_full to be considered a real job description
+# (not a stub title-restatement). Used by _is_stub_jd() to gate _find_missing_fields
+# and _resolve_from_fragments so the pipeline escalates past title-only stubs.
+_MIN_JD_LENGTH = 200
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -201,7 +205,7 @@ def enrich_job(
         if start_idx <= TIER_ORDER.index("free"):
             try:
                 # Sub-tier A: Direct URL fetch
-                source_urls = _parse_source_urls(job_row.get("source_urls"))
+                source_urls = parse_source_urls(job_row.get("source_urls"))
                 for url in source_urls:
                     jd_text = fetch_direct_jd(url)
                     if jd_text:
@@ -411,17 +415,38 @@ def run_enrichment_backfill(
 # ---------------------------------------------------------------------------
 
 
+def _is_stub_jd(jd_text: str | None, title: str = "", company: str = "") -> bool:
+    """Return True if jd_text is a stub (falsy or title-restatement < _MIN_JD_LENGTH chars).
+
+    Stubs are treated as missing jd_full so the pipeline escalates to richer tiers
+    that may provide a real job description, rather than persisting noise.
+
+    Args:
+        jd_text: The jd_full text to check.
+        title:   Job title (carried for API symmetry; unused in current check).
+        company: Company name (carried for API symmetry; unused in current check).
+    """
+    if not jd_text:
+        return True
+    return len(jd_text.strip()) < _MIN_JD_LENGTH
+
+
 def _find_missing_fields(job_row: dict) -> list:
     """Return list of missing scoring-relevant field names.
 
     A job needs enrichment if any of these are missing:
-    - jd_full: full job description (needed for AI scoring)
+    - jd_full: full job description (needed for AI scoring). Stubs (title
+      restatements shorter than _MIN_JD_LENGTH chars) are treated as missing.
     - salary_min: minimum salary
 
     Returns empty list if all fields are present (no enrichment needed).
     """
     missing = []
-    if not job_row.get("jd_full"):
+    if _is_stub_jd(
+        job_row.get("jd_full"),
+        job_row.get("title", ""),
+        job_row.get("company", ""),
+    ):
         missing.append("jd_full")
     if job_row.get("salary_min") is None:
         missing.append("salary_min")
@@ -454,24 +479,6 @@ def _start_tier_index(current_tier: str | None) -> int:
         return 0
 
 
-def _parse_source_urls(source_urls_json: str | None) -> list:
-    """Parse source_urls JSON field into a list of URL strings.
-
-    Args:
-        source_urls_json: JSON string like '["https://..."]' or None.
-
-    Returns:
-        List of URL strings. Empty list if None or unparseable.
-    """
-    if not source_urls_json:
-        return []
-    try:
-        urls = json.loads(source_urls_json)
-        return [u for u in urls if isinstance(u, str)]
-    except (json.JSONDecodeError, TypeError):
-        return []
-
-
 def _resolve_from_fragments(
     fragments: dict,
     missing: list,
@@ -482,6 +489,10 @@ def _resolve_from_fragments(
     Looks for direct matches: fragments['jd_full'] -> jd_full,
     fragments['url_jd'] -> jd_full, fragments['salary_min'] -> salary_min, etc.
 
+    Rejects stub jd_full values (title restatements < _MIN_JD_LENGTH chars) via
+    _is_stub_jd() — same gate as _find_missing_fields() — so stubs from cheaper
+    tiers don't block escalation to richer tiers that may have the real JD.
+
     Args:
         fragments: Dict of collected data from free-tier sources.
         missing: List of field names that are still missing.
@@ -490,13 +501,21 @@ def _resolve_from_fragments(
     Returns:
         Dict of {field: value} for fields that fragments can satisfy.
     """
+    title = job_row.get("title", "")
+    company = job_row.get("company", "")
     enriched = {}
     for field in missing:
         # Direct key match
         if field in fragments and fragments[field] is not None:
+            # Reject stub jd_full values — treat them as not found so the
+            # pipeline can escalate to a tier with a real description.
+            if field == "jd_full" and _is_stub_jd(fragments[field], title, company):
+                continue
             enriched[field] = fragments[field]
         # url_jd maps to jd_full
         elif field == "jd_full" and fragments.get("url_jd"):
+            if _is_stub_jd(fragments["url_jd"], title, company):
+                continue
             enriched["jd_full"] = fragments["url_jd"]
 
     return _filter_non_none(enriched)
