@@ -577,7 +577,7 @@ def register_health_heartbeat(scheduler, app) -> None:
 
 
 def register_all_jobs(scheduler, app) -> None:
-    """Register all 15 scheduled jobs on the given scheduler instance.
+    """Register all 14 scheduled jobs on the given scheduler instance.
 
     Order matches the legacy inline shape so any future re-introduction of
     cross-job ordering invariants (e.g., agentic_backfill must register

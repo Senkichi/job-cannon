@@ -94,14 +94,14 @@ class UpsertResult:
 
 
 # ---------------------------------------------------------------------------
-# IngestionRejected — scaffolding (activates in Phase 47.04 after m078)
+# IngestionRejected — raised by upsert_job when an m078 contract trigger (or the I-11 UNIQUE index) rejects a write.
 # ---------------------------------------------------------------------------
 
 
 class IngestionRejected(Exception):
     """Raised when a DB constraint trigger rejects a write.
 
-    Activated in Phase 47.04: a ``sqlite3.IntegrityError`` from an m078
+    A ``sqlite3.IntegrityError`` from an m078
     trigger ``RAISE(ABORT, 'I-NN: ...')`` (or the I-11 UNIQUE index) is caught
     in ``upsert_job`` and re-raised as ``IngestionRejected`` carrying the
     invariant name parsed from the error message.
