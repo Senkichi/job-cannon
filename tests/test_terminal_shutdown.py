@@ -260,7 +260,7 @@ def test_console_ctrl_handler_lets_ctrl_c_fall_through():
 
     captured_handler: list = []
 
-    def _capture_set(handler, add):  # noqa: ARG001
+    def _capture_set(handler, add):
         captured_handler.append(handler)
         return None  # do not actually register during the test
 
