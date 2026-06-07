@@ -30,6 +30,7 @@ from flask import (
 )
 
 from job_finder.json_utils import utc_now_iso
+from job_finder.web.ats_platforms import NON_SCANNABLE_PLATFORMS
 from job_finder.web.ats_prober import probe_single_company
 from job_finder.web.ats_scanner import probe_ats_slugs, run_ats_scan
 from job_finder.web.db_helpers import (
@@ -222,6 +223,7 @@ def expand(company_id):
         jobs=jobs,
         scan_history=scan_history,
         research=research,
+        ats_not_scannable=(company["ats_platform"] or "").lower() in NON_SCANNABLE_PLATFORMS,
     )
 
 
@@ -375,6 +377,8 @@ def update_slug(company_id):
             jobs=[],
             scan_history=[],
             research=None,
+            ats_not_scannable=(unchanged_company["ats_platform"] or "").lower()
+            in NON_SCANNABLE_PLATFORMS,
         )
 
     # Reload company data
@@ -417,6 +421,8 @@ def update_slug(company_id):
         jobs=jobs,
         scan_history=scan_history,
         research=research,
+        ats_not_scannable=(updated_company["ats_platform"] or "").lower()
+        in NON_SCANNABLE_PLATFORMS,
     )
 
 

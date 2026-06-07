@@ -436,3 +436,29 @@ class TestDispatcherWiring:
                 assert _verify_live(platform, "any") is True
             with patch(probe_target, return_value=False):
                 assert _verify_live(platform, "any") is False
+
+
+# ---------------------------------------------------------------------------
+# NON_SCANNABLE_PLATFORMS invariants (#167)
+# ---------------------------------------------------------------------------
+
+
+class TestNonScannablePlatformsConstant:
+    """NON_SCANNABLE_PLATFORMS is a frozenset, contains jobvite, and is a
+    subset of registered scanner names (no phantom entries)."""
+
+    def test_non_scannable_platforms_is_frozenset(self):
+        from job_finder.web.ats_platforms import NON_SCANNABLE_PLATFORMS
+
+        assert isinstance(NON_SCANNABLE_PLATFORMS, frozenset)
+
+    def test_jobvite_in_non_scannable_platforms(self):
+        from job_finder.web.ats_platforms import NON_SCANNABLE_PLATFORMS
+
+        assert "jobvite" in NON_SCANNABLE_PLATFORMS
+
+    def test_non_scannable_platforms_subset_of_registered_scanners(self):
+        """Every entry in NON_SCANNABLE_PLATFORMS must be a registered scanner name."""
+        from job_finder.web.ats_platforms import NON_SCANNABLE_PLATFORMS, SCANNERS_BY_NAME
+
+        assert set(SCANNERS_BY_NAME) >= NON_SCANNABLE_PLATFORMS
