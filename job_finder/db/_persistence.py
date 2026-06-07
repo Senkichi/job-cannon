@@ -98,6 +98,24 @@ def persist_job_expiry_state(
     raise last_err
 
 
+def persist_job_notes(conn: sqlite3.Connection, dedup_key: str, notes: str) -> None:
+    """Persist user-written notes for a job (single-column UPDATE).
+
+    Empty string is a valid value — it clears the column.  The caller is
+    responsible for length-capping before passing ``notes`` in.
+
+    Args:
+        conn: Open sqlite3 connection.
+        dedup_key: The job's primary key.
+        notes: Note text to persist (may be empty string to clear).
+    """
+    conn.execute(
+        "UPDATE jobs SET notes = ? WHERE dedup_key = ?",
+        (notes, dedup_key),
+    )
+    conn.commit()
+
+
 def update_pipeline_status(
     conn: sqlite3.Connection,
     dedup_key: str,

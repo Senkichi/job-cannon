@@ -258,12 +258,8 @@
         {% endif %}
       </div>
 
-      <!-- Notes textarea -->
-      <div class="bg-slate-800/40 rounded-lg border border-slate-700 p-3">
-        <h3 class="text-xs font-semibold text-slate-400 mb-2">Notes</h3>
-        <textarea class="w-full bg-slate-900 text-slate-300 text-sm rounded border border-slate-700 p-3 focus:outline-none focus:border-indigo-500 min-h-[80px] resize-y"
-                  placeholder="Add notes about this job...">{{ job.notes or "" }}</textarea>
-      </div>
+      <!-- Notes panel -->
+      {% include "jobs/_notes_panel.html" %}
 
       <!-- Action bar: Collapse Full Detail button (bottom) -->
       <div class="flex items-center gap-3">

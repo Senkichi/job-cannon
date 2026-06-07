@@ -3262,3 +3262,103 @@ class TestCompositeScoreCell:
         cell = html[idx : idx + 1500]
         assert "Strength:" not in cell
         assert "Gap:" not in cell
+
+
+class TestSaveNotes:
+    """Tests for POST /jobs/<key>/notes route."""
+
+    def test_save_notes_returns_200(self, jobs_client):
+        response = jobs_client.post(
+            "/jobs/acme%7Cdata-scientist%7Cremote/notes",
+            data={"notes": "Looks like a good fit."},
+        )
+        assert response.status_code == 200
+
+    def test_save_notes_writes_to_db(self, jobs_client, tmp_db_path):
+        import sqlite3
+
+        jobs_client.post(
+            "/jobs/acme%7Cdata-scientist%7Cremote/notes",
+            data={"notes": "Interview scheduled for Monday."},
+        )
+        conn = sqlite3.connect(tmp_db_path)
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT notes FROM jobs WHERE dedup_key = ?",
+            ("acme|data-scientist|remote",),
+        ).fetchone()
+        conn.close()
+        assert row["notes"] == "Interview scheduled for Monday."
+
+    def test_save_notes_empty_clears_column(self, jobs_client, tmp_db_path):
+        import sqlite3
+
+        # First write a non-empty value
+        jobs_client.post(
+            "/jobs/acme%7Cdata-scientist%7Cremote/notes",
+            data={"notes": "Some existing note."},
+        )
+        # Then clear it
+        response = jobs_client.post(
+            "/jobs/acme%7Cdata-scientist%7Cremote/notes",
+            data={"notes": ""},
+        )
+        assert response.status_code == 200
+        conn = sqlite3.connect(tmp_db_path)
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT notes FROM jobs WHERE dedup_key = ?",
+            ("acme|data-scientist|remote",),
+        ).fetchone()
+        conn.close()
+        # Empty string persisted (column cleared)
+        assert row["notes"] == "" or row["notes"] is None
+
+    def test_save_notes_caps_at_32000_chars(self, jobs_client, tmp_db_path):
+        import sqlite3
+
+        oversized = "x" * 40000
+        jobs_client.post(
+            "/jobs/acme%7Cdata-scientist%7Cremote/notes",
+            data={"notes": oversized},
+        )
+        conn = sqlite3.connect(tmp_db_path)
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT notes FROM jobs WHERE dedup_key = ?",
+            ("acme|data-scientist|remote",),
+        ).fetchone()
+        conn.close()
+        assert len(row["notes"]) == 32000
+
+    def test_save_notes_logs_edit_notes_activity(self, jobs_client, tmp_db_path):
+        import sqlite3
+
+        jobs_client.post(
+            "/jobs/acme%7Cdata-scientist%7Cremote/notes",
+            data={"notes": "Note for activity log test."},
+        )
+        conn = sqlite3.connect(tmp_db_path)
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT action FROM user_activity WHERE entity_id = ? ORDER BY id DESC LIMIT 1",
+            ("acme|data-scientist|remote",),
+        ).fetchone()
+        conn.close()
+        assert row is not None
+        assert row["action"] == "edit_notes"
+
+    def test_save_notes_404_on_unknown_key(self, jobs_client):
+        response = jobs_client.post(
+            "/jobs/no-such-key/notes",
+            data={"notes": "Should 404."},
+        )
+        assert response.status_code == 404
+
+    def test_save_notes_fragment_contains_name_notes(self, jobs_client):
+        """Returned HTML fragment must contain the wired textarea (name=notes)."""
+        response = jobs_client.post(
+            "/jobs/acme%7Cdata-scientist%7Cremote/notes",
+            data={"notes": "Check fragment."},
+        )
+        assert b'name="notes"' in response.data

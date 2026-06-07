@@ -1,0 +1,30 @@
+{# Notes panel partial — shared by _row_detail.html (inline expand) and detail.html (standalone page).
+   Persists via POST /<dedup_key>/notes; swaps itself in-place via HTMX outerHTML.
+   Uses a self-targeting div id so the swap works whether rendered in a table row
+   or on a standalone detail page. #}
+{% set key_safe = job.dedup_key | urlencode | replace('%', '') %}
+<div id="notes-panel-{{ key_safe }}" class="bg-slate-800/40 rounded-lg border border-slate-700 p-3">
+  <h3 class="text-xs font-semibold text-slate-400 mb-2">Notes</h3>
+  {% if notes_saved %}
+    <p class="text-xs text-emerald-400 mb-2">Notes saved.</p>
+  {% endif %}
+  <form>
+    <textarea name="notes"
+              class="w-full bg-slate-900 text-slate-300 text-sm rounded border border-slate-700 p-3 focus:outline-none focus:border-indigo-500 min-h-[80px] resize-y"
+              placeholder="Add notes about this job...">{{ job.notes or "" }}</textarea>
+    <div class="mt-2">
+      <button type="button"
+              hx-post="{{ url_for('jobs.save_notes', dedup_key=job.dedup_key) }}"
+              hx-include="closest form"
+              hx-target="#notes-panel-{{ key_safe }}"
+              hx-swap="outerHTML"
+              hx-disable-elt="this"
+              class="px-3 py-1 bg-indigo-600 hover:bg-indigo-500 text-white text-xs rounded transition-colors disabled:opacity-50">
+        Save Notes
+        <span class="htmx-indicator ml-1 inline-flex items-center gap-1">
+          <span class="inline-block w-3 h-3 border-2 border-slate-400 border-t-transparent rounded-full animate-spin"></span>
+        </span>
+      </button>
+    </div>
+  </form>
+</div>
