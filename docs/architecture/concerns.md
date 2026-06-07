@@ -221,7 +221,7 @@ old module exposed.
   `_SUB_SCORE_KEYS`. Pure scoring-rule logic. Zero DB side-effects.
 - `_persistence.py` — write paths: `log_run`, `persist_job_assessment`
   (depends on `_classification`), `persist_job_expiry_state`,
-  `persist_job_archetype`, `update_pipeline_status`.
+  `update_pipeline_status`.
 - `_jobs.py` — job CRUD: `upsert_job` (still D=21 — complexity reduction is
   out of scope for S7d), `get_job`, `merge_description`, `load_job_context`.
   Owns the canonical `JOBS_ALL_COLUMNS` projection re-imported by

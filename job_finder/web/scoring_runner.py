@@ -32,8 +32,8 @@ def run_scoring(
     config: dict,
     db_path: str,
 ) -> dict:
-    """Unified v3.0 scoring runner -- replaces run_haiku_scoring +
-    run_sonnet_evaluation once Plan 4 lands.
+    """Unified v3.0 scoring runner -- replaced run_haiku_scoring +
+    run_sonnet_evaluation (Plan 4 Commit E removed the legacy two-tier path).
 
     For each dedup_key in ``new_job_keys``:
 
