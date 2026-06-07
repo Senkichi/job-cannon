@@ -14,6 +14,7 @@ from job_finder.db import (
     get_recent_pipeline_events,
     get_recent_runs,
 )
+from job_finder.web.autoheal.health_monitor import degraded_sources
 from job_finder.web.claude_client import get_cost_stats, is_anthropic_available
 from job_finder.web.db_helpers import get_db
 from job_finder.web.exclusion_filter import count_scorable
@@ -121,6 +122,11 @@ def _cached_tier_available(tier: str, config: dict) -> bool:
     return result
 
 
+def _get_degraded_sources_context(conn) -> dict:
+    """Return dict with list of currently-degraded parser sources (dashboard widget)."""
+    return {"degraded": degraded_sources(conn)}
+
+
 def _get_quick_actions_context(conn, config):
     """Build template context for quick actions section.
 
@@ -187,6 +193,7 @@ def index():
         "dashboard/index.html",
         **stats_ctx,
         **qa_ctx,
+        **_get_degraded_sources_context(conn),
         recent_runs=recent_runs,
         user_activity=user_activity,
         pipeline_summary=pipeline_summary,
@@ -332,4 +339,20 @@ def cost_detail():
         "dashboard/_cost_detail.html",
         cost_stats=cost_stats,
         budget_cap=budget_cap,
+    )
+
+
+@dashboard_bp.route("/degraded-sources", strict_slashes=False)
+def degraded_sources_fragment():
+    """HTMX fragment — parser-health widget showing currently-degraded sources.
+
+    Non-HTMX direct browser hits redirect to the dashboard index so the widget
+    is never rendered as a bare standalone page.
+    """
+    if not request.headers.get("HX-Request"):
+        return redirect(url_for("dashboard.index"))
+    conn = get_db()
+    return render_template(
+        "dashboard/_degraded_sources.html",
+        **_get_degraded_sources_context(conn),
     )

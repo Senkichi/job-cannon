@@ -380,8 +380,8 @@ class TestEnrichJobTierOrder:
             patch("job_finder.web.data_enricher.search_duckduckgo") as mock_ddg,
             patch("job_finder.web.data_enricher.search_serpapi") as mock_serp,
         ):
-            # Free tier URL fetch succeeds with JD
-            mock_fetch.return_value = "Full job description from direct URL fetch."
+            # Free tier URL fetch succeeds with a real-length JD (>= 200 chars)
+            mock_fetch.return_value = "Full job description from direct URL fetch. " * 5
             result = enrich_job(sparse_job_row, serpapi_key="key")
 
         mock_fetch.assert_called_once()
@@ -479,7 +479,8 @@ class TestEnrichJobTierOrder:
             patch("job_finder.web.data_enricher.search_duckduckgo") as mock_ddg,
         ):
             mock_fetch.return_value = None
-            mock_ats.return_value = {"jd_full": "ATS API returned full JD."}
+            # ATS result must be >= 200 chars to pass the stub-JD gate
+            mock_ats.return_value = {"jd_full": "ATS API returned full JD. " * 8}
             mock_ddg.return_value = None
 
             result = enrich_job(sparse_job_row, conn=temp_db)
@@ -510,7 +511,8 @@ class TestEnrichJobTierOrder:
         ):
             mock_fetch.return_value = None
             mock_ats.return_value = {}
-            mock_scrape.return_value = {"jd_full": "Careers page JD."}
+            # Careers JD must be >= 200 chars to pass the stub-JD gate
+            mock_scrape.return_value = {"jd_full": "Careers page JD. " * 13}
             mock_ddg.return_value = None
 
             result = enrich_job(sparse_job_row, conn=temp_db)
@@ -588,8 +590,9 @@ class TestEnrichmentTierPersistence:
         )
         temp_db.commit()
 
+        mock_jd = "Full job description from direct URL. " * 6  # 228 chars — passes stub gate
         with patch("job_finder.web.data_enricher.fetch_direct_jd") as mock_fetch:
-            mock_fetch.return_value = "Full job description from direct URL."
+            mock_fetch.return_value = mock_jd
 
             result = enrich_job(sparse_job_row, conn=temp_db)
 
@@ -601,7 +604,7 @@ class TestEnrichmentTierPersistence:
 
         # Both fields should be set together
         assert row is not None
-        assert row["jd_full"] == "Full job description from direct URL."
+        assert row["jd_full"] == mock_jd
         assert row["enrichment_tier"] == "free"
 
     def test_resumes_from_next_tier(self, sparse_job_row, temp_db):
@@ -1714,3 +1717,145 @@ class TestRunEnrichmentBackfillSelect:
             "needs-sal-new-2",
             "needs-both-3",
         ]
+
+
+# ---------------------------------------------------------------------------
+# Stub-JD gate: _is_stub_jd, _find_missing_fields, _resolve_from_fragments
+# ---------------------------------------------------------------------------
+
+
+class TestStubJdGate:
+    """Verify that stub JDs (title-restatements < _MIN_JD_LENGTH chars) are
+    rejected by _find_missing_fields and _resolve_from_fragments.
+
+    This guards the stub-JD gating ported from the deleted
+    enrichment_sources.{find_missing_fields,resolve_from_fragments} into the
+    live data_enricher private helpers.
+
+    Acceptance criterion: a fragment whose jd_full is a title-restatement stub
+    must NOT be persisted — the helpers must treat it as if jd_full is missing
+    so the pipeline escalates to a richer tier.
+    """
+
+    _STUB = "Software Engineer at Acme Corp"  # 30 chars — well below 200
+    _REAL = "x" * 201  # 201 chars — above the 200-char threshold
+
+    # ------------------------------------------------------------------ #
+    # _is_stub_jd
+    # ------------------------------------------------------------------ #
+
+    def test_is_stub_jd_none_is_stub(self):
+        """None jd_text → stub."""
+        from job_finder.web.data_enricher import _is_stub_jd
+
+        assert _is_stub_jd(None) is True
+
+    def test_is_stub_jd_empty_is_stub(self):
+        """Empty string → stub."""
+        from job_finder.web.data_enricher import _is_stub_jd
+
+        assert _is_stub_jd("") is True
+
+    def test_is_stub_jd_short_is_stub(self):
+        """Text shorter than _MIN_JD_LENGTH after strip → stub."""
+        from job_finder.web.data_enricher import _is_stub_jd
+
+        assert _is_stub_jd(self._STUB) is True
+
+    def test_is_stub_jd_exactly_200_is_not_stub(self):
+        """Text of exactly 200 chars → NOT a stub (threshold is < 200)."""
+        from job_finder.web.data_enricher import _is_stub_jd
+
+        assert _is_stub_jd("x" * 200) is False
+
+    def test_is_stub_jd_real_jd_not_stub(self):
+        """Text of 201+ chars → NOT a stub."""
+        from job_finder.web.data_enricher import _is_stub_jd
+
+        assert _is_stub_jd(self._REAL) is False
+
+    def test_is_stub_jd_whitespace_only_is_stub(self):
+        """Whitespace-only (collapses to empty on strip) → stub."""
+        from job_finder.web.data_enricher import _is_stub_jd
+
+        assert _is_stub_jd("   \n\t  ") is True
+
+    # ------------------------------------------------------------------ #
+    # _find_missing_fields — stub JD treated as missing
+    # ------------------------------------------------------------------ #
+
+    def test_find_missing_fields_stub_jd_is_missing(self):
+        """A stub jd_full (< 200 chars) is treated as missing."""
+        from job_finder.web.data_enricher import _find_missing_fields
+
+        row = {"jd_full": self._STUB, "title": "SWE", "company": "Acme", "salary_min": 100_000}
+        assert "jd_full" in _find_missing_fields(row)
+
+    def test_find_missing_fields_real_jd_not_missing(self):
+        """A real jd_full (>= 200 chars) is NOT treated as missing."""
+        from job_finder.web.data_enricher import _find_missing_fields
+
+        row = {"jd_full": self._REAL, "title": "SWE", "company": "Acme", "salary_min": 100_000}
+        assert "jd_full" not in _find_missing_fields(row)
+
+    def test_find_missing_fields_none_jd_is_missing(self):
+        """None jd_full → missing (baseline regression guard)."""
+        from job_finder.web.data_enricher import _find_missing_fields
+
+        row = {"jd_full": None, "salary_min": 100_000}
+        assert "jd_full" in _find_missing_fields(row)
+
+    # ------------------------------------------------------------------ #
+    # _resolve_from_fragments — stub fragments rejected
+    # ------------------------------------------------------------------ #
+
+    def test_resolve_rejects_stub_jd_fragment(self):
+        """A stub jd_full in fragments is NOT returned."""
+        from job_finder.web.data_enricher import _resolve_from_fragments
+
+        fragments = {"jd_full": self._STUB}
+        result = _resolve_from_fragments(
+            fragments, ["jd_full"], {"title": "SWE", "company": "Acme"}
+        )
+        assert "jd_full" not in result
+
+    def test_resolve_rejects_stub_url_jd_fragment(self):
+        """A stub url_jd (< 200 chars) is NOT mapped to jd_full."""
+        from job_finder.web.data_enricher import _resolve_from_fragments
+
+        fragments = {"url_jd": self._STUB}
+        result = _resolve_from_fragments(
+            fragments, ["jd_full"], {"title": "SWE", "company": "Acme"}
+        )
+        assert "jd_full" not in result
+
+    def test_resolve_accepts_real_jd_fragment(self):
+        """A real jd_full (>= 200 chars) IS returned."""
+        from job_finder.web.data_enricher import _resolve_from_fragments
+
+        fragments = {"jd_full": self._REAL}
+        result = _resolve_from_fragments(
+            fragments, ["jd_full"], {"title": "SWE", "company": "Acme"}
+        )
+        assert result.get("jd_full") == self._REAL
+
+    def test_resolve_accepts_real_url_jd_fragment(self):
+        """A real url_jd (>= 200 chars) IS mapped to jd_full."""
+        from job_finder.web.data_enricher import _resolve_from_fragments
+
+        fragments = {"url_jd": self._REAL}
+        result = _resolve_from_fragments(
+            fragments, ["jd_full"], {"title": "SWE", "company": "Acme"}
+        )
+        assert result.get("jd_full") == self._REAL
+
+    def test_resolve_stub_does_not_block_non_jd_fields(self):
+        """Stub jd rejection does not prevent other fields (salary_min) from resolving."""
+        from job_finder.web.data_enricher import _resolve_from_fragments
+
+        fragments = {"jd_full": self._STUB, "salary_min": 120_000}
+        result = _resolve_from_fragments(
+            fragments, ["jd_full", "salary_min"], {"title": "SWE", "company": "Acme"}
+        )
+        assert "jd_full" not in result
+        assert result.get("salary_min") == 120_000
