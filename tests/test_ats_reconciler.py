@@ -4,14 +4,15 @@ Covers:
 - Posting-ID extraction for all 5 supported platforms.
 - Set-diff happy path: tracked job's URL matches live board → LIVE + last_seen refresh.
 - Set-diff expired path: tracked job's ID missing from live board → EXPIRED + archive.
-- Safety guards: scan-empty, scan-exception, unsupported-platform, Workday truncation,
+- Safety guards: scan-empty, scan-exception, unsupported-platform,
+  Workday completeness gate (incomplete board → skip, no writes),
   scan returns postings but none parseable.
 - reconcile_all_companies orchestrator aggregates per-company results.
 """
 
 import sqlite3
 from datetime import UTC, datetime
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 # ---------------------------------------------------------------------------
 # _extract_posting_id
@@ -349,24 +350,23 @@ class TestReconcileCompany:
         assert result["skipped"] is True
         assert result["skip_reason"] == "unsupported_platform"
 
-    def test_workday_is_unsupported_platform(self, tmp_db_path):
-        """Workday is intentionally excluded from batch reconciliation
-        because scan_workday's pagination can return partial results
-        (observed returning only 40 postings for Walmart during e2e),
-        which would cause false-expires. Workday jobs must fall through
-        to Phase C per-URL HTTP GET. See _RECONCILABLE_PLATFORMS note in
-        ats_reconciler.py.
-        """
+    @patch("job_finder.web.ats_reconciler._workday_live_id_set")
+    def test_workday_incomplete_board_skips_no_writes(self, mock_wday, tmp_db_path):
+        """Workday board that can't be fully paginated (total > cap) skips to avoid
+        false-expire.  Zero expiry writes must be made for any tracked job."""
         from job_finder.web.ats_reconciler import reconcile_company
         from job_finder.web.db_helpers import standalone_connection
 
-        url = "https://walmart.wd5.myworkdayjobs.com/en-US/WalmartExternal/job/R-1"
-        _setup_company_and_jobs(
+        url = (
+            "https://walmart.wd5.myworkdayjobs.com/en-US/WalmartExternal/job/Software-Engineer_R-1"
+        )
+        _, dedup_keys = _setup_company_and_jobs(
             tmp_db_path,
             platform="workday",
             slug="walmart.wd5/WalmartExternal",
             job_urls=[url],
         )
+        mock_wday.return_value = (set(), False)  # board incomplete
 
         with standalone_connection(tmp_db_path) as conn:
             company_row = dict(
@@ -375,8 +375,135 @@ class TestReconcileCompany:
             result = reconcile_company(conn, company_row)
 
         assert result["skipped"] is True
-        assert result["skip_reason"] == "unsupported_platform"
+        assert result["skip_reason"] == "workday_incomplete"
+        assert result["expired"] == 0  # false-expire guard held
+
+        conn = sqlite3.connect(tmp_db_path)
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT expiry_status FROM jobs WHERE dedup_key = ?",
+            (dedup_keys[0],),
+        ).fetchone()
+        conn.close()
+        assert row["expiry_status"] is None  # no write happened
+
+    @patch("job_finder.web.ats_platforms._platforms_workday.requests.post")
+    def test_workday_over_cap_total_skips_via_completeness_gate(self, mock_post, tmp_db_path):
+        """End-to-end: CXS returns total=500 (> 200 cap) → complete=False →
+        reconcile skips with 'workday_incomplete', no DB writes."""
+        from job_finder.web.ats_reconciler import reconcile_company
+        from job_finder.web.db_helpers import standalone_connection
+
+        url = "https://walmart.wd5.myworkdayjobs.com/en-US/WalmartExternal/job/R-1"
+        _, dedup_keys = _setup_company_and_jobs(
+            tmp_db_path,
+            platform="workday",
+            slug="walmart.wd5/WalmartExternal",
+            job_urls=[url],
+        )
+        mock_resp = MagicMock(status_code=200)
+        mock_resp.json.return_value = {
+            "total": 500,
+            "jobPostings": [
+                {"title": f"Job {i}", "externalPath": f"/job/Job-{i}_R-{i}"} for i in range(20)
+            ],
+        }
+        mock_post.return_value = mock_resp
+
+        with standalone_connection(tmp_db_path) as conn:
+            company_row = dict(
+                conn.execute("SELECT id, ats_platform, ats_slug FROM companies").fetchone()
+            )
+            result = reconcile_company(conn, company_row)
+
+        assert result["skipped"] is True
+        assert result["skip_reason"] == "workday_incomplete"
         assert result["expired"] == 0
+
+        conn = sqlite3.connect(tmp_db_path)
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT expiry_status FROM jobs WHERE dedup_key = ?",
+            (dedup_keys[0],),
+        ).fetchone()
+        conn.close()
+        assert row["expiry_status"] is None
+
+    @patch("job_finder.web.ats_reconciler._workday_live_id_set")
+    def test_workday_complete_board_expires_absentees_and_keeps_live(self, mock_wday, tmp_db_path):
+        """Complete Workday board: job present on board stays live; absentee expires."""
+        from job_finder.web.ats_reconciler import reconcile_company
+        from job_finder.web.db_helpers import standalone_connection
+
+        present_url = (
+            "https://walmart.wd5.myworkdayjobs.com/en-US/WalmartExternal/job/Present-Job_R-1"
+        )
+        absent_url = (
+            "https://walmart.wd5.myworkdayjobs.com/en-US/WalmartExternal/job/Absent-Job_R-2"
+        )
+        _, dedup_keys = _setup_company_and_jobs(
+            tmp_db_path,
+            platform="workday",
+            slug="walmart.wd5/WalmartExternal",
+            job_urls=[present_url, absent_url],
+        )
+        # Live board only includes Present-Job_R-1
+        mock_wday.return_value = ({"Present-Job_R-1"}, True)
+
+        with standalone_connection(tmp_db_path) as conn:
+            company_row = dict(
+                conn.execute("SELECT id, ats_platform, ats_slug FROM companies").fetchone()
+            )
+            result = reconcile_company(conn, company_row)
+
+        assert result["skipped"] is False
+        assert result["live"] == 1
+        assert result["expired"] == 1
+
+        conn = sqlite3.connect(tmp_db_path)
+        conn.row_factory = sqlite3.Row
+        rows = {
+            r["dedup_key"]: dict(r)
+            for r in conn.execute(
+                "SELECT dedup_key, expiry_status, pipeline_status FROM jobs"
+            ).fetchall()
+        }
+        conn.close()
+        assert rows[dedup_keys[0]]["expiry_status"] == "live"  # present → live
+        assert rows[dedup_keys[1]]["expiry_status"] == "expired"  # absent → expired
+        assert rows[dedup_keys[1]]["pipeline_status"] == "archived"
+
+    @patch("job_finder.web.ats_platforms._fetch_workday_description")
+    @patch("job_finder.web.ats_platforms._platforms_workday.requests.post")
+    def test_workday_reconcile_does_not_fetch_descriptions(
+        self, mock_post, mock_desc_fetch, tmp_db_path
+    ):
+        """Workday reconciliation uses the CXS list endpoint only —
+        per-job description GETs must NOT be issued during reconciliation."""
+        from job_finder.web.ats_reconciler import reconcile_company
+        from job_finder.web.db_helpers import standalone_connection
+
+        url = "https://walmart.wd5.myworkdayjobs.com/en-US/WalmartExternal/job/Present-Job_R-1"
+        _setup_company_and_jobs(
+            tmp_db_path,
+            platform="workday",
+            slug="walmart.wd5/WalmartExternal",
+            job_urls=[url],
+        )
+        mock_resp = MagicMock(status_code=200)
+        mock_resp.json.return_value = {
+            "total": 1,
+            "jobPostings": [{"title": "Present Job", "externalPath": "/job/Present-Job_R-1"}],
+        }
+        mock_post.return_value = mock_resp
+
+        with standalone_connection(tmp_db_path) as conn:
+            company_row = dict(
+                conn.execute("SELECT id, ats_platform, ats_slug FROM companies").fetchone()
+            )
+            reconcile_company(conn, company_row)
+
+        mock_desc_fetch.assert_not_called()
 
     @patch("job_finder.web.ats_reconciler.run_platform_scan")
     def test_scan_returns_postings_but_no_parseable_ids_skips(

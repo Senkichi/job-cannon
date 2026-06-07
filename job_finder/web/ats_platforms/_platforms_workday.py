@@ -190,17 +190,26 @@ def _parse_posted_date(value: str | None) -> datetime | None:
 # ---------------------------------------------------------------------------
 
 
-def _fetch_postings(slug: str) -> list[dict]:
-    """POST + paginate over Workday CXS list endpoint.
+def _fetch_postings_with_completeness(slug: str) -> tuple[list[dict], bool]:
+    """POST + paginate over Workday CXS list endpoint, tracking completeness.
 
-    Returns the raw posting list; description fetches happen later in
-    ``_posting_to_job`` so the title-match gate runs first and we only
-    pay for detail fetches on matched postings.
+    Returns ``(postings, complete)`` where ``complete`` is ``True`` only
+    when the board was **fully** fetched:
+
+    - First-page error (network / HTTP / JSON) → ``complete=False``.
+    - ``total > _MAX_RESULTS`` → ``complete=False`` (board too large to paginate).
+    - Pagination stops before ``total_fetched >= total`` → ``complete=False``.
+    - Genuine empty board (``total=0``) → ``complete=True``.
+
+    The completeness flag is the gate used by the ATS reconciler to decide
+    whether expiry-reconciliation is safe for a Workday tenant.  A warning
+    is logged whenever the board is incomplete so operators can see which
+    tenants exceed the pagination cap.
     """
     parts = slug.split("/", 1)
     if len(parts) != 2:
         logger.warning("scan_workday: invalid slug format '%s'", slug)
-        return []
+        return [], False
 
     subdomain, board = parts
     dot_wd_idx = subdomain.find(".wd")
@@ -210,6 +219,8 @@ def _fetch_postings(slug: str) -> list[dict]:
     offset = 0
     out: list[dict] = []
     total_fetched = 0
+    saw_total = False
+    total = 0
 
     while offset < _MAX_RESULTS:
         # Inter-page pacing — does not run on the first iteration; the wait
@@ -245,6 +256,18 @@ def _fetch_postings(slug: str) -> list[dict]:
             break
 
         total = data.get("total", 0)
+        saw_total = True
+
+        if total > _MAX_RESULTS:
+            logger.warning(
+                "scan_workday('%s') board has %d postings (cap %d) — incomplete; "
+                "reconciliation will skip this tenant",
+                slug,
+                total,
+                _MAX_RESULTS,
+            )
+            break
+
         postings = data.get("jobPostings", [])
         if not postings:
             break
@@ -263,7 +286,22 @@ def _fetch_postings(slug: str) -> list[dict]:
         if total_fetched >= total:
             break
 
-    return out
+    complete = saw_total and total_fetched >= total
+    return out, complete
+
+
+def _fetch_postings(slug: str) -> list[dict]:
+    """POST + paginate over Workday CXS list endpoint.
+
+    Returns the raw posting list; description fetches happen later in
+    ``_posting_to_job`` so the title-match gate runs first and we only
+    pay for detail fetches on matched postings.
+
+    Thin wrapper around :func:`_fetch_postings_with_completeness` — the
+    completeness signal is consumed by the ATS reconciler but is not
+    needed by the standard scanner flow.
+    """
+    return _fetch_postings_with_completeness(slug)[0]
 
 
 def _posting_to_job(posting: dict, _slug: str) -> dict:
