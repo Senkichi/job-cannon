@@ -31,6 +31,8 @@ from job_finder.web.claude_client import (  # noqa: F401 — record_cost + Budge
 
 logger = logging.getLogger(__name__)
 
+# "triage" is reserved/unwired — it has no production callers and is not part of any live
+# routing path. Kept cheap-to-preserve for a potential future product decision. Do not wire.
 _VALID_WORKLOADS: frozenset[str] = frozenset({"quick", "score", "triage"})
 
 # Workload-class model defaults per provider.
