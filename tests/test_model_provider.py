@@ -422,13 +422,21 @@ def test_call_model_skips_budget_for_free_provider(provider_name, model_name, tm
 def test_call_model_checks_budget_for_paid_provider(tmp_path):
     """call_model calls cost_gate when provider is paid (not in FREE_PROVIDERS).
 
-    Polish-review F2 (2026-05-26) moved anthropic into FREE_PROVIDERS, so the
-    representative paid provider here is cerebras (in the production fallback
-    chain; has a default score model unlike openrouter, which is config-only).
+    Polish-review F2 (2026-05-26) moved anthropic into FREE_PROVIDERS.  groq /
+    cerebras were removed from _PROVIDER_DEFAULTS (no adapter).  openrouter is
+    the only remaining provider in _SUPPORTED_PROVIDERS that is NOT in
+    FREE_PROVIDERS, so it stands in as the representative paid provider here.
+    Model is supplied via overrides since openrouter has no _PROVIDER_DEFAULTS entry.
     """
     from job_finder.web.model_provider import call_model
 
-    config = {"providers": {"primary": "cerebras", "fallback_chain": []}}
+    config = {
+        "providers": {
+            "primary": "openrouter",
+            "fallback_chain": [],
+            "overrides": {"openrouter": {"score": "deepseek/deepseek-v4-flash:free"}},
+        }
+    }
     conn = _migrated_conn(tmp_path)
 
     with (
@@ -437,7 +445,7 @@ def test_call_model_checks_budget_for_paid_provider(tmp_path):
         patch("job_finder.web.model_provider.record_cost"),
     ):
         mock_adapter = MagicMock()
-        mock_adapter.call.return_value = _make_result(provider="cerebras")
+        mock_adapter.call.return_value = _make_result(provider="openrouter")
         mock_make_adapter.return_value = mock_adapter
 
         call_model("score", "sys", [{"role": "user", "content": "hi"}], conn, config)
@@ -452,12 +460,19 @@ def test_call_model_raises_cascade_exhausted_when_budget_blocks_only_provider(tm
     BudgetExceededError directly was removed. The cascade skips over-budget
     providers — the canonical 'no provider' signal is exhaustion.)
 
-    Polish-review F2 (2026-05-26) — uses cerebras because anthropic moved
-    into FREE_PROVIDERS and never trips the budget gate any more.
+    Polish-review F2 (2026-05-26) — originally used cerebras; updated to
+    openrouter (the only non-FREE provider still in _SUPPORTED_PROVIDERS) after
+    groq/cerebras were removed from _PROVIDER_DEFAULTS pending adapter work.
     """
     from job_finder.web.model_provider import ProviderCascadeExhaustedError, call_model
 
-    config = {"providers": {"primary": "cerebras", "fallback_chain": []}}
+    config = {
+        "providers": {
+            "primary": "openrouter",
+            "fallback_chain": [],
+            "overrides": {"openrouter": {"score": "deepseek/deepseek-v4-flash:free"}},
+        }
+    }
     conn = _migrated_conn(tmp_path)
 
     with patch("job_finder.web.model_provider.cost_gate", return_value=False):
@@ -942,7 +957,9 @@ from job_finder.web.model_provider import (
 )
 
 
-def test_provider_defaults_contains_all_eight_providers():
+def test_provider_defaults_contains_all_shipped_cascade_providers():
+    # groq / cerebras removed: no adapter implementation yet — see _PROVIDER_DEFAULTS
+    # comment in model_provider.py for the full rationale.
     assert set(_PROVIDER_DEFAULTS) >= {
         "claude_code_cli",
         "anthropic",
@@ -950,8 +967,6 @@ def test_provider_defaults_contains_all_eight_providers():
         "gemini_cli",
         "ollama",
         "local_bundled",
-        "groq",
-        "cerebras",
     }
 
 
