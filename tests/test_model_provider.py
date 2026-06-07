@@ -1062,6 +1062,54 @@ from job_finder.web.model_provider import (
     tier_has_configured_provider,
 )
 
+# ---------------------------------------------------------------------------
+# Openrouter cascade-exclusion invariant (drift guard)
+# ---------------------------------------------------------------------------
+
+
+def test_openrouter_excluded_from_provider_defaults_invariant():
+    """Drift guard: openrouter is in _SUPPORTED_PROVIDERS (eval-judge dispatch)
+    but intentionally absent from _PROVIDER_DEFAULTS (not in prod cascade).
+
+    Prevents a well-meaning maintainer from adding an openrouter defaults entry
+    that would silently promote it into the production fallback chain.
+
+    See also: the NOTE comment above _PROVIDER_DEFAULTS in model_provider.py
+    and providers/openrouter_provider.py module docstring.
+
+    Note on subset direction: the full invariant set(_PROVIDER_DEFAULTS) <=
+    _SUPPORTED_PROVIDERS cannot be asserted here because groq/cerebras are
+    pre-registered in _PROVIDER_DEFAULTS as model-name placeholders ahead of
+    their adapter implementations, so they are not yet in _SUPPORTED_PROVIDERS.
+    Once those adapters ship and groq/cerebras are added to _SUPPORTED_PROVIDERS,
+    this test can be upgraded to the full subset assert.
+    """
+    assert "openrouter" in _SUPPORTED_PROVIDERS, (
+        "openrouter was removed from _SUPPORTED_PROVIDERS — update this guard "
+        "and providers/openrouter_provider.py to match the new registration state"
+    )
+    assert "openrouter" not in _PROVIDER_DEFAULTS, (
+        "openrouter must NOT be in _PROVIDER_DEFAULTS — it is eval-judge only "
+        "and excluded from the production cascade. "
+        "See providers/openrouter_provider.py and the NOTE comment above "
+        "_PROVIDER_DEFAULTS in model_provider.py."
+    )
+
+
+def test_provider_defaults_subset_of_supported_providers():
+    """Invariant: set(_PROVIDER_DEFAULTS) <= _SUPPORTED_PROVIDERS.
+
+    Every provider that has a default model mapping must also be registered in
+    ``_SUPPORTED_PROVIDERS`` so that ``_make_adapter()`` can dispatch it.
+    Violating this invariant means the provider appears in routing defaults but
+    has no adapter — the cascade silently skips it on every call.
+    """
+    missing = set(_PROVIDER_DEFAULTS) - _SUPPORTED_PROVIDERS
+    assert not missing, (
+        f"Providers in _PROVIDER_DEFAULTS but not in _SUPPORTED_PROVIDERS: {missing}. "
+        f"Add the provider to _SUPPORTED_PROVIDERS and implement an adapter."
+    )
+
 
 def test_is_supported_provider_name_typo():
     assert is_supported_provider_name("gorq") is False

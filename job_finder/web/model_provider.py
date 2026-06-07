@@ -39,6 +39,11 @@ _VALID_WORKLOADS: frozenset[str] = frozenset({"quick", "score", "triage"})
 # - triage: pre-scoring gate; uses the `quick` model with a triage-specific prompt.
 #
 # Triage entries are absent here (resolved as identical to `quick` at lookup time).
+#
+# NOTE: `openrouter` is intentionally absent from this dict. It is registered in
+# _SUPPORTED_PROVIDERS (so _make_adapter can dispatch it) but is eval-judge only —
+# it is not part of the production scoring cascade. Adding an openrouter entry here
+# would silently enable it as a cascade fallback. See providers/openrouter_provider.py.
 _PROVIDER_DEFAULTS: dict[str, dict[str, str]] = {
     "claude_code_cli": {"quick": "claude-haiku-4-5", "score": "claude-sonnet-4-6"},
     "anthropic": {"quick": "claude-haiku-4-5", "score": "claude-sonnet-4-6"},
@@ -247,12 +252,14 @@ def resolve_provider_config(tier: str, config: dict) -> dict:
 _SUPPORTED_PROVIDERS: frozenset[str] = frozenset(
     {
         "anthropic",
+        "cerebras",
+        "claude_code_cli",
         "gemini",
+        "gemini_cli",
+        "groq",
+        "local_bundled",
         "ollama",
         "openrouter",
-        "claude_code_cli",
-        "gemini_cli",
-        "local_bundled",
     }
 )
 
@@ -524,6 +531,14 @@ def _make_adapter(
         from job_finder.web.providers.openrouter_provider import OpenRouterProvider
 
         return OpenRouterProvider(config=config)
+    if provider_name == "groq":
+        from job_finder.web.providers.groq_provider import GroqProvider
+
+        return GroqProvider(config=config)
+    if provider_name == "cerebras":
+        from job_finder.web.providers.cerebras_provider import CerebrasProvider
+
+        return CerebrasProvider(config=config)
     if provider_name == "claude_code_cli":
         from job_finder.web.providers.claude_code_cli import ClaudeCodeCLIProvider
 

@@ -228,9 +228,6 @@ scoring:
 #   ollama | anthropic | gemini | local_bundled |
 #   gemini_cli | claude_code_cli | openrouter
 #
-# Note: groq and cerebras adapters are aspirational / not yet shipped.
-# Including them in fallback_chain produces a ValueError warning on every
-# scoring call — omit them until the adapters are registered.
 #
 providers:
   primary: ollama              # Provider tried first for every call
