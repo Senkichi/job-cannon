@@ -659,6 +659,212 @@ class TestEnrichmentTierPersistence:
 
 
 # ---------------------------------------------------------------------------
+# _persist invariant-guard tests (issue #106)
+# ---------------------------------------------------------------------------
+
+
+class TestPersistInvariantGuards:
+    """_persist routes jd_full through set_jd_full() and salary through
+    _normalize_salary() so m078 invariant violations (I-02/I-13) cannot
+    silently discard the enrichment_tier bookmark or sibling fields.
+    """
+
+    def _insert_job(self, conn, dedup_key: str) -> None:
+        conn.execute(
+            "INSERT INTO jobs (dedup_key, title, company, location) VALUES (?, ?, ?, ?)",
+            (dedup_key, "Test Job", "Test Co", "Remote"),
+        )
+        conn.commit()
+
+    def _fetch(self, conn, dedup_key: str) -> dict:
+        row = conn.execute(
+            "SELECT jd_full, salary_min, salary_max, location, enrichment_tier "
+            "FROM jobs WHERE dedup_key = ?",
+            (dedup_key,),
+        ).fetchone()
+        assert row is not None, f"Job {dedup_key!r} not found"
+        return dict(row)
+
+    # ------------------------------------------------------------------ #
+    # jd_full — I-13 gate
+    # ------------------------------------------------------------------ #
+
+    def test_junk_jd_not_written_but_tier_recorded(self, temp_db):
+        """A junk jd_full (< 200 chars) is gated by set_jd_full(); tier still written."""
+        from job_finder.web.data_enricher import _persist
+
+        key = "co|junk-jd|test"
+        self._insert_job(temp_db, key)
+
+        junk_jd = "loading"  # classic auth-wall junk
+        _persist(temp_db, {"dedup_key": key}, {"jd_full": junk_jd}, "free")
+
+        row = self._fetch(temp_db, key)
+        assert row["jd_full"] is None, "Junk jd_full must NOT be written"
+        assert row["enrichment_tier"] == "free", "Tier must be written even when jd_full is junk"
+
+    def test_valid_jd_written_and_tier_recorded(self, temp_db):
+        """A valid jd_full (>= 200 chars) is written and tier is recorded."""
+        from job_finder.web.data_enricher import _persist
+
+        key = "co|valid-jd|test"
+        self._insert_job(temp_db, key)
+
+        good_jd = "This is a real job description with lots of detail. " * 4  # > 200 chars
+        _persist(temp_db, {"dedup_key": key}, {"jd_full": good_jd}, "free")
+
+        row = self._fetch(temp_db, key)
+        assert row["jd_full"] == good_jd
+        assert row["enrichment_tier"] == "free"
+
+    # ------------------------------------------------------------------ #
+    # salary — I-02 normalisation
+    # ------------------------------------------------------------------ #
+
+    def test_inverted_salary_swapped_and_written(self, temp_db):
+        """An inverted salary pair (min > max, same magnitude) is swapped before the UPDATE."""
+        from job_finder.web.data_enricher import _persist
+
+        key = "anthropic|data-scientist|test"
+        self._insert_job(temp_db, key)
+
+        # Simulate the Anthropic parser-inversion bug: min and max are swapped
+        _persist(
+            temp_db,
+            {"dedup_key": key},
+            {"salary_min": 300_000, "salary_max": 200_000},
+            "free",
+        )
+
+        row = self._fetch(temp_db, key)
+        assert row["salary_min"] == 200_000, "Inverted salary_min should be swapped to 200k"
+        assert row["salary_max"] == 300_000, "Inverted salary_max should be swapped to 300k"
+        assert row["enrichment_tier"] == "free"
+
+    def test_extreme_salary_inversion_dropped_tier_written(self, temp_db):
+        """An extreme salary inversion (>10x ratio) drops both salary fields; tier still written."""
+        from job_finder.web.data_enricher import _persist
+
+        key = "co|extreme-sal|test"
+        self._insert_job(temp_db, key)
+
+        # 300000 vs 15 is clearly a unit mismatch (annual vs hourly)
+        _persist(
+            temp_db,
+            {"dedup_key": key},
+            {"salary_min": 300_000, "salary_max": 15},
+            "free",
+        )
+
+        row = self._fetch(temp_db, key)
+        assert row["salary_min"] is None, "Extreme-inversion salary_min must be dropped"
+        assert row["salary_max"] is None, "Extreme-inversion salary_max must be dropped"
+        assert row["enrichment_tier"] == "free", "Tier must be written even when salary is dropped"
+
+    def test_normal_salary_order_written_unchanged(self, temp_db):
+        """A correctly ordered salary pair passes through unchanged."""
+        from job_finder.web.data_enricher import _persist
+
+        key = "co|normal-sal|test"
+        self._insert_job(temp_db, key)
+
+        _persist(
+            temp_db,
+            {"dedup_key": key},
+            {"salary_min": 120_000, "salary_max": 180_000},
+            "ddg",
+        )
+
+        row = self._fetch(temp_db, key)
+        assert row["salary_min"] == 120_000
+        assert row["salary_max"] == 180_000
+        assert row["enrichment_tier"] == "ddg"
+
+    # ------------------------------------------------------------------ #
+    # field isolation — one bad field must not discard siblings
+    # ------------------------------------------------------------------ #
+
+    def test_valid_location_written_when_jd_is_junk(self, temp_db):
+        """When jd_full is junk and location is valid, location is still persisted."""
+        from job_finder.web.data_enricher import _persist
+
+        key = "co|partial-enrich|test"
+        self._insert_job(temp_db, key)
+
+        _persist(
+            temp_db,
+            {"dedup_key": key},
+            {"jd_full": "sign in to view", "location": "San Francisco, CA"},
+            "free",
+        )
+
+        row = self._fetch(temp_db, key)
+        assert row["jd_full"] is None, "Junk jd_full must NOT be written"
+        assert row["location"] == "San Francisco, CA", "Valid location must be written"
+        assert row["enrichment_tier"] == "free"
+
+    def test_tier_written_when_all_fields_are_junk(self, temp_db):
+        """When every enriched field is dropped, tier is still recorded."""
+        from job_finder.web.data_enricher import _persist
+
+        key = "co|all-junk|test"
+        self._insert_job(temp_db, key)
+
+        _persist(
+            temp_db,
+            {"dedup_key": key},
+            {"jd_full": "loading", "salary_min": 300_000, "salary_max": 15},
+            "free",
+        )
+
+        row = self._fetch(temp_db, key)
+        assert row["jd_full"] is None
+        assert row["salary_min"] is None
+        assert row["salary_max"] is None
+        assert row["enrichment_tier"] == "free", (
+            "Tier must be written even when all fields dropped"
+        )
+
+    # ------------------------------------------------------------------ #
+    # trigger fallback — simulate a DB trigger rejecting the UPDATE
+    # ------------------------------------------------------------------ #
+
+    def test_trigger_rejection_still_records_tier(self, temp_db):
+        """Even if a DB trigger fires on the remaining-fields UPDATE, the tier
+        fallback UPDATE ensures the job is not re-fetched indefinitely."""
+        from job_finder.web.data_enricher import _persist
+
+        key = "co|trigger-test|test"
+        self._insert_job(temp_db, key)
+
+        # Install a trigger that rejects any location UPDATE with a custom error,
+        # simulating a future invariant that the Python layer hasn't learnt about.
+        temp_db.execute(
+            "CREATE TRIGGER tg_test_reject_location "
+            "BEFORE UPDATE OF location ON jobs "
+            "BEGIN "
+            "  SELECT RAISE(ABORT, 'X-01: test rejection'); "
+            "END"
+        )
+        temp_db.commit()
+
+        _persist(
+            temp_db,
+            {"dedup_key": key},
+            {"location": "New York, NY"},
+            "ddg",
+        )
+
+        row = self._fetch(temp_db, key)
+        # location update was rejected by trigger — location stays default
+        assert row["location"] == "Remote"
+        # tier must still be written via the fallback path
+        assert row["enrichment_tier"] == "ddg", (
+            "Tier fallback UPDATE must succeed even when the main UPDATE is rejected"
+        )
+
+
+# ---------------------------------------------------------------------------
 # Backward compatibility and never-raises (Phase 10 — updated)
 # ---------------------------------------------------------------------------
 
