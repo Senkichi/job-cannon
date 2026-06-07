@@ -87,12 +87,6 @@ _INV1_UNREAD_ALLOWLIST: frozenset[str] = frozenset(
         # job_finder/.
         "default_format",
         "markdown_path",
-        # --- jsearch config keys ---
-        # jsearch is listed in config.example.yaml but has no source
-        # implementation.  Its rapidapi_key has no reader because the source is
-        # absent.  Tracked as #jsearch; also caught by
-        # test_inv3_sources_have_implementations.
-        "rapidapi_key",
         # --- Aspirational / future-feature keys ---
         # profile.job_archetypes.*.weight_overrides — planned scoring override;
         # no consumer exists yet.  Documented for future use.
@@ -134,15 +128,7 @@ _PARSER_ONLY_XFAIL: frozenset[str] = frozenset(
 
 # Sources in config.example.yaml that have no *_source.py and no wiring in
 # ingestion_runner.py.  Remove each entry once the implementation lands.
-_SOURCES_UNIMPLEMENTED_XFAIL: frozenset[str] = frozenset(
-    {
-        # jsearch: listed in config.example.yaml under sources.jsearch but
-        # has no job_finder/sources/jsearch_source.py and no
-        # _JSEARCH_SPEC / _fetch_jsearch in ingestion_runner.py.
-        # Fix pending — see issue tracker (#jsearch).
-        "jsearch",
-    }
-)
+_SOURCES_UNIMPLEMENTED_XFAIL: frozenset[str] = frozenset()
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -389,7 +375,7 @@ def test_inv3_sources_have_implementations():
     """Every source declared in config.example.yaml must have a *_source.py.
 
     Catches sources that are documented/configurable but silently never run
-    because no implementation exists (the jsearch class of bug).
+    because no implementation exists (surface-without-implementation bug).
 
     Known unimplemented sources are in _SOURCES_UNIMPLEMENTED_XFAIL and
     tracked with xfail until the implementation lands.

@@ -87,7 +87,6 @@ def index():
             "sources.dataforseo.api_key",
             "sources.google_cse.api_key",
             "sources.google_cse.cse_id",
-            "sources.jsearch.rapidapi_key",
             "sources.portal_search.usajobs.user_agent_email",
             "sources.portal_search.usajobs.authorization_key",
             "sources.portal_search.adzuna.app_id",
@@ -188,9 +187,6 @@ def save():
         )
         _move_secret_to_keyring(
             form_config, ("sources", "google_cse", "cse_id"), "sources.google_cse.cse_id"
-        )
-        _move_secret_to_keyring(
-            form_config, ("sources", "jsearch", "rapidapi_key"), "sources.jsearch.rapidapi_key"
         )
         # Stage 7.2: route IMAP app_password to keyring (same canonical name
         # the onboarding wizard writes through).
@@ -460,15 +456,6 @@ def _parse_form_to_config(form) -> dict:
         google_cse["cse_id"] = form["google_cse_cse_id"]
     if google_cse:
         config.setdefault("sources", {})["google_cse"] = google_cse
-
-    # --- Sources: JSearch ---
-    jsearch = {}
-    if _has("jsearch_enabled"):
-        jsearch["enabled"] = _checked("jsearch_enabled")
-    if _has("jsearch_rapidapi_key") and form["jsearch_rapidapi_key"]:
-        jsearch["rapidapi_key"] = form["jsearch_rapidapi_key"]
-    if jsearch:
-        config.setdefault("sources", {})["jsearch"] = jsearch
 
     # --- Sources: portal_search (Stage 7 — NEW tile) ---
     # Master switch + keywords + sub-portal toggles. Secret credentials for
