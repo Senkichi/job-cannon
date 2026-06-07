@@ -16,8 +16,10 @@ import json
 import logging
 from datetime import UTC
 
-from flask import Blueprint, jsonify, render_template, request
+from flask import Blueprint, current_app, jsonify, render_template, request
 
+from job_finder.web.backfill_direct_links import backfill_direct_links
+from job_finder.web.db_helpers import get_db
 from job_finder.web.scheduler import get_scheduler
 
 logger = logging.getLogger(__name__)
@@ -259,3 +261,20 @@ def drop_review(dedup_key: str):
     conn.commit()
     logger.info("Admin review: dropped %s", dedup_key)
     return ("", 200)
+
+
+@admin_bp.route("/jobs/direct-links/backfill", methods=["POST"], strict_slashes=False)
+def backfill_direct_links_route():
+    """Resolve jobs.direct_url for the existing backlog (ATS/careers only, free).
+
+    One-time manual op. May take a while on a large backlog (one ATS scan +
+    careers scrape per NULL-direct_url job that has a linked company). For a
+    clean run, pause the enrichment backfill first:
+        POST /admin/jobs/enrichment_backfill/pause
+    Idempotent — re-running only touches rows still NULL.
+    """
+    conn = get_db()
+    config = current_app.config.get("JF_CONFIG", {}) or {}
+    summary = backfill_direct_links(conn, config)
+    logger.warning("Admin: direct-link backfill %s", summary)
+    return jsonify(summary)
