@@ -269,12 +269,6 @@ providers:
 #   primary: gemini
 #   fallback_chain: [claude_code_cli, anthropic]
 
-# --- Output settings ---
-output:
-  default_format: cli
-  markdown_path: reports/
-  max_results: 50
-
 # --- Database ---
 db:
   # SQLite database file path (created automatically on first run)
@@ -332,16 +326,8 @@ server:
   # Debug mode (set to false in production-like environments)
   debug: true
 
-# --- Stale detection thresholds ---
-stale_detection:
-  # Days since last_seen before a job is marked stale
-  stale_threshold_days: 14
-  # Days since last_seen before a passive-stage job is auto-archived
-  archive_threshold_days: 30
-
 # --- Unified staleness orchestrator (nightly 2:00 AM) ---
-# Replaces the older trio of stale_detection / expiry_check / liveness_check
-# scheduled jobs with one run that does:
+# Consolidates expiry_check / liveness_check into one run that does:
 #   B) batch ATS reconciliation (one API call per company with an ATS slug)
 #   A) time-based stale marking + passive-stage archive
 #   C) parallel HTTP cascade for remaining unchecked jobs

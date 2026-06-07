@@ -30,6 +30,7 @@ ACTION_BATCH_SCORE = "batch_score"
 
 ACTION_SCHEDULED_ATS_SCAN = "scheduled_ats_scan"
 ACTION_SAVE_JD = "save_jd"
+ACTION_EDIT_NOTES = "edit_notes"
 ACTION_SCHEDULED_PIPELINE_DETECTION = "scheduled_pipeline_detection"
 ACTION_SCHEDULED_AGENTIC_BACKFILL = "scheduled_agentic_backfill"
 ACTION_SCHEDULED_ENRICHMENT_BACKFILL = "scheduled_enrichment_backfill"

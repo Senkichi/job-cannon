@@ -151,22 +151,8 @@
     {% endif %}
   </div>
 
-  <!-- Notes (placeholder) -->
-  <div class="bg-slate-800/40 rounded-lg border border-slate-700 p-4">
-    <h2 class="text-sm font-semibold text-slate-300 mb-3">Notes</h2>
-    <textarea class="w-full bg-slate-900 text-slate-300 text-sm rounded border border-slate-700 p-3 focus:outline-none focus:border-indigo-500 min-h-[80px] resize-y"
-              placeholder="Add notes about this job...">{{ job.notes or "" }}</textarea>
-  </div>
-
-  <!-- Placeholder tabs for Phase 2/4 -->
-  <div class="bg-slate-800/40 rounded-lg border border-slate-700 p-4 text-xs text-slate-600">
-    <div class="flex gap-4">
-      <span class="text-slate-500 font-medium">Claude Analysis</span>
-      <span class="text-slate-700">|</span>
-      <span class="text-slate-500 font-medium">Resume</span>
-    </div>
-    <p class="mt-2 text-slate-700">Coming in Phase 2 / Phase 4</p>
-  </div>
+  <!-- Notes panel -->
+  {% include "jobs/_notes_panel.html" %}
 
 </div>
 {% endif %}
