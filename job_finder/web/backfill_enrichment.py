@@ -300,7 +300,6 @@ def run_scoring_backfill(
 
     print(f"\nScoring backfill: {len(rows)} jobs to evaluate")
     scored_count = 0
-    model = (config.get("providers", {}).get("scoring") or {}).get("model")
 
     # Resolve candidate context once for the whole backfill. Build it from
     # the original config (provider-agnostic) so the rubric sees the user's
@@ -329,7 +328,7 @@ def run_scoring_backfill(
             dedup_key,
             sr.data,
             provider=sr.provider,
-            model=model,
+            model=sr.model,
             config=config,
         )
         scored_count += 1
