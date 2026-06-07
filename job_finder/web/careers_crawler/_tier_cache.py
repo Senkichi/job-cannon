@@ -74,6 +74,7 @@ def _try_cached_tier(
                     title_exclusions,
                     search_keywords,
                     config,
+                    db_path=db_path,
                 )
                 if pw_jobs:
                     local_summary["playwright_rendered"] += 1
@@ -86,6 +87,7 @@ def _try_cached_tier(
                     careers_url,
                     target_titles,
                     title_exclusions,
+                    db_path=db_path,
                 )
                 if pw_jobs:
                     local_summary["playwright_rendered"] += 1
