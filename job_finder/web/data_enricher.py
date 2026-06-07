@@ -41,7 +41,9 @@ import logging
 from typing import Any
 
 from job_finder.config import JD_STORAGE_MAX_CHARS
+from job_finder.db._direct_link import set_direct_url
 from job_finder.db._jd_full import set_jd_full as _set_jd_full
+from job_finder.web.direct_link import pick_direct_link
 from job_finder.web.enrichment_sources import merge_apply_urls, parse_source_urls
 from job_finder.web.enrichment_tiers import (
     fetch_ddg_jds,
@@ -204,6 +206,9 @@ def enrich_job(
         # ---------------------------------------------------------------
         if start_idx <= TIER_ORDER.index("free"):
             try:
+                ats_result: dict = {}
+                careers_result: dict = {}
+
                 # Sub-tier A: Direct URL fetch
                 source_urls = parse_source_urls(job_row.get("source_urls"))
                 for url in source_urls:
@@ -226,6 +231,13 @@ def enrich_job(
                         for k, v in careers_result.items():
                             if k not in fragments:
                                 fragments[k] = v
+
+                # Capture the direct company-posting link from data the ATS
+                # scan / careers scrape already fetched (zero new network).
+                if conn is not None and job_row.get("dedup_key"):
+                    direct = pick_direct_link(source_urls, ats_result, careers_result)
+                    if direct:
+                        set_direct_url(conn, job_row["dedup_key"], direct[0], direct[1])
 
                 # Resolve what free tier found
                 enriched = _resolve_from_fragments(fragments, missing, job_row)

@@ -22,6 +22,7 @@ from bs4 import BeautifulSoup
 from ddgs import DDGS
 
 from job_finder.config import JD_STORAGE_MAX_CHARS
+from job_finder.web.direct_link import resolve_direct_link
 from job_finder.web.domain_policy import domain_priority, is_blocked_domain
 from job_finder.web.html_extract import html_to_clean_text
 from job_finder.web.model_provider import call_model
@@ -223,6 +224,10 @@ def query_ats_api(job_row: dict, conn: Any, config: dict) -> dict:
         if posting.get("salary_max"):
             result["salary_max"] = posting["salary_max"]
 
+        link = resolve_direct_link(postings, title)
+        if link:
+            result["direct_url"], result["direct_url_confidence"] = link
+
         return result
 
     except Exception as e:
@@ -292,6 +297,10 @@ def scrape_careers(job_row: dict, conn: Any, config: dict) -> dict:
         result = {}
         if posting.get("description"):
             result["jd_full"] = posting["description"][:_MAX_JD_CHARS]
+
+        link = resolve_direct_link(postings, title)
+        if link:
+            result["direct_url"], result["direct_url_confidence"] = link
 
         return result
 
