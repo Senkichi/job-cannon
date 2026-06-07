@@ -39,8 +39,25 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
+def _cadence_to_hour_expr(preset: str) -> str:
+    """Map a cadence_preset name to an APScheduler CronTrigger hour expression.
+
+    Supported presets (from config.example.yaml and the onboarding wizard):
+      - "light"    → "8"           (once/day, mid-morning)
+      - "standard" → "0,8,16"      (3×/day — the legacy default)
+      - "heavy"    → "0,4,8,12,16,20"  (6×/day)
+
+    Unknown values fall back to "0,8,16" (standard) so existing deployments
+    that omit cadence_preset are unaffected.
+
+    Note: rescheduling takes effect only on app restart — there is no
+    live-reschedule path.
+    """
+    return {"light": "8", "standard": "0,8,16", "heavy": "0,4,8,12,16,20"}.get(preset, "0,8,16")
+
+
 def register_ingestion(scheduler, app) -> None:
-    """Register the 3x/day ingestion job (CronTrigger hour=0,8,16)."""
+    """Register the ingestion job using the cadence_preset from config."""
 
     def run_pipeline():
         """Wrapped ingestion job executed by APScheduler."""
@@ -106,9 +123,11 @@ def register_ingestion(scheduler, app) -> None:
                     },
                 )
 
+    config = get_config_snapshot(app)
+    preset = config.get("scheduler", {}).get("cadence_preset", "standard")
     scheduler.add_job(
         run_pipeline,
-        trigger=CronTrigger(hour="0,8,16"),
+        trigger=CronTrigger(hour=_cadence_to_hour_expr(preset)),
         id="ingestion_poll",
         replace_existing=True,
         max_instances=1,  # prevents overlap on long runs
