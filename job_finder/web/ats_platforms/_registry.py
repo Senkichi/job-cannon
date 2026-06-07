@@ -22,7 +22,9 @@ calls here pick up the patch the same as the historical ``scan_*`` body.
 
 from __future__ import annotations
 
+import json
 import logging
+import sqlite3
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -69,8 +71,10 @@ def run_platform_scan(
     slug: str,
     target_titles: list[str],
     exclusions: list[str],
+    *,
+    conn: sqlite3.Connection | None = None,
 ) -> list[dict]:
-    """Run one platform scan: fetch → title gate → normalize → log.
+    """Run one platform scan: fetch → raw capture → title gate → normalize → log.
 
     The behavior matches the historical per-platform ``scan_*`` body:
     every raw posting that ``_title_matches`` accepts is normalized via
@@ -86,6 +90,12 @@ def run_platform_scan(
             allows all titles through (the config layer is expected to
             forbid this; the gate respects it for completeness).
         exclusions: Title-match keywords for exclusion. AND-NOT semantics.
+        conn: Optional DB connection.  When provided the raw pre-filter
+            API response is recorded via ``record_extraction`` with
+            ``detect=True`` so an empty response on a previously-productive
+            platform is detected as a true break.  The ~19 callers in
+            ``ats_platforms/__init__.py`` and ``ats_reconciler.py`` omit
+            this argument (``conn=None``) and are unaffected.
 
     Returns:
         Canonical job dicts for matched postings. Empty list on fetch
@@ -100,6 +110,36 @@ def run_platform_scan(
     from job_finder.web.ats_platforms import _title_matches
 
     postings = list(scanner.fetch_postings(slug))
+
+    # --- Autoheal Phase B: capture raw pre-filter API response ---
+    # detect=True is honest here: len(postings)==0 on a platform that
+    # previously returned jobs is a genuine API break (shape changed,
+    # auth expired, …), not a post-filter false-alarm.
+    if conn is not None:
+        try:
+            from job_finder.web.autoheal import MIN_MEANINGFUL_LEN
+            from job_finder.web.autoheal.health_monitor import record_extraction
+
+            raw = json.dumps(postings)[:50000]
+            # The health-monitor's MIN_MEANINGFUL_LEN gate was designed for
+            # email bodies where a very short body is a meta/empty email.
+            # For ATS, any API response — including [] — is a meaningful
+            # result.  Pad to the threshold so genuine empty-API breaks on
+            # a previously-productive platform actually fire the break counter.
+            if len(raw) < MIN_MEANINGFUL_LEN:
+                raw = raw.ljust(MIN_MEANINGFUL_LEN)
+
+            record_extraction(
+                conn,
+                f"ats:{scanner.name}",
+                "ats",
+                raw,
+                job_count=len(postings),
+                detect=True,
+            )
+        except Exception:
+            pass  # observability must never break ingestion
+
     results: list[dict] = []
     for posting in postings:
         title = scanner.title_of(posting)

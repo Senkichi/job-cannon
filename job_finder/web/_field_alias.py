@@ -1,0 +1,125 @@
+"""Shared field-alias helpers for JSON job-posting extraction.
+
+Provides the canonical key lists and first-match-wins extractors shared
+between ``careers_page_interactions.py`` (generic careers-page AI navigator)
+and the ATS platform scanners (Greenhouse, Lever, …).
+
+**Key ordering matters — first-match-wins.**
+Each platform's real key must appear *before* any alias:
+
+- ``JOB_TITLE_FIELDS``: ``title`` (Greenhouse), ``text`` (Lever), then
+  broader aliases.
+- ``JOB_URL_FIELDS``: ``url`` generic, then ``hostedUrl`` (Lever),
+  ``absolute_url`` (Greenhouse), then broader aliases.
+
+Adding a new key that belongs between existing ones? Insert it in the
+correct position — do not append to the end.
+"""
+
+from __future__ import annotations
+
+# ---------------------------------------------------------------------------
+# Canonical key lists (shared across surfaces)
+# ---------------------------------------------------------------------------
+
+JOB_ARRAY_KEYS: list[str] = [
+    "jobs",
+    "results",
+    "data",
+    "positions",
+    "openings",
+    "postings",
+    "items",
+    "jobPostings",
+    "records",
+    "hits",
+]
+
+# Title key priority:
+#   title        — Greenhouse, generic
+#   text         — Lever
+#   name         — generic fallback
+#   jobTitle     — schema.org / some custom platforms
+#   job_title    — underscore variant
+#   positionTitle — some legacy APIs
+#   role         — informal alias
+#   position     — generic fallback
+JOB_TITLE_FIELDS: list[str] = [
+    "title",
+    "text",
+    "name",
+    "jobTitle",
+    "job_title",
+    "positionTitle",
+    "role",
+    "position",
+]
+
+# URL key priority:
+#   url           — generic
+#   hostedUrl     — Lever
+#   absolute_url  — Greenhouse
+#   applyUrl      — schema.org / some custom platforms
+#   apply_url     — underscore variant
+#   link / href   — generic HTML-derived
+#   detailUrl / detail_url / jobUrl / canonicalUrl — misc aliases
+JOB_URL_FIELDS: list[str] = [
+    "url",
+    "hostedUrl",
+    "absolute_url",
+    "applyUrl",
+    "apply_url",
+    "link",
+    "href",
+    "detailUrl",
+    "detail_url",
+    "jobUrl",
+    "canonicalUrl",
+]
+
+
+# ---------------------------------------------------------------------------
+# Extraction helpers
+# ---------------------------------------------------------------------------
+
+
+def extract_field(obj: dict, field_names: list[str]):
+    """Return the first non-falsy value from *obj* keyed by *field_names*.
+
+    Returns ``None`` when none of the keys are present or all mapped values
+    are falsy.  Callers that need a guaranteed ``str`` should coalesce:
+    ``extract_field(obj, JOB_TITLE_FIELDS) or ""``.
+    """
+    for name in field_names:
+        if obj.get(name):
+            return obj[name]
+    return None
+
+
+def find_job_array(data) -> list | None:
+    """Return the array of job-posting dicts from a parsed JSON response.
+
+    Handles three shapes:
+    - Direct list: ``[{...}, ...]``
+    - Top-level keyed: ``{"jobs": [...]}``
+    - One-level nested: ``{"data": {"jobs": [...]}}``
+
+    Returns ``None`` when no recognisable job array is found.
+    """
+    if isinstance(data, list):
+        return data if data and isinstance(data[0], dict) else None
+
+    if isinstance(data, dict):
+        for key in JOB_ARRAY_KEYS:
+            if key in data and isinstance(data[key], list):
+                return data[key]
+
+        # Check nested: {data: {jobs: [...]}} or {results: {items: [...]}}
+        for outer_key in ("data", "results", "response", "body"):
+            if outer_key in data and isinstance(data[outer_key], dict):
+                inner = data[outer_key]
+                for key in JOB_ARRAY_KEYS:
+                    if key in inner and isinstance(inner[key], list):
+                        return inner[key]
+
+    return None
