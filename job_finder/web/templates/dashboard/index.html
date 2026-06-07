@@ -138,6 +138,19 @@
     </form>
   </dialog>
 
+  {# ── Parser Health widget — live-update ── #}
+  {# Re-fetches on dashboard-refresh (this tab's sync/scoring runs) and on    #}
+  {# sse:jobs-changed so a source newly flagged DEGRADED surfaces without a   #}
+  {# full page reload. Inline render on full page load avoids a layout shift. #}
+  <section aria-label="Parser health">
+    <div id="degraded-sources"
+         hx-get="{{ url_for('dashboard.degraded_sources_fragment') }}"
+         hx-trigger="dashboard-refresh from:body, sse:jobs-changed"
+         hx-swap="innerHTML">
+      {% include "dashboard/_degraded_sources.html" %}
+    </div>
+  </section>
+
   <!-- ── Pipeline Review Queue ── -->
   {# The container refetches on sse:detections-changed so detections surfaced  #}
   {# by the background pipeline-detection job appear live. It deliberately     #}
