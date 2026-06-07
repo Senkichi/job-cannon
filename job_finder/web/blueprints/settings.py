@@ -25,7 +25,6 @@ from job_finder.config import (
     DEFAULT_CANDIDATE_SCORE_THRESHOLD,
     DEFAULT_DAILY_BUDGET_USD,
     DEFAULT_LOOKBACK_DAYS,
-    DEFAULT_MAX_RESULTS,
     DEFAULT_MIN_SCORE_THRESHOLD,
     load_config,
 )
@@ -559,29 +558,9 @@ def _parse_form_to_config(form) -> dict:
     if scoring:
         config["scoring"] = scoring
 
-    # --- Output ---
-    output = {}
-    if _has("output_default_format"):
-        output["default_format"] = form["output_default_format"]
-    if _has("output_markdown_path"):
-        output["markdown_path"] = form["output_markdown_path"]
-    if _has("output_max_results"):
-        output["max_results"] = safe_int(form["output_max_results"], DEFAULT_MAX_RESULTS)
-    if output:
-        config["output"] = output
-
     # --- Database ---
     if _has("db_path"):
         config["db"] = {"path": form["db_path"]}
-
-    # --- Drive ---
-    drive = {}
-    if _has("drive_folder_id"):
-        drive["folder_id"] = form["drive_folder_id"]
-    if _has("drive_convert_to_gdoc"):
-        drive["convert_to_gdoc"] = form["drive_convert_to_gdoc"] in ("on", "true", True)
-    if drive:
-        config["drive"] = drive
 
     # --- Notifications (checkboxes with hidden companion inputs) ---
     notifications = {}

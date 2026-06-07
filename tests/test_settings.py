@@ -30,7 +30,6 @@ def settings_app(tmp_db_path, tmp_path):
         "db": {"path": tmp_db_path},
         "scoring": {"min_score_threshold": 40},
         "sources": {},
-        "output": {"default_format": "cli", "max_results": 50},
     }
     with open(config_path, "w", encoding="utf-8") as f:
         yaml.dump(initial_config, f, default_flow_style=False)

@@ -1432,9 +1432,6 @@ class TestSettingsAtsScanSection:
                 "candidate_score_threshold": "42",
                 "model_haiku": "claude-haiku-4-5",
                 "model_sonnet": "claude-sonnet-4-6",
-                "output_default_format": "cli",
-                "output_markdown_path": "reports/",
-                "output_max_results": "50",
                 "db_path": "jobs.db",
             },
         )
