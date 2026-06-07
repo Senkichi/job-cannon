@@ -64,6 +64,8 @@ COLUMN_CATEGORIES: dict[str, str] = {
     "enrichment_tier": "system",
     "comp_data_json": "system",  # company-research output
     "unresolved_reasons": "system",  # NEW in Phase 47 m078 — JSON reason codes
+    "direct_url": "system",  # NEW m085 — company-posting link captured by enrichment
+    "direct_url_confidence": "system",  # NEW m085 — strict/loose match tag
     # ── scoring-owned ─────────────────────────────────────────────────────
     "score": "scoring",
     "score_breakdown": "scoring",
