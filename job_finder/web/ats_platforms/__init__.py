@@ -60,6 +60,14 @@ from job_finder.web.ats_platforms._title_match import (  # noqa: F401
     _title_matches,
 )
 
+NON_SCANNABLE_PLATFORMS: frozenset[str] = frozenset({"jobvite"})
+"""Platforms registered in SCANNERS_BY_NAME that intentionally return no jobs.
+
+A platform lands here when it has no public unauthenticated API (Jobvite is
+the canonical example). Callers can check this set to surface a "no public
+API" badge instead of the generic "No ATS" / "0 jobs" messaging.
+"""
+
 SCANNERS_BY_NAME: dict[str, PlatformScanner] = {
     s.name: s
     for s in (
@@ -268,6 +276,7 @@ def scan_rippling(slug: str, target_titles: list[str], exclusions: list[str]) ->
 
 
 __all__ = [
+    "NON_SCANNABLE_PLATFORMS",
     "SCANNERS_BY_NAME",
     "PlatformScanner",
     "run_platform_scan",

@@ -21,6 +21,11 @@
       <span class="px-2 py-0.5 rounded text-xs font-medium bg-teal-700 text-teal-200">Greenhouse</span>
       {% elif company.ats_platform == 'ashby' %}
       <span class="px-2 py-0.5 rounded text-xs font-medium bg-purple-700 text-purple-200">Ashby</span>
+      {% elif ats_not_scannable %}
+      <span class="px-2 py-0.5 rounded text-xs font-medium bg-amber-700 text-amber-200"
+            title="Registered ATS with no public API — scans always return 0 jobs">
+        {{ company.ats_platform|capitalize }} (no public API)
+      </span>
       {% else %}
       <span class="px-2 py-0.5 rounded text-xs font-medium bg-slate-600 text-slate-400">No ATS</span>
       {% endif %}
@@ -129,6 +134,11 @@
         </div>
         {% else %}
         <p class="text-xs text-slate-500">No scans yet.</p>
+        {% endif %}
+        {% if ats_not_scannable %}
+        <p class="text-xs text-amber-400/70 mt-2">
+          {{ company.ats_platform|capitalize }} has no public API — 0 is expected, not a failure.
+        </p>
         {% endif %}
       </div>
 

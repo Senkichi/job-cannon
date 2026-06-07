@@ -771,3 +771,52 @@ class TestCompanyResearchRoutes:
         client, db_path, conn = companies_client
         resp = client.post("/companies/99999/research")
         assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Tests: NON_SCANNABLE_PLATFORMS badge rendering (#167)
+# ---------------------------------------------------------------------------
+
+
+class TestNonScannableBadge:
+    """Jobvite companies render the amber "no public API" badge, not "No ATS"."""
+
+    def test_jobvite_company_shows_no_public_api_badge(self, companies_client):
+        """Expanding a jobvite company shows amber badge text, not 'No ATS'."""
+        client, db_path, conn = companies_client
+        company_id = _insert_company(conn, ats_platform="jobvite", ats_slug="victaulic")
+        resp = client.get(f"/companies/{company_id}/expand")
+        assert resp.status_code == 200
+        body = resp.data.decode()
+        assert "no public API" in body
+        assert "No ATS" not in body
+
+    def test_jobvite_scan_history_shows_api_note(self, companies_client):
+        """Expanded jobvite row shows the 'no public API — 0 is expected' note."""
+        client, db_path, conn = companies_client
+        company_id = _insert_company(conn, ats_platform="jobvite", ats_slug="victaulic")
+        resp = client.get(f"/companies/{company_id}/expand")
+        assert resp.status_code == 200
+        body = resp.data.decode()
+        assert "0 is expected" in body
+
+    def test_greenhouse_company_still_shows_greenhouse_badge(self, companies_client):
+        """A greenhouse company with zero jobs still renders 'Greenhouse', not 'No ATS'."""
+        client, db_path, conn = companies_client
+        company_id = _insert_company(conn, ats_platform="greenhouse", ats_slug="stripe")
+        resp = client.get(f"/companies/{company_id}/expand")
+        assert resp.status_code == 200
+        body = resp.data.decode()
+        assert "Greenhouse" in body
+        assert "No ATS" not in body
+        assert "no public API" not in body
+
+    def test_no_ats_company_still_shows_no_ats_badge(self, companies_client):
+        """A company with no ATS still renders the 'No ATS' badge."""
+        client, db_path, conn = companies_client
+        company_id = _insert_company(conn, ats_platform=None)
+        resp = client.get(f"/companies/{company_id}/expand")
+        assert resp.status_code == 200
+        body = resp.data.decode()
+        assert "No ATS" in body
+        assert "no public API" not in body
