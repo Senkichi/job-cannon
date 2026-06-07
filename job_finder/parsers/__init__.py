@@ -1,5 +1,12 @@
 """Email parsers for different job board alert formats."""
 
+from __future__ import annotations
+
+import logging
+from collections.abc import Callable
+from datetime import datetime
+
+from job_finder.parsers._positional_fallback import has_job_urls, positional_fallback
 from job_finder.parsers.glassdoor_parser import parse_glassdoor_alert
 from job_finder.parsers.greenhouse_parser import parse_greenhouse_alert
 from job_finder.parsers.indeed_parser import parse_indeed_alert, parse_indeed_match_alert
@@ -8,7 +15,49 @@ from job_finder.parsers.monster_parser import parse_monster_alert
 from job_finder.parsers.trueup_parser import parse_trueup_alert
 from job_finder.parsers.ziprecruiter_parser import parse_ziprecruiter_alert
 
+logger = logging.getLogger(__name__)
+
+
+def extract_with_fallback(
+    primary_fn: Callable,
+    body: str,
+    email_date: datetime | None,
+) -> list:
+    """Run the primary parser; fall back to positional extraction only when needed.
+
+    The fallback fires **only** if all three conditions hold:
+    1. The primary parser returned an empty list.
+    2. The body contains at least one recognised job-board / ATS URL.
+    3. The body is not empty.
+
+    This ensures genuine meta/empty emails are never handed to the fallback,
+    and that a working primary parse is never overridden.
+
+    Args:
+        primary_fn: The parser callable, e.g. ``parse_linkedin_alert``.
+        body: Raw email body text.
+        email_date: When the email was sent.
+
+    Returns:
+        Jobs from the primary parser, or (if empty + job URL present) jobs
+        from the positional fallback, or ``[]``.
+    """
+    jobs = primary_fn(body, email_date)
+    if jobs:
+        return jobs
+    if body and has_job_urls(body):
+        fallback_jobs = positional_fallback(body, email_date)
+        if fallback_jobs:
+            logger.debug(
+                "extract_with_fallback: primary empty; positional fallback found %d job(s)",
+                len(fallback_jobs),
+            )
+        return fallback_jobs
+    return []
+
+
 __all__ = [
+    "extract_with_fallback",
     "parse_glassdoor_alert",
     "parse_greenhouse_alert",
     "parse_indeed_alert",

@@ -27,7 +27,9 @@ Design principles:
   - Never raises — all errors are caught and logged.
   - Returns empty dict when nothing can be enriched.
   - Skips enrichment when job already has all scoring-relevant data.
-  - Persists enrichment_tier atomically with enriched fields in one UPDATE.
+  - Persists enrichment_tier with enriched fields; jd_full and salary routed
+    through sanctioned helpers before the UPDATE so invariant violations in one
+    field cannot discard the tier bookmark or sibling fields (I-02 / I-13).
   - Jobs with enrichment_tier set resume from the NEXT tier up.
   - Exhausted jobs are returned immediately without any API calls.
 
@@ -43,6 +45,7 @@ from typing import Any
 from job_finder.config import JD_STORAGE_MAX_CHARS
 from job_finder.db._direct_link import set_direct_url
 from job_finder.db._jd_full import set_jd_full as _set_jd_full
+from job_finder.db._jobs import _normalize_salary
 from job_finder.web.direct_link import pick_direct_link
 from job_finder.web.enrichment_sources import merge_apply_urls, parse_source_urls
 from job_finder.web.enrichment_tiers import (
@@ -609,7 +612,21 @@ def _apply_post_fetch_extraction(
 
 
 def _persist(conn: Any, job_row: dict, enriched: dict, tier_name: str) -> None:
-    """Persist enriched fields + enrichment_tier atomically in a single UPDATE.
+    """Persist enriched fields + enrichment_tier, routing each field through its
+    sanctioned write path so m078 invariant violations cannot silently discard
+    the full enrichment.
+
+    Write order:
+    1. ``jd_full`` — routed through ``_set_jd_full()`` (I-13 junk gate) as a
+       separate commit.  A junk JD is logged and skipped; ``_set_jd_full`` never
+       raises, so a bad JD cannot abort the remaining writes.
+    2. ``salary_min`` / ``salary_max`` — normalised via ``_normalize_salary()``
+       before the UPDATE (I-02 inversion fix).  A same-unit inversion is swapped;
+       an extreme unit-mismatch drops both fields and logs a WARNING.
+    3. Remaining fields (``location``, normalised salary) + ``enrichment_tier``
+       in one UPDATE.  If that UPDATE fails unexpectedly, a fallback tier-only
+       UPDATE ensures the tier bookmark is always recorded so the job is not
+       re-fetched indefinitely.
 
     Only writes to DB if conn is provided. If enriched is empty, still
     updates enrichment_tier to track progress (unless conn is None).
@@ -627,17 +644,56 @@ def _persist(conn: Any, job_row: dict, enriched: dict, tier_name: str) -> None:
     if not dedup_key:
         return
 
-    try:
-        if enriched:
-            # Filter to allowlisted columns only — prevents AI-extracted keys from
-            # injecting arbitrary column names into the dynamic SQL SET clause.
-            safe_enriched = {k: v for k, v in enriched.items() if k in _ENRICHABLE_COLUMNS}
-            if safe_enriched != enriched:
-                unknown = set(enriched) - _ENRICHABLE_COLUMNS
-                logger.warning("_persist: dropping non-allowlisted columns: %s", unknown)
-        else:
-            safe_enriched = {}
+    if enriched:
+        # Filter to allowlisted columns only — prevents AI-extracted keys from
+        # injecting arbitrary column names into the dynamic SQL SET clause.
+        safe_enriched = {k: v for k, v in enriched.items() if k in _ENRICHABLE_COLUMNS}
+        if safe_enriched != enriched:
+            unknown = set(enriched) - _ENRICHABLE_COLUMNS
+            logger.warning("_persist: dropping non-allowlisted columns: %s", unknown)
+    else:
+        safe_enriched = {}
 
+    # --- Step 1: jd_full — routed through set_jd_full() (I-13 junk gate) ---
+    # Extracted from the multi-column UPDATE so a junk JD trigger (I-13) cannot
+    # abort and discard the enrichment_tier bookmark and all sibling fields.
+    # _set_jd_full() handles its own commit; it never raises.
+    jd_full_value = safe_enriched.pop("jd_full", None)
+    if jd_full_value is not None:
+        try:
+            _set_jd_full(conn, dedup_key, jd_full_value, source="data_enricher._persist")
+        except Exception as e:
+            logger.warning("_persist: jd_full write failed for '%s': %s", dedup_key, e)
+
+    # --- Step 2: salary — normalise before writing (I-02 inversion fix) ---
+    # Both fields are extracted together so _normalize_salary() can swap or
+    # null an inverted pair atomically.  Single-field salary writes (one is
+    # None) pass through unchanged — the normaliser's early-return branch.
+    sal_min = safe_enriched.pop("salary_min", None)
+    sal_max = safe_enriched.pop("salary_max", None)
+    if sal_min is not None or sal_max is not None:
+        orig_min, orig_max = sal_min, sal_max
+        sal_min, sal_max = _normalize_salary(sal_min, sal_max)
+        if sal_min is None and sal_max is None and (orig_min is not None or orig_max is not None):
+            logger.warning(
+                "_persist: salary dropped for '%s' (extreme inversion or zero "
+                "after normalisation; original min=%s max=%s)",
+                dedup_key,
+                orig_min,
+                orig_max,
+            )
+        else:
+            if sal_min is not None:
+                safe_enriched["salary_min"] = sal_min
+            if sal_max is not None:
+                safe_enriched["salary_max"] = sal_max
+
+    # --- Step 3: remaining fields + enrichment_tier ---
+    # enrichment_tier is always written — even when every enriched field was
+    # junk-gated or dropped — so the job is not re-fetched on the next backfill.
+    # The fallback tier-only UPDATE in the except handler is the last resort for
+    # any unexpected violation that slips past the Python-layer guards above.
+    try:
         if safe_enriched:
             set_clauses = ", ".join(f"{k} = ?" for k in safe_enriched)
             set_clauses += ", enrichment_tier = ?"
@@ -654,3 +710,13 @@ def _persist(conn: Any, job_row: dict, enriched: dict, tier_name: str) -> None:
         conn.commit()
     except Exception as e:
         logger.warning("Failed to persist enrichment for '%s': %s", dedup_key, e)
+        # Fallback: at minimum record the tier so this job is not re-fetched
+        # with the same data on every subsequent backfill.
+        try:
+            conn.execute(
+                "UPDATE jobs SET enrichment_tier = ? WHERE dedup_key = ?",
+                (tier_name, dedup_key),
+            )
+            conn.commit()
+        except Exception as tier_e:
+            logger.warning("_persist: tier fallback also failed for '%s': %s", dedup_key, tier_e)
