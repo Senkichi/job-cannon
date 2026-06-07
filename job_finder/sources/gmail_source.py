@@ -12,6 +12,7 @@ from datetime import UTC, datetime, timedelta
 from googleapiclient.discovery import build
 
 from job_finder.models import Job
+from job_finder.parsers import extract_with_fallback
 from job_finder.parsers.glassdoor_parser import parse_glassdoor_alert
 from job_finder.parsers.greenhouse_parser import parse_greenhouse_alert
 from job_finder.parsers.indeed_parser import parse_indeed_alert, parse_indeed_match_alert
@@ -190,7 +191,7 @@ class GmailSource:
                     # body=None means the API response was malformed; allow
                     # retry on the next sync rather than permanently silencing.
                     newly_processed.append(msg_id)
-                    jobs = parser_fn(body, email_date)
+                    jobs = extract_with_fallback(parser_fn, body, email_date)
                     all_jobs.extend(jobs)
                     self.extraction_records.append(
                         {

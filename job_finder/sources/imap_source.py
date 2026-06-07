@@ -12,6 +12,7 @@ from datetime import UTC, datetime
 from imapclient import IMAPClient
 
 from job_finder.models import Job
+from job_finder.parsers import extract_with_fallback
 from job_finder.sources.gmail_source import (
     SENDER_LABEL,
     SENDER_PARSERS,
@@ -114,7 +115,7 @@ class ImapSource:
 
                     # Parse the email body
                     try:
-                        jobs = parser_fn(body, email_date)
+                        jobs = extract_with_fallback(parser_fn, body, email_date)
                         all_jobs.extend(jobs)
                         self.extraction_records.append(
                             {

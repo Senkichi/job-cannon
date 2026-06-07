@@ -13,6 +13,27 @@ Note: indeed_parser uses is_meta_email with _INDEED_META_PATTERNS as extra_patte
 import re
 
 # ---------------------------------------------------------------------------
+# Placeholder detection
+# ---------------------------------------------------------------------------
+
+# Known HTML template artifact strings that appear when email rendering engines
+# substitute placeholder text instead of real job data.  These values must never
+# become job titles or company names.  Lifted here from ziprecruiter_parser so
+# both that parser and _positional_fallback share a single canonical copy.
+_PLACEHOLDER_STRINGS: frozenset[str] = frozenset(
+    {
+        "title",
+        "body",
+        "unknown",
+        "name",
+        "company",
+        "location",
+        "n/a",
+        "none",
+    }
+)
+
+# ---------------------------------------------------------------------------
 # Salary parsing
 # ---------------------------------------------------------------------------
 

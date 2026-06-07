@@ -23,32 +23,17 @@ from bs4 import BeautifulSoup
 
 from job_finder.models import Job
 from job_finder.parsers._common import (
+    _PLACEHOLDER_STRINGS,
+    parse_salary_range,
+)
+from job_finder.parsers._common import (
     is_meta_email as _is_meta_email,
 )
 from job_finder.parsers._common import (
     looks_like_salary_text as _looks_like_salary_text,
 )
-from job_finder.parsers._common import (
-    parse_salary_range,
-)
 
 logger = logging.getLogger(__name__)
-
-# Known HTML template artifact strings that appear when email rendering engines
-# substitute placeholder text instead of real job data. These values must never
-# become job titles or company names.
-_PLACEHOLDER_STRINGS = frozenset(
-    {
-        "title",
-        "body",
-        "unknown",
-        "name",
-        "company",
-        "location",
-        "n/a",
-        "none",
-    }
-)
 
 
 # Patterns used to identify ZipRecruiter job links
