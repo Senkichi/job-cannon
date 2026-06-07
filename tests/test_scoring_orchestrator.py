@@ -138,7 +138,9 @@ class TestScoreAndPersistJob:
         assessment = _make_assessment(provider="ollama")
 
         def stub_scorer(job, conn_arg, cfg, candidate_context):
-            return ScoringResult(status="ok", data=assessment, provider="ollama")
+            return ScoringResult(
+                status="ok", data=assessment, provider="ollama", model="qwen2.5:14b"
+            )
 
         so.score_and_persist_job(
             seeded_job,
@@ -332,31 +334,13 @@ class TestScoreAndPersistJob:
         assert row["classification"] == "reject"
 
     def test_legacy_functions_removed(self):
-        """Plan 4 Commit E removed score_and_persist_haiku + sonnet."""
+        """Plan 4 Commit E removed score_and_persist_haiku + sonnet.
+        Issue 154 removed the dead _resolve_scoring_model helper."""
         assert not hasattr(so, "score_and_persist_haiku")
         assert not hasattr(so, "score_and_persist_sonnet")
         assert not hasattr(so, "_apply_calibration")
+        assert not hasattr(so, "_resolve_scoring_model")
         assert callable(so.score_and_persist_job)
-
-
-class TestResolveScoringModel:
-    """Covers the tiny config-extraction helper used by score_and_persist_job."""
-
-    def test_reads_providers_scoring_model(self):
-        cfg = {"providers": {"scoring": {"model": "qwen2.5:14b"}}}
-        assert so._resolve_scoring_model(cfg, provider=None) == "qwen2.5:14b"
-
-    def test_missing_providers_returns_none(self):
-        assert so._resolve_scoring_model({}, provider=None) is None
-
-    def test_missing_scoring_block_returns_none(self):
-        assert (
-            so._resolve_scoring_model(
-                {"providers": {"low": {"model": "x"}}},
-                provider=None,
-            )
-            is None
-        )
 
 
 class TestCascadeModelPersisted:
@@ -392,28 +376,6 @@ class TestCascadeModelPersisted:
         ).fetchone()
         assert row["scoring_provider"] == "ollama"
         assert row["scoring_model"] == "qwen2.5:14b"
-
-    def test_falls_back_to_config_when_result_model_absent(self, db_conn, seeded_job):
-        """Legacy callers / test stubs without a model field still work via
-        the providers.scoring.model fallback path."""
-        conn, _ = db_conn
-        config = {
-            "providers": {
-                "scoring": {"model": "config-fallback-model"},
-            }
-        }
-        assessment = _make_assessment(provider="ollama")
-
-        def stub_scorer(job, conn_arg, cfg, candidate_context):
-            # ScoringResult intentionally without model=
-            return ScoringResult(status="ok", data=assessment, provider="ollama")
-
-        so.score_and_persist_job(seeded_job, conn, config, scorer_fn=stub_scorer)
-        row = conn.execute(
-            "SELECT scoring_model FROM jobs WHERE dedup_key = ?",
-            ("job-abc",),
-        ).fetchone()
-        assert row["scoring_model"] == "config-fallback-model"
 
     def test_real_config_shape_persists_cascade_model(self, db_conn, seeded_job):
         """Real config.yaml uses providers.overrides.{provider}.score, not
