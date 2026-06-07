@@ -138,7 +138,9 @@ class TestScoreAndPersistJob:
         assessment = _make_assessment(provider="ollama")
 
         def stub_scorer(job, conn_arg, cfg, candidate_context):
-            return ScoringResult(status="ok", data=assessment, provider="ollama")
+            return ScoringResult(
+                status="ok", data=assessment, provider="ollama", model="qwen2.5:14b"
+            )
 
         so.score_and_persist_job(
             seeded_job,
@@ -339,26 +341,6 @@ class TestScoreAndPersistJob:
         assert callable(so.score_and_persist_job)
 
 
-class TestResolveScoringModel:
-    """Covers the tiny config-extraction helper used by score_and_persist_job."""
-
-    def test_reads_providers_scoring_model(self):
-        cfg = {"providers": {"scoring": {"model": "qwen2.5:14b"}}}
-        assert so._resolve_scoring_model(cfg, provider=None) == "qwen2.5:14b"
-
-    def test_missing_providers_returns_none(self):
-        assert so._resolve_scoring_model({}, provider=None) is None
-
-    def test_missing_scoring_block_returns_none(self):
-        assert (
-            so._resolve_scoring_model(
-                {"providers": {"low": {"model": "x"}}},
-                provider=None,
-            )
-            is None
-        )
-
-
 class TestCascadeModelPersisted:
     """The real config uses providers.overrides.{provider}.score, not
     providers.scoring.model. _resolve_scoring_model can't read that path,
@@ -393,13 +375,18 @@ class TestCascadeModelPersisted:
         assert row["scoring_provider"] == "ollama"
         assert row["scoring_model"] == "qwen2.5:14b"
 
-    def test_falls_back_to_config_when_result_model_absent(self, db_conn, seeded_job):
-        """Legacy callers / test stubs without a model field still work via
-        the providers.scoring.model fallback path."""
+    def test_result_model_absent_persists_null(self, db_conn, seeded_job):
+        """When ScoringResult carries no model, scoring_model persists as NULL.
+
+        The old providers.scoring.model config-fallback path (_resolve_scoring_model)
+        was removed because it read a forbidden Phase-40 key that is absent from
+        the live flat schema and always returned None anyway.
+        """
         conn, _ = db_conn
         config = {
             "providers": {
-                "scoring": {"model": "config-fallback-model"},
+                "primary": "ollama",
+                "overrides": {"ollama": {"score": "qwen2.5:14b"}},
             }
         }
         assessment = _make_assessment(provider="ollama")
@@ -413,7 +400,7 @@ class TestCascadeModelPersisted:
             "SELECT scoring_model FROM jobs WHERE dedup_key = ?",
             ("job-abc",),
         ).fetchone()
-        assert row["scoring_model"] == "config-fallback-model"
+        assert row["scoring_model"] is None
 
     def test_real_config_shape_persists_cascade_model(self, db_conn, seeded_job):
         """Real config.yaml uses providers.overrides.{provider}.score, not
