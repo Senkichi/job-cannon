@@ -421,6 +421,7 @@ def _crawl_companies(
                                     careers_url,
                                     target_titles,
                                     title_exclusions,
+                                    db_path=db_path,
                                 )
                                 if static_result:
                                     jobs = static_result
@@ -450,6 +451,7 @@ def _crawl_companies(
                                         title_exclusions,
                                         search_keywords,
                                         config,
+                                        db_path=db_path,
                                     )
                                     jobs = pw_jobs
                                     tier_used = "playwright"
@@ -467,6 +469,7 @@ def _crawl_companies(
                                         careers_url,
                                         target_titles,
                                         title_exclusions,
+                                        db_path=db_path,
                                     )
                                     tier_used = "playwright"
                                     local_summary["playwright_rendered"] += 1

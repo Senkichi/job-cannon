@@ -29,6 +29,7 @@ from bs4 import BeautifulSoup
 
 from job_finder.web._http_constants import _HEADERS, _TIMEOUT
 from job_finder.web.careers_crawler._static_tier import _extract_jobs_from_soup
+from job_finder.web.db_helpers import standalone_connection
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +43,7 @@ def _try_playwright_extract(
     url: str,
     target_titles: list[str],
     exclusions: list[str],
+    db_path: str | None = None,
 ) -> list[dict]:
     """Render page with Playwright and extract jobs from rendered DOM.
 
@@ -50,6 +52,7 @@ def _try_playwright_extract(
         url: Careers page URL to render.
         target_titles: Target title keywords.
         exclusions: Exclusion keywords.
+        db_path: Optional path to SQLite DB for Phase-B raw-HTML capture.
 
     Returns:
         List of matched job dicts. Empty on timeout/error.
@@ -62,7 +65,27 @@ def _try_playwright_extract(
 
         html = page.content()
         soup = BeautifulSoup(html, "html.parser")
-        return _extract_jobs_from_soup(soup, url, target_titles, exclusions)
+        jobs = _extract_jobs_from_soup(soup, url, target_titles, exclusions)
+
+        # --- Autoheal Phase B: record final rendered HTML (detect=True) ---
+        if db_path:
+            try:
+                from job_finder.web.autoheal.health_monitor import record_extraction as _rec
+
+                with standalone_connection(db_path) as cap_conn:
+                    _rec(
+                        cap_conn,
+                        "careers",
+                        "careers",
+                        html[:50000],
+                        job_count=len(jobs),
+                        detect=True,
+                    )
+                    cap_conn.commit()
+            except Exception:
+                pass  # observability must never break ingestion
+
+        return jobs
 
     except Exception as e:
         logger.debug("Playwright render failed for '%s': %s", url, e)
@@ -82,6 +105,7 @@ def _try_playwright_active(
     exclusions: list[str],
     search_keywords: list[str],
     config: dict,
+    db_path: str | None = None,
 ) -> tuple[list[dict], str | None]:
     """Render page with Playwright, interact to discover more jobs.
 
@@ -96,6 +120,7 @@ def _try_playwright_active(
         exclusions: Title keywords for exclusion filter.
         search_keywords: Deduplicated keywords for search form submission.
         config: App config dict (for interaction limits).
+        db_path: Optional path to SQLite DB for Phase-B raw-HTML capture.
 
     Returns:
         Tuple of (jobs_list, discovered_api_endpoint_or_None).
@@ -229,6 +254,25 @@ def _try_playwright_active(
                 url,
                 len(all_jobs),
             )
+
+        # --- Autoheal Phase B: record final rendered HTML once at exit (detect=True) ---
+        if db_path:
+            try:
+                from job_finder.web.autoheal.health_monitor import record_extraction as _rec
+
+                final_html = page.content()
+                with standalone_connection(db_path) as cap_conn:
+                    _rec(
+                        cap_conn,
+                        "careers",
+                        "careers",
+                        final_html[:50000],
+                        job_count=len(all_jobs),
+                        detect=True,
+                    )
+                    cap_conn.commit()
+            except Exception:
+                pass  # observability must never break ingestion
 
         return all_jobs, discovered_api
 

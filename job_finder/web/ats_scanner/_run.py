@@ -403,27 +403,16 @@ def _scan_one_company_via_ats_api(
             logger.warning("Unknown ATS platform '%s' for company '%s'", platform, company_name)
             job_dicts = []
         else:
-            job_dicts = run_platform_scan(scanner, slug, target_titles, title_exclusions)
+            # Pass conn so run_platform_scan captures the raw pre-filter
+            # API response with detect=True (Phase B).  The Phase-A
+            # detect=False post-filter hook has been removed; raw capture
+            # at the registry chokepoint supersedes it.
+            job_dicts = run_platform_scan(
+                scanner, slug, target_titles, title_exclusions, conn=conn
+            )
 
         company_jobs_found = len(job_dicts)
         summary["jobs_discovered"] += company_jobs_found
-
-        # --- Autoheal Phase A: capture ATS extraction baseline (detect=False) ---
-        # Raw API response isn't reachable here; capture the post-filter count only.
-        # Detection (break-rule) is Phase B when raw artifact capture lands.
-        try:
-            from job_finder.web.autoheal.health_monitor import record_extraction as _rec_ext
-
-            _rec_ext(
-                conn,
-                f"ats:{platform}",
-                "ats",
-                f"matched={company_jobs_found} slug={slug}",
-                job_count=company_jobs_found,
-                detect=False,
-            )
-        except Exception:
-            pass  # observability must never break ingestion
 
         # Upsert each matched job (uses inner standalone_connection per Phase A semantics).
         with standalone_connection(db_path) as scan_conn:

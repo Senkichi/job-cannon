@@ -76,33 +76,20 @@ _API_PATTERNS = [
     "/wday/cxs/",  # Workday REST API
 ]
 
-# JSON keys that typically hold job arrays
-_JOB_ARRAY_KEYS = [
-    "jobs",
-    "results",
-    "data",
-    "positions",
-    "openings",
-    "postings",
-    "items",
-    "jobPostings",
-    "records",
-    "hits",
-]
-
-# Fields that indicate a dict is a job object
-_JOB_TITLE_FIELDS = ["title", "name", "position", "jobTitle", "job_title", "positionTitle", "role"]
-_JOB_URL_FIELDS = [
-    "url",
-    "link",
-    "href",
-    "applyUrl",
-    "apply_url",
-    "detailUrl",
-    "detail_url",
-    "jobUrl",
-    "canonicalUrl",
-]
+# Field-alias helpers are defined in _field_alias and re-exported here
+# under the private names that existing callers in this module use.
+from job_finder.web._field_alias import (
+    JOB_TITLE_FIELDS as _JOB_TITLE_FIELDS,
+)
+from job_finder.web._field_alias import (
+    JOB_URL_FIELDS as _JOB_URL_FIELDS,
+)
+from job_finder.web._field_alias import (
+    extract_field as _extract_field,
+)
+from job_finder.web._field_alias import (
+    find_job_array as _find_job_array,
+)
 
 # Navigation path prefixes to skip (not job links)
 _NAV_PATH_PREFIXES = (
@@ -544,30 +531,7 @@ def _is_ats_url(url: str) -> bool:
     return any(ats in netloc for ats in _ATS_DOMAINS)
 
 
-def _find_job_array(data) -> list | None:
-    """Find the array of job objects in a JSON response."""
-    if isinstance(data, list):
-        return data if data and isinstance(data[0], dict) else None
-
-    if isinstance(data, dict):
-        for key in _JOB_ARRAY_KEYS:
-            if key in data and isinstance(data[key], list):
-                return data[key]
-
-        # Check nested: {data: {jobs: [...]}} or {results: {items: [...]}}
-        for outer_key in ("data", "results", "response", "body"):
-            if outer_key in data and isinstance(data[outer_key], dict):
-                inner = data[outer_key]
-                for key in _JOB_ARRAY_KEYS:
-                    if key in inner and isinstance(inner[key], list):
-                        return inner[key]
-
-    return None
-
-
-def _extract_field(obj: dict, field_names: list[str]):
-    """Extract the first matching field value from a dict."""
-    for name in field_names:
-        if obj.get(name):
-            return obj[name]
-    return None
+# _find_job_array and _extract_field are imported from job_finder.web._field_alias
+# above — they are not re-defined here.  Any internal callers reference them
+# via the ``_find_job_array`` / ``_extract_field`` aliases established in the
+# import block so no call-site changes are needed.

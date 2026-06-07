@@ -31,6 +31,7 @@ from job_finder.web.careers_crawler._title_filters import (
     _is_metadata_blob,
     _is_nav_path,
 )
+from job_finder.web.db_helpers import standalone_connection
 
 logger = logging.getLogger(__name__)
 
@@ -198,6 +199,7 @@ def _try_static_extract(
     url: str,
     target_titles: list[str],
     exclusions: list[str],
+    db_path: str | None = None,
 ) -> list[dict] | None:
     """Try extracting jobs from static HTML (no JS rendering).
 
@@ -229,6 +231,24 @@ def _try_static_extract(
     # Extract jobs regardless — JSON-LD works even on JS-heavy pages
     # if the structured data is embedded in the initial HTML
     jobs = _extract_jobs_from_soup(soup, url, target_titles, exclusions)
+
+    # --- Autoheal Phase B: record raw HTML + extraction count (detect=True) ---
+    if db_path:
+        try:
+            from job_finder.web.autoheal.health_monitor import record_extraction as _rec
+
+            with standalone_connection(db_path) as cap_conn:
+                _rec(
+                    cap_conn,
+                    "careers",
+                    "careers",
+                    html[:50000],
+                    job_count=len(jobs),
+                    detect=True,
+                )
+                cap_conn.commit()
+        except Exception:
+            pass  # observability must never break ingestion
 
     if jobs:
         # Found jobs statically — no need for Playwright

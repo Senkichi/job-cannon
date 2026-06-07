@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 
+from job_finder.web._field_alias import JOB_TITLE_FIELDS, JOB_URL_FIELDS, extract_field
 from job_finder.web.ats_platforms._registry import (
     PlatformScanner,
     _http_get_json,
@@ -78,13 +79,21 @@ def _posting_to_job(posting: dict, slug: str) -> dict:
     if created_at_ms is not None:
         posted_date = datetime.fromtimestamp(created_at_ms / 1000, tz=UTC).isoformat()
 
+    # ── Title / URL via shared alias lists (Phase B field-rename tolerance) ────
+    # extract_field returns the first matching key from each alias list so a
+    # renamed Lever key (e.g. "text" → "title") still resolves.
+    # The canonical Lever keys ("text", "hostedUrl") appear early in each
+    # list so currently-working postings are unaffected.
+    title = extract_field(posting, JOB_TITLE_FIELDS) or ""
+    source_url = extract_field(posting, JOB_URL_FIELDS) or ""
+
     return {
-        "title": posting.get("text", ""),
+        "title": title,
         "company_source": "Lever",
         "location": location,
         "locations_structured": _to_canonical(posting),
         "description": posting.get("descriptionPlain") or "",
-        "source_url": posting.get("hostedUrl") or "",
+        "source_url": source_url,
         "salary_min": salary_min,
         "salary_max": salary_max,
         "comp_json": comp_json,
