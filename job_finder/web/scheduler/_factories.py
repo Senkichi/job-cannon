@@ -12,6 +12,7 @@ rather than at scheduler-setup time inside ``init_scheduler``.
 
 import logging
 
+from job_finder.web import run_events
 from job_finder.web.db_helpers import get_config_snapshot
 from job_finder.web.live_events import publish as _publish_live
 
@@ -38,15 +39,42 @@ def _make_simple_job(app, name, import_func, *, publish_events=()):
     """
 
     def wrapper():
+        import time as _time
+
         with app.app_context():
             config = get_config_snapshot(app)
             db_path = app.config.get("DB_PATH", "jobs.db")
+            t0 = _time.time()
+            counters0 = run_events.db_counters(db_path)
+            run_id = run_events.start(
+                job=name, source="scheduler", db_path=db_path, db_before=counters0
+            )
             try:
                 result = import_func()(db_path, config)
                 logger.info("%s: %s", name, result)
+                run_events.end(
+                    run_id,
+                    job=name,
+                    source="scheduler",
+                    disposition="completed",
+                    db_path=db_path,
+                    db_before=counters0,
+                    duration_s=round(_time.time() - t0, 2),
+                    result=result,
+                )
                 _publish_all(publish_events)
             except Exception as e:
                 logger.error("%s failed: %s", name, e)
+                run_events.end(
+                    run_id,
+                    job=name,
+                    source="scheduler",
+                    disposition="failed",
+                    db_path=db_path,
+                    db_before=counters0,
+                    duration_s=round(_time.time() - t0, 2),
+                    error=type(e).__name__,
+                )
 
     return wrapper
 
@@ -90,22 +118,38 @@ def _make_tracked_job(
                 return
 
             t0 = _time.time()
+            counters0 = run_events.db_counters(db_path)
+            run_id = run_events.start(
+                job=name, source="scheduler", db_path=db_path, db_before=counters0
+            )
             try:
                 result = import_func()(db_path, config)
                 logger.info("%s: %s", name, result)
                 metadata = extract_metadata(result)
-                metadata["duration_seconds"] = round(_time.time() - t0, 2)
+                duration = round(_time.time() - t0, 2)
+                metadata["duration_seconds"] = duration
                 # status="degraded" when extract_metadata surfaces a non-empty
                 # errors list (e.g., pipeline_detection skipped because Gmail
                 # auth failed). Truthful status lets the dashboard distinguish
                 # "ran clean" from "ran but produced nothing useful".
                 metadata["status"] = "degraded" if metadata.get("errors") else "success"
                 log_activity(db_path, action, metadata=metadata)
+                run_events.end(
+                    run_id,
+                    job=name,
+                    source="scheduler",
+                    disposition="degraded" if metadata["status"] == "degraded" else "completed",
+                    db_path=db_path,
+                    db_before=counters0,
+                    duration_s=duration,
+                    result=result,
+                )
                 # A completed run (even degraded) may have mutated rows; tell
                 # live widgets to refetch. Failures fall through to the except
                 # branch and intentionally publish nothing.
                 _publish_all(publish_events)
             except Exception as e:
+                duration = round(_time.time() - t0, 2)
                 logger.error("%s failed: %s", name, e)
                 log_activity(
                     db_path,
@@ -113,8 +157,18 @@ def _make_tracked_job(
                     metadata={
                         "status": "failed",
                         "error": type(e).__name__,
-                        "duration_seconds": round(_time.time() - t0, 2),
+                        "duration_seconds": duration,
                     },
+                )
+                run_events.end(
+                    run_id,
+                    job=name,
+                    source="scheduler",
+                    disposition="failed",
+                    db_path=db_path,
+                    db_before=counters0,
+                    duration_s=duration,
+                    error=type(e).__name__,
                 )
 
     return wrapper
