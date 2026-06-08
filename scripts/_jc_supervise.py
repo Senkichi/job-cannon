@@ -89,7 +89,10 @@ def pid_alive(pid: int) -> bool:
     try:
         os.kill(pid, 0)
         return True
-    except OSError:
+    except (OSError, OverflowError, ValueError):
+        # OverflowError/ValueError: a pid larger than the platform pid_t max
+        # (e.g. a sentinel "definitely dead" pid on 32-bit pid_t Linux) cannot
+        # name a live process — treat as not alive rather than propagating.
         return False
 
 
