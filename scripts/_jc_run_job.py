@@ -38,6 +38,7 @@ for _stream in (sys.stdout, sys.stderr):
     except Exception:
         pass
 
+
 def _default_db() -> str:
     """Resolve the jobs.db path portably: $JC_DB_PATH, else
     $JOB_CANNON_USER_DATA_DIR/jobs.db, else <repo-root>/jobs.db."""
@@ -78,7 +79,9 @@ def _setup_logging() -> None:
     root.setLevel(logging.INFO)
     h = logging.StreamHandler(sys.stdout)
     h.setLevel(logging.INFO)
-    h.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s", "%H:%M:%S"))
+    h.setFormatter(
+        logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s", "%H:%M:%S")
+    )
     root.addHandler(h)
     # Quiet the known-noisy transitive loggers (mirrors create_app's suppression).
     logging.getLogger("primp").setLevel(logging.WARNING)
@@ -115,7 +118,7 @@ def main() -> int:
     # reconstruct it from (job, pid) and record reaped/stalled if we are killed.
     try:
         from job_finder.web import run_events
-    except Exception:  # noqa: BLE001
+    except Exception:
         run_events = None
     run_id = f"{key}:{os.getpid()}"
     counters0 = run_events.db_counters(db_path) if run_events else None
@@ -160,7 +163,7 @@ def main() -> int:
                 result=result,
             )
         return 0
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         elapsed = round(time.time() - t0, 1)
         log.error("RUNNER FAIL job=%s elapsed=%ss %s: %s", key, elapsed, type(exc).__name__, exc)
         traceback.print_exc()

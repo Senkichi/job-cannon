@@ -46,7 +46,7 @@ import logging
 import os
 import sqlite3
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -77,7 +77,7 @@ def events_path() -> Path:
 
 def _utc_iso() -> str:
     """Naive UTC ISO-8601 to second resolution (store-UTC / render-local)."""
-    return datetime.now(timezone.utc).replace(tzinfo=None, microsecond=0).isoformat()
+    return datetime.now(UTC).replace(tzinfo=None, microsecond=0).isoformat()
 
 
 def make_run_id(job: str, pid: int, *, unique: bool = True) -> str:
@@ -100,7 +100,7 @@ def _append(record: dict) -> None:
         line = json.dumps(record, default=str, ensure_ascii=False)
         with open(events_path(), "a", encoding="utf-8") as handle:
             handle.write(line + "\n")
-    except Exception as exc:  # noqa: BLE001 — instrumentation must never break a job
+    except Exception as exc:
         logger.warning("run_events: emit failed (%s): %s", type(exc).__name__, exc)
 
 
@@ -157,7 +157,7 @@ def db_counters(db_path: str | os.PathLike | None) -> dict | None:
             )
         finally:
             conn.close()
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         return {"error": f"{type(exc).__name__}: {exc}"}
     return out
 
@@ -266,7 +266,9 @@ def heartbeat(
     )
 
 
-def mark(event: str, run_id: str, *, job: str, source: str, pid: int | None = None, **fields) -> None:
+def mark(
+    event: str, run_id: str, *, job: str, source: str, pid: int | None = None, **fields
+) -> None:
     """Emit an arbitrary terminal/diagnostic event (e.g. ``reaped``, ``stalled``)."""
     _emit(event, run_id=run_id, job=job, source=source, pid=pid, **fields)
 
@@ -300,6 +302,6 @@ def find_terminal(run_id: str, path: str | os.PathLike | None = None) -> str | N
                     return rec.get("disposition") or "completed"
                 if rec.get("event") in ("reaped", "stalled"):
                     return rec["event"]
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.warning("run_events: find_terminal failed: %s", exc)
     return None

@@ -16,7 +16,9 @@ def events_file(tmp_path, monkeypatch):
 
 
 def _read(path):
-    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    return [
+        json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()
+    ]
 
 
 def test_events_path_env_override(events_file):
@@ -26,8 +28,14 @@ def test_events_path_env_override(events_file):
 def test_start_end_roundtrip_correlates_run_id(events_file):
     run_id = run_events.start(job="enrichment", source="harness", pid=4242)
     run_events.end(
-        run_id, job="enrichment", source="harness", disposition="completed",
-        pid=4242, duration_s=12.5, exit_code=0, result={"scored": 3},
+        run_id,
+        job="enrichment",
+        source="harness",
+        disposition="completed",
+        pid=4242,
+        duration_s=12.5,
+        exit_code=0,
+        result={"scored": 3},
     )
     records = _read(events_file)
     assert [r["event"] for r in records] == ["run_start", "run_end"]

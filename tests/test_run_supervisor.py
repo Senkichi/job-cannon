@@ -26,7 +26,9 @@ def sup():
 def test_classify_clean_exit_wins_even_if_alive(sup):
     # A terminal run_end on disk means the runner finished; nothing to record.
     assert sup.classify(alive=True, log_age=10, stall_sec=420, run_end_seen=True) == "clean_exit"
-    assert sup.classify(alive=False, log_age=9999, stall_sec=420, run_end_seen=True) == "clean_exit"
+    assert (
+        sup.classify(alive=False, log_age=9999, stall_sec=420, run_end_seen=True) == "clean_exit"
+    )
 
 
 def test_classify_reaped_when_dead_and_no_terminal(sup):

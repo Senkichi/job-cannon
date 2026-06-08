@@ -14,6 +14,7 @@ import os
 import sqlite3
 import sys
 
+
 def _default_db() -> str:
     """Resolve the jobs.db path portably: $JC_DB_PATH, else
     $JOB_CANNON_USER_DATA_DIR/jobs.db, else <repo-root>/jobs.db."""
@@ -40,14 +41,14 @@ def q1(c, sql, params=()):
     try:
         row = c.execute(sql, params).fetchone()
         return row[0] if row else None
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         return f"ERR({type(e).__name__}: {e})"
 
 
 def qrows(c, sql, params=()):
     try:
         return c.execute(sql, params).fetchall()
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         return [("ERR", f"{type(e).__name__}: {e}")]
 
 
@@ -97,7 +98,7 @@ def main() -> None:
             "SELECT COALESCE(classification,'(null)'), COUNT(*) FROM jobs "
             "GROUP BY classification ORDER BY 2 DESC",
         ):
-            print(f"   {str(k):<18} {v}")
+            print(f"   {k!s:<18} {v}")
 
     if "enrichment_tier" in jc:
         print("-- by enrichment_tier --")
@@ -106,7 +107,7 @@ def main() -> None:
             "SELECT COALESCE(enrichment_tier,'(null)'), COUNT(*) FROM jobs "
             "GROUP BY enrichment_tier ORDER BY 2 DESC",
         ):
-            print(f"   {str(k):<18} {v}")
+            print(f"   {k!s:<18} {v}")
 
     if "pipeline_status" in jc:
         print("-- by pipeline_status --")
@@ -115,7 +116,7 @@ def main() -> None:
             "SELECT COALESCE(pipeline_status,'(null)'), COUNT(*) FROM jobs "
             "GROUP BY pipeline_status ORDER BY 2 DESC",
         ):
-            print(f"   {str(k):<18} {v}")
+            print(f"   {k!s:<18} {v}")
 
     if "source" in jc:
         print("-- by source (top 15) --")
@@ -124,12 +125,14 @@ def main() -> None:
             "SELECT COALESCE(source,'(null)'), COUNT(*) FROM jobs "
             "GROUP BY source ORDER BY 2 DESC LIMIT 15",
         ):
-            print(f"   {str(k):<22} {v}")
+            print(f"   {k!s:<22} {v}")
 
     if "first_seen" in jc:
         print(
             "jobs_first_seen_today     = "
-            + str(q1(c, "SELECT COUNT(*) FROM jobs WHERE date(first_seen)=date('now','localtime')"))
+            + str(
+                q1(c, "SELECT COUNT(*) FROM jobs WHERE date(first_seen)=date('now','localtime')")
+            )
         )
         print(
             "jobs_first_seen_utc_today = "
@@ -139,7 +142,9 @@ def main() -> None:
         print(f"jobs_is_stale             = {q1(c, 'SELECT COUNT(*) FROM jobs WHERE is_stale=1')}")
 
     # companies
-    if "companies" in {r[0] for r in qrows(c, "SELECT name FROM sqlite_master WHERE type='table'")}:
+    if "companies" in {
+        r[0] for r in qrows(c, "SELECT name FROM sqlite_master WHERE type='table'")
+    }:
         print(f"total_companies           = {q1(c, 'SELECT COUNT(*) FROM companies')}")
         cc = cols(c, "companies")
         if "ats_platform" in cc:
@@ -149,7 +154,7 @@ def main() -> None:
                 "SELECT COALESCE(ats_platform,'(null)'), COUNT(*) FROM companies "
                 "GROUP BY ats_platform ORDER BY 2 DESC LIMIT 12",
             ):
-                print(f"   {str(k):<18} {v}")
+                print(f"   {k!s:<18} {v}")
 
     # user_activity recency
     print("-- last user_activity per scheduled_* action --")
@@ -158,7 +163,7 @@ def main() -> None:
         "SELECT action, MAX(occurred_at) FROM user_activity "
         "WHERE action LIKE 'scheduled_%' OR action='sync' GROUP BY action ORDER BY 2 DESC",
     ):
-        print(f"   {str(k):<32} {v}")
+        print(f"   {k!s:<32} {v}")
 
     print("-- user_activity failures (last 24h) --")
     fails = qrows(
@@ -169,7 +174,7 @@ def main() -> None:
     )
     if fails:
         for k, v in fails:
-            print(f"   {str(k):<32} {v}")
+            print(f"   {k!s:<32} {v}")
     else:
         print("   (none)")
 
@@ -203,7 +208,7 @@ def main() -> None:
                     f"WHERE date({tcol})=date('now') GROUP BY {pcol} ORDER BY 2 DESC",
                 ):
                     prov, total, n = (list(row) + [None, None, None])[:3]
-                    print(f"   {str(prov):<18} ${total}  n={n}")
+                    print(f"   {prov!s:<18} ${total}  n={n}")
     print(f"==== END SNAPSHOT [{label}] ====", flush=True)
     c.close()
 

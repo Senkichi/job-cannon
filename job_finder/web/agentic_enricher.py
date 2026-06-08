@@ -46,6 +46,7 @@ def _resolve_batch_limit(config: dict, limit: int | None) -> int:
     except (TypeError, ValueError):
         return DEFAULT_AGENTIC_BATCH_LIMIT
 
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
