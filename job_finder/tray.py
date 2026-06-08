@@ -161,9 +161,7 @@ class TrayApp:
         """Serve via Werkzeug. ``self.app`` was built in ``__init__`` — we do
         NOT call ``create_app()`` again (invariant 1)."""
         assert self.app is not None, "TrayApp.app must be set in __init__"
-        self.werkzeug_server = make_server(
-            self.bind_host, self.port, self.app, threaded=True
-        )
+        self.werkzeug_server = make_server(self.bind_host, self.port, self.app, threaded=True)
         self.werkzeug_server.serve_forever()
 
     def _load_icon(self):
@@ -171,11 +169,7 @@ class TrayApp:
 
         from PIL import Image
 
-        with (
-            resources.files("job_finder.assets")
-            .joinpath("tray_icon.png")
-            .open("rb") as fh
-        ):
+        with resources.files("job_finder.assets").joinpath("tray_icon.png").open("rb") as fh:
             return Image.open(fh).copy()
 
     def run(self) -> None:
@@ -235,9 +229,7 @@ class TrayApp:
         Ctrl+C; ``runtime_shutdown`` still fires via ``_shutdown_all``."""
         debug = self.cfg.get("server", {}).get("debug", False)
         try:
-            self.app.run(
-                host=self.bind_host, port=self.port, debug=debug, use_reloader=False
-            )
+            self.app.run(host=self.bind_host, port=self.port, debug=debug, use_reloader=False)
         finally:
             self._shutdown_all()
 
