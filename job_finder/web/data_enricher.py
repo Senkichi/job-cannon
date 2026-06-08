@@ -45,7 +45,7 @@ from typing import Any
 from job_finder.config import JD_STORAGE_MAX_CHARS
 from job_finder.db._direct_link import set_direct_url
 from job_finder.db._jd_full import set_jd_full as _set_jd_full
-from job_finder.db._jobs import _normalize_salary
+from job_finder.db._jobs import _reconcile_salary_for_write
 from job_finder.web.direct_link import pick_direct_link
 from job_finder.web.enrichment_sources import merge_apply_urls, parse_source_urls
 from job_finder.web.enrichment_tiers import (
@@ -620,9 +620,12 @@ def _persist(conn: Any, job_row: dict, enriched: dict, tier_name: str) -> None:
     1. ``jd_full`` — routed through ``_set_jd_full()`` (I-13 junk gate) as a
        separate commit.  A junk JD is logged and skipped; ``_set_jd_full`` never
        raises, so a bad JD cannot abort the remaining writes.
-    2. ``salary_min`` / ``salary_max`` — normalised via ``_normalize_salary()``
-       before the UPDATE (I-02 inversion fix).  A same-unit inversion is swapped;
-       an extreme unit-mismatch drops both fields and logs a WARNING.
+    2. ``salary_min`` / ``salary_max`` — reconciled via
+       ``_reconcile_salary_for_write()`` before the UPDATE (I-02 inversion fix).
+       A single new value that would invert against the existing stored
+       counterpart is dropped (keeping existing) so the I-02 trigger cannot abort
+       the persist; a both-field same-unit inversion is swapped; an extreme
+       mismatch drops the incoming pair. Drops log a WARNING.
     3. Remaining fields (``location``, normalised salary) + ``enrichment_tier``
        in one UPDATE.  If that UPDATE fails unexpectedly, a fallback tier-only
        UPDATE ensures the tier bookmark is always recorded so the job is not
@@ -665,28 +668,29 @@ def _persist(conn: Any, job_row: dict, enriched: dict, tier_name: str) -> None:
         except Exception as e:
             logger.warning("_persist: jd_full write failed for '%s': %s", dedup_key, e)
 
-    # --- Step 2: salary — normalise before writing (I-02 inversion fix) ---
-    # Both fields are extracted together so _normalize_salary() can swap or
-    # null an inverted pair atomically.  Single-field salary writes (one is
-    # None) pass through unchanged — the normaliser's early-return branch.
+    # --- Step 2: salary — reconcile before writing (I-02 inversion fix) ---
+    # _reconcile_salary_for_write() validates the EFFECTIVE pair the I-02 trigger
+    # will see: a single-field update leaves the unset column at its stored
+    # value, so a new value that inverts against the existing counterpart trips
+    # tg_jobs_salary_range and aborts the whole persist. The helper drops such an
+    # incoming value (keeping existing) rather than letting the trigger fire.
     sal_min = safe_enriched.pop("salary_min", None)
     sal_max = safe_enriched.pop("salary_max", None)
     if sal_min is not None or sal_max is not None:
-        orig_min, orig_max = sal_min, sal_max
-        sal_min, sal_max = _normalize_salary(sal_min, sal_max)
-        if sal_min is None and sal_max is None and (orig_min is not None or orig_max is not None):
+        salary_cols, dropped = _reconcile_salary_for_write(
+            sal_min, sal_max, job_row.get("salary_min"), job_row.get("salary_max")
+        )
+        if dropped:
             logger.warning(
-                "_persist: salary dropped for '%s' (extreme inversion or zero "
-                "after normalisation; original min=%s max=%s)",
+                "_persist: salary dropped for '%s' (would invert the stored range; "
+                "incoming min=%s max=%s, existing min=%s max=%s)",
                 dedup_key,
-                orig_min,
-                orig_max,
+                sal_min,
+                sal_max,
+                job_row.get("salary_min"),
+                job_row.get("salary_max"),
             )
-        else:
-            if sal_min is not None:
-                safe_enriched["salary_min"] = sal_min
-            if sal_max is not None:
-                safe_enriched["salary_max"] = sal_max
+        safe_enriched.update(salary_cols)
 
     # --- Step 3: remaining fields + enrichment_tier ---
     # enrichment_tier is always written — even when every enriched field was

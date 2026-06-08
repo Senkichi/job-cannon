@@ -167,6 +167,53 @@ def _normalize_salary(
     return lo, hi
 
 
+def _reconcile_salary_for_write(
+    sal_min: int | None,
+    sal_max: int | None,
+    existing_min: int | None,
+    existing_max: int | None,
+) -> tuple[dict[str, int | None], bool]:
+    """Decide which salary columns to write so the I-02 trigger never aborts.
+
+    The ``tg_jobs_salary_range`` (I-02) trigger validates ``NEW.salary_min`` vs
+    ``NEW.salary_max``. On a SINGLE-field salary UPDATE the unset column keeps
+    its stored value, so a new value that inverts against the existing
+    counterpart trips the trigger and aborts the *entire* enrichment persist
+    (jd_full survives via its own write; location + tier fall back). Because the
+    trigger guards every write, any stored pair is already consistent — so an
+    effective inversion can only originate from the incoming value.
+
+    Policy:
+      * Both fields supplied → normalise the incoming pair (swap/drop) exactly as
+        before; write the result (or nothing when an extreme mismatch nulls it).
+      * One field supplied → if it would invert against the existing counterpart,
+        drop the incoming value (keep existing, write nothing); otherwise write it.
+
+    Returns:
+        ``(columns_to_write, dropped)`` — ``columns_to_write`` maps salary column
+        names to values to SET; ``dropped`` is True when an inverted/extreme
+        incoming value was discarded (callers may log it).
+    """
+    if sal_min is None and sal_max is None:
+        return {}, False
+
+    if sal_min is not None and sal_max is not None:
+        norm_min, norm_max = _normalize_salary(sal_min, sal_max)
+        if norm_min is None and norm_max is None:
+            return {}, True  # extreme mismatch — keep existing, write nothing
+        return {"salary_min": norm_min, "salary_max": norm_max}, False
+
+    # Single-field update: validate against the existing counterpart.
+    if sal_min is not None:
+        if existing_max is not None and sal_min > existing_max:
+            return {}, True  # would invert vs stored max — drop incoming
+        return {"salary_min": sal_min}, False
+    # sal_max is not None
+    if existing_min is not None and existing_min > sal_max:
+        return {}, True  # would invert vs stored min — drop incoming
+    return {"salary_max": sal_max}, False
+
+
 def merge_description(existing: str | None, new: str | None) -> str | None:
     """Merge two description strings — single source of truth for description merge logic.
 
