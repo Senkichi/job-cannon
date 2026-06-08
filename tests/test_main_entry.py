@@ -7,6 +7,11 @@ as the opt-out switch.
 We don't actually call ``main()`` end-to-end (it would block on
 ``app.run()``); instead we exercise ``_open_browser`` directly and verify
 the URL-banner / timer-scheduling logic via patching.
+
+Note (Issue #40): tray mode is now the default launch mode, so the tests
+that exercise terminal-mode serving pass ``--terminal`` explicitly. The
+assertions are unchanged — they still verify the banner / Timer / app.run
+wiring, now reached via the explicit flag instead of the bare invocation.
 """
 
 from unittest.mock import MagicMock, patch
@@ -47,7 +52,7 @@ def test_main_no_browser_env_var_skips_timer_and_message(monkeypatch, capsys):
         patch("job_finder.config.load_config", return_value={}),
         patch("job_finder.web.create_app", return_value=fake_app),
         patch("job_finder.__main__.threading.Timer") as mock_timer,
-        patch("job_finder.__main__.sys.argv", ["job-cannon"]),
+        patch("job_finder.__main__.sys.argv", ["job-cannon", "--terminal"]),
         # Probe / port checks must be stubbed so the test doesn't depend on
         # what's actually bound on port 5000 during the test run.
         patch("job_finder.__main__.probe_existing_jc", return_value=None),
@@ -76,7 +81,7 @@ def test_main_default_schedules_browser_open(monkeypatch, capsys):
         patch("job_finder.config.load_config", return_value={}),
         patch("job_finder.web.create_app", return_value=fake_app),
         patch("job_finder.__main__.threading.Timer", return_value=fake_timer) as mock_timer_class,
-        patch("job_finder.__main__.sys.argv", ["job-cannon"]),
+        patch("job_finder.__main__.sys.argv", ["job-cannon", "--terminal"]),
         patch("job_finder.__main__.probe_existing_jc", return_value=None),
         patch("job_finder.__main__._port_is_listening", return_value=False),
         patch("job_finder.__main__.acquire_pidfile", return_value=MagicMock(acquired=True)),
@@ -113,7 +118,7 @@ def test_main_respects_server_overrides_in_config(monkeypatch, capsys):
     with (
         patch("job_finder.config.load_config", return_value=cfg),
         patch("job_finder.web.create_app", return_value=fake_app),
-        patch("job_finder.__main__.sys.argv", ["job-cannon"]),
+        patch("job_finder.__main__.sys.argv", ["job-cannon", "--terminal"]),
         patch("job_finder.__main__.probe_existing_jc", return_value=None),
         patch("job_finder.__main__._port_is_listening", return_value=False),
         patch("job_finder.__main__.acquire_pidfile", return_value=MagicMock(acquired=True)),
@@ -140,7 +145,7 @@ def test_main_passes_use_reloader_false(monkeypatch):
     with (
         patch("job_finder.config.load_config", return_value={}),
         patch("job_finder.web.create_app", return_value=fake_app),
-        patch("job_finder.__main__.sys.argv", ["job-cannon"]),
+        patch("job_finder.__main__.sys.argv", ["job-cannon", "--terminal"]),
         patch("job_finder.__main__.probe_existing_jc", return_value=None),
         patch("job_finder.__main__._port_is_listening", return_value=False),
         patch("job_finder.__main__.acquire_pidfile", return_value=MagicMock(acquired=True)),
