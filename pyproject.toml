@@ -102,6 +102,12 @@ dependencies = [
     # ships only core deps; misplacement crashes the app at first import
     # with ModuleNotFoundError. (Plan 44-01, Phase 44 PyPI prep.)
     "python-dotenv~=1.0",
+    # System-tray launch mode (Issue #40, default for end users). pystray owns
+    # the main thread and renders the tray icon; Pillow loads the bundled
+    # job_finder/assets/tray_icon.png. Both are core deps (not extras) because
+    # tray mode is the default invocation path — a pipx install must ship them.
+    "pystray>=0.19",
+    "Pillow>=10.0",
 ]
 
 [project.optional-dependencies]

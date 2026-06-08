@@ -16,6 +16,14 @@ import pytest
 # up their own os.environ patches.
 os.environ.setdefault("GSD_BACKUP_CONFIRMED", "1")
 
+# pystray's Xorg backend connects to the X display at IMPORT time, so a bare
+# `import pystray` on a headless Linux CI runner ($DISPLAY unset) raises
+# Xlib.error.DisplayNameError and crashes collection of tests/test_tray.py.
+# The `dummy` backend is pystray's documented display-free backend; it still
+# exposes Icon / Menu / MenuItem (which the tray tests mock anyway). Set it
+# session-wide before any test module imports pystray. Harmless on Windows/macOS.
+os.environ.setdefault("PYSTRAY_BACKEND", "dummy")
+
 
 def _seed_onboarding_complete(db_path: str) -> None:
     """Seed onboarding_state(id=1, onboarding_complete=1) so the @before_request gate does not redirect tests to /onboarding/welcome.

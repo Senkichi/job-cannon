@@ -47,7 +47,11 @@ def test_timer_daemon_true():
 
 
 def test_main_sets_timer_daemon(monkeypatch):
-    """main() must set timer.daemon = True before starting the timer."""
+    """main() must set timer.daemon = True before starting the timer.
+
+    Passes --terminal because tray mode is the default since Issue #40; the
+    browser Timer being asserted here only exists on the terminal path.
+    """
     monkeypatch.setenv("JOB_CANNON_NO_BROWSER", "0")
     monkeypatch.delenv("JOB_CANNON_NO_BROWSER", raising=False)
 
@@ -70,7 +74,7 @@ def test_main_sets_timer_daemon(monkeypatch):
         patch("job_finder.web._runtime.runtime_shutdown"),
         patch("job_finder.__main__._install_terminal_shutdown"),
         patch("job_finder.__main__.threading.Timer", side_effect=_capturing_timer),
-        patch("job_finder.__main__.sys.argv", ["job-cannon"]),
+        patch("job_finder.__main__.sys.argv", ["job-cannon", "--terminal"]),
         # Hermetic: don't let a live instance on :5000 short-circuit main()
         # before the Timer is created (the assertion target).
         patch("job_finder.__main__.probe_existing_jc", return_value=None),

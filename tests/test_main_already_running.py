@@ -487,7 +487,9 @@ class TestMainSequence:
         with (
             patch("job_finder.__main__.probe_existing_jc", return_value=None),
             patch("job_finder.__main__._port_is_listening", return_value=False),
-            patch("job_finder.__main__.sys.argv", ["job-cannon"]),
+            # --terminal: tray mode is the default since Issue #40; this branch
+            # asserts the lock logic reaches app.run, which is the terminal path.
+            patch("job_finder.__main__.sys.argv", ["job-cannon", "--terminal"]),
             patch("job_finder.config.load_config", return_value={}),
             patch("job_finder.web.create_app", return_value=fake_app),
             patch("job_finder.web._process_lifecycle.install_kill_on_exit"),
@@ -514,7 +516,8 @@ class TestMainSequence:
                 "job_finder.__main__.handle_existing_instance",
                 return_value=ExistingInstanceAction.CONTINUE_STARTUP,
             ),
-            patch("job_finder.__main__.sys.argv", ["job-cannon"]),
+            # --terminal: tray is the default since Issue #40; assert app.run.
+            patch("job_finder.__main__.sys.argv", ["job-cannon", "--terminal"]),
             patch("job_finder.config.load_config", return_value={}),
             patch("job_finder.web.create_app", return_value=fake_app),
             patch("job_finder.web._process_lifecycle.install_kill_on_exit"),
@@ -689,7 +692,8 @@ class TestMainSequence:
                 "job_finder.__main__.handle_existing_instance",
                 return_value=ExistingInstanceAction.CONTINUE_STARTUP,
             ),
-            patch("job_finder.__main__.sys.argv", ["job-cannon"]),
+            # --terminal: tray is the default since Issue #40; assert app.run.
+            patch("job_finder.__main__.sys.argv", ["job-cannon", "--terminal"]),
             patch("job_finder.config.load_config", return_value={}),
             patch("job_finder.web.create_app", return_value=fake_app),
             patch("job_finder.web._process_lifecycle.install_kill_on_exit"),

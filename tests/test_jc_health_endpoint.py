@@ -16,18 +16,23 @@ import pytest
 
 
 @pytest.fixture
-def app():
-    """Minimal create_app() with a temp DB to avoid touching real user data."""
-    import os
+def app(monkeypatch):
+    """Minimal create_app() with a temp DB to avoid touching real user data.
 
+    Uses ``monkeypatch.setenv`` (NOT raw ``os.environ[...] = ...`` + ``del``):
+    monkeypatch restores ``JOB_CANNON_USER_DATA_DIR`` to its *prior* value at
+    teardown. The old raw-``del`` version unconditionally unset the var, so when
+    a dev session / CI had it pointing at a real config, every test that ran
+    after this one resolved a partial platformdirs config and failed in
+    ``load_config()`` — order-dependent cross-test pollution (Issue #40 fix).
+    """
     with tempfile.TemporaryDirectory() as tmp:
-        os.environ["JOB_CANNON_USER_DATA_DIR"] = tmp
+        monkeypatch.setenv("JOB_CANNON_USER_DATA_DIR", tmp)
         from job_finder.web import create_app
 
         application = create_app(config={"TESTING": True, "db": {"path": f"{tmp}/test.db"}})
         application.config["TESTING"] = True
         yield application
-        del os.environ["JOB_CANNON_USER_DATA_DIR"]
 
 
 @pytest.fixture

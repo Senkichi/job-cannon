@@ -57,6 +57,12 @@ def _build_parser() -> argparse.ArgumentParser:
         action="version",
         version=f"job-cannon {_get_version()}",
     )
+    parser.add_argument(
+        "--terminal",
+        action="store_true",
+        help="Force terminal mode (no system tray). Default is tray mode. "
+        "Equivalent to setting JOB_CANNON_NO_TRAY=1.",
+    )
     return parser
 
 
@@ -367,13 +373,63 @@ def _install_terminal_shutdown(app) -> None:
         pass  # pywin32 not available — fine on non-Windows and some Windows configs
 
 
+def _run_terminal_mode(cfg: dict, bind_host: str, port: int, debug: bool, url: str) -> None:
+    """Build the app and serve it on the main thread (terminal mode).
+
+    This is the pre-Issue-#40 launch path, extracted verbatim so the new tray
+    dispatch in :func:`main` can route to it for ``--terminal`` /
+    ``JOB_CANNON_NO_TRAY=1`` and so the asymmetric tray fallback can reuse the
+    same banner + browser-Timer + signal-handler wiring.
+    """
+    from job_finder.web import create_app
+    from job_finder.web._runtime import runtime_shutdown
+
+    app = create_app(config=cfg)
+
+    # F2: surface the URL before any Werkzeug noise and (unless opted out)
+    # kick off a delayed browser open. The print() lands in stdout before
+    # logging is fully attached — this is the one user-facing print in the
+    # whole project, justified because the alternative is a stranded user.
+    no_browser = bool(os.environ.get("JOB_CANNON_NO_BROWSER"))
+
+    print(f"Job Cannon is starting on {url}")
+    if not no_browser:
+        print("Opening your browser…  (Ctrl+C to stop)")
+        # webbrowser.open is documented as thread-safe; firing from a Timer
+        # avoids racing app.run() and keeps the open non-blocking. We use
+        # use_reloader=False below, so this Timer fires exactly once.
+        # daemon=True: if the main thread exits before the Timer fires (e.g.
+        # very fast crash at startup), the Timer thread does not keep the
+        # process alive.
+        timer = threading.Timer(_BROWSER_OPEN_DELAY_SEC, _open_browser, args=(url,))
+        timer.daemon = True
+        timer.start()
+
+    _install_terminal_shutdown(app)
+
+    try:
+        app.run(
+            host=bind_host,
+            port=port,
+            debug=debug,
+            use_reloader=False,
+            # threaded=True is required for the SSE live-update stream (/events):
+            # each open EventSource holds one worker thread for the life of the
+            # connection, and the single-threaded default would let one stream
+            # block every other request. Safe at single-user/local scale.
+            threaded=True,
+        )
+    finally:
+        runtime_shutdown()
+
+
 def main() -> None:
     """Resolve config, build the Flask app, and start the dev server."""
     # SHORT-CIRCUIT: parse --help / --version BEFORE any config / Flask imports.
     # argparse calls sys.exit(0) on --help and --version, so we never touch
     # load_config() if those flags are passed. This is what makes
     # `pipx install job-cannon && job-cannon --help` work without config.yaml.
-    _build_parser().parse_args()
+    args = _build_parser().parse_args()
 
     # Lazy imports so a --help invocation doesn't pay the Flask import cost.
     from job_finder.config import (
@@ -382,7 +438,6 @@ def main() -> None:
         DEFAULT_SERVER_PORT,
         load_config,
     )
-    from job_finder.web import create_app
     from job_finder.web.user_data_dirs import user_data_root
 
     cfg = load_config(allow_missing=True)
@@ -445,52 +500,34 @@ def main() -> None:
             sys.exit(1)
         # CONTINUE_STARTUP: dead-PID retry succeeded inside handle_existing_instance
 
-    # --- Step 4: create app + run.
-    app = create_app(config=cfg)
-
+    # --- Step 4: process-level orphan guard, then dispatch to a launch mode.
     from job_finder.web import _process_lifecycle
 
     # install_kill_on_exit returns None by design — the Job Object handle is
     # retained in module state inside _process_lifecycle_win32.  Idempotent.
+    # Installed before dispatch so BOTH tray and terminal modes get Win32
+    # orphan-on-hard-kill protection for the spawned Ollama subprocess.
     _process_lifecycle.install_kill_on_exit()
 
-    # F2: surface the URL before any Werkzeug noise and (unless opted out)
-    # kick off a delayed browser open. The print() lands in stdout before
-    # logging is fully attached — this is the one user-facing print in the
-    # whole project, justified because the alternative is a stranded user.
-    no_browser = bool(os.environ.get("JOB_CANNON_NO_BROWSER"))
-
-    print(f"Job Cannon is starting on {url}")
-    if not no_browser:
-        print("Opening your browser…  (Ctrl+C to stop)")
-        # webbrowser.open is documented as thread-safe; firing from a Timer
-        # avoids racing app.run() and keeps the open non-blocking. We use
-        # use_reloader=False below, so this Timer fires exactly once.
-        # daemon=True: if the main thread exits before the Timer fires (e.g.
-        # very fast crash at startup), the Timer thread does not keep the
-        # process alive.
-        timer = threading.Timer(_BROWSER_OPEN_DELAY_SEC, _open_browser, args=(url,))
-        timer.daemon = True
-        timer.start()
-
-    _install_terminal_shutdown(app)
-
-    from job_finder.web._runtime import runtime_shutdown
-
-    try:
-        app.run(
-            host=bind_host,
-            port=port,
-            debug=debug,
-            use_reloader=False,
-            # threaded=True is required for the SSE live-update stream (/events):
-            # each open EventSource holds one worker thread for the life of the
-            # connection, and the single-threaded default would let one stream
-            # block every other request. Safe at single-user/local scale.
-            threaded=True,
-        )
-    finally:
-        runtime_shutdown()
+    # Tray mode is the default (Issue #40) — an end user never sees a terminal.
+    # --terminal / JOB_CANNON_NO_TRAY=1 force the existing terminal path; the
+    # tray app also auto-falls back to terminal mode if the icon can't be built.
+    if args.terminal or os.environ.get("JOB_CANNON_NO_TRAY"):
+        _run_terminal_mode(cfg, bind_host, port, debug, url)
+    else:
+        # Importing job_finder.tray pulls in pystray, whose Linux backend
+        # connects to the X display AT IMPORT TIME — on a headless box ($DISPLAY
+        # unset) that raises before TrayApp can even be constructed. Treat an
+        # import failure the same as an Icon-construction failure: fall back to
+        # terminal mode rather than crashing. (TrayApp.run() handles the
+        # post-import Icon / event-loop failures itself.)
+        try:
+            from job_finder.tray import TrayApp
+        except Exception as exc:
+            logger.warning("Tray mode unavailable (%s); falling back to terminal mode", exc)
+            _run_terminal_mode(cfg, bind_host, port, debug, url)
+        else:
+            TrayApp(cfg).run()
 
 
 if __name__ == "__main__":

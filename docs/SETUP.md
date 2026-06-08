@@ -219,7 +219,39 @@ uv run python run.py             # legacy entry, still works (now a shim)
 
 Open http://localhost:5000. Click **Run Pipeline** on the dashboard to fetch + score jobs for the first time. The scheduler also runs ingestion automatically per your chosen cadence (default: 3×/day at 00:00, 08:00, 16:00 local).
 
-To stop: `Ctrl+C` in the terminal. The scheduler's pidfile auto-cleans on graceful shutdown.
+### Tray mode (default) vs terminal mode
+
+By default Job Cannon launches into **tray mode**: a small icon appears in your
+system tray / menu bar and there is no terminal to babysit. Click the icon for:
+
+- **Open Job Cannon** — opens http://localhost:5000 in your browser (also the default action on left-click).
+- **Pause scheduler** — toggles the background ingestion/enrichment scheduler.
+- **Open logs folder** — opens the log directory in your file explorer.
+- **Quit** — stops the server and exits cleanly (within ~5 s, no orphaned processes).
+
+Force the classic **terminal mode** (foreground server, `Ctrl+C` to stop — useful
+for developers, debugging, and headless/CI environments) either way:
+
+```powershell
+uv run job-cannon --terminal
+# or
+$env:JOB_CANNON_NO_TRAY = "1"; uv run job-cannon
+```
+
+To stop: in tray mode use the **Quit** menu item; in terminal mode press `Ctrl+C`.
+The scheduler's pidfile auto-cleans on graceful shutdown.
+
+**Platform notes:**
+
+- **Linux (GNOME 22+):** GNOME does not render tray icons without the
+  [AppIndicator extension](https://extensions.gnome.org/extension/615/appindicator-support/).
+  If the icon can't be created, Job Cannon **auto-falls back to terminal mode**
+  with a log line — no action required. Install the extension to get the tray icon.
+- **macOS:** a brief Dock icon flash at startup is expected. Permanently
+  suppressing it would require `.app` bundling (not yet shipped).
+- **Any platform:** if the tray fails *after* the web server has already started,
+  the app keeps serving **headless** at the logged URL rather than restarting —
+  press `Ctrl+C` to stop.
 
 ---
 
