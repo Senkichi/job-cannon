@@ -33,7 +33,7 @@ import webbrowser
 
 import pystray
 from apscheduler.schedulers.base import STATE_PAUSED
-from werkzeug.serving import make_server
+from werkzeug.serving import BaseWSGIServer, make_server
 
 from job_finder.config import DEFAULT_SERVER_HOST, DEFAULT_SERVER_PORT
 from job_finder.web import create_app
@@ -65,7 +65,7 @@ class TrayApp:
         # invariant 1 — the terminal-mode fallback reuses self.app.
         self.app = create_app(config=cfg)
         self.flask_thread: threading.Thread | None = None
-        self.werkzeug_server = None
+        self.werkzeug_server: BaseWSGIServer | None = None
         self.icon: pystray.Icon | None = None
         self._shutdown_done = False
 
@@ -108,9 +108,9 @@ class TrayApp:
             if sys.platform == "win32":
                 os.startfile(str(path))  # noqa: S606 — documented Windows API
             elif sys.platform == "darwin":
-                subprocess.run(["open", str(path)], check=False)  # noqa: S607
+                subprocess.run(["open", str(path)], check=False)
             else:
-                subprocess.run(["xdg-open", str(path)], check=False)  # noqa: S607
+                subprocess.run(["xdg-open", str(path)], check=False)
         except Exception as exc:
             logger.warning("Open logs folder failed: %s", exc)
 
