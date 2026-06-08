@@ -132,6 +132,16 @@ def create_app(config_path: str = "config.yaml", config: dict | None = None) -> 
         app.config["DB_PATH"] = str(user_data_dirs.db_path())
     if "TESTING" in cfg:
         app.config["TESTING"] = cfg["TESTING"]
+    # Propagate SKIP_SCHEDULER from the config dict into app.config so
+    # init_scheduler's guard (which reads app.config, not cfg) actually fires.
+    # Without this, create_app(config={..., "SKIP_SCHEDULER": True}) still starts
+    # a full background scheduler — the cfg flag only reached the startup-backfill
+    # gate below, never the scheduler guard. Secondary app instances
+    # (scripts/run_overnight.py) relied on the cross-process pidfile lock as an
+    # accidental backstop; standalone (no live app holding the pidfile) the
+    # scheduler started anyway. See worktree validation run 2026-06-07.
+    if cfg.get("SKIP_SCHEDULER"):
+        app.config["SKIP_SCHEDULER"] = True
     app.secret_key = os.environ.get("FLASK_SECRET_KEY") or secrets.token_hex(32)
 
     # --- Database setup ---
