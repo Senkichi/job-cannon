@@ -15,6 +15,7 @@ from the plan (§11):
     route to the terminal path without constructing a TrayApp.
 """
 
+import sys
 from unittest.mock import MagicMock, patch
 
 import pystray
@@ -238,6 +239,23 @@ def test_dispatch_no_tray_env_uses_terminal(monkeypatch, _dispatch_env):
     monkeypatch.setenv("JOB_CANNON_NO_TRAY", "1")
     mock_terminal, mock_tray_cls = _dispatch_env
     with patch("job_finder.__main__.sys.argv", ["job-cannon"]):
+        main_mod.main()
+    mock_terminal.assert_called_once()
+    mock_tray_cls.assert_not_called()
+
+
+def test_dispatch_tray_import_failure_falls_back_to_terminal(monkeypatch, _dispatch_env):
+    """Headless box: `import job_finder.tray` raises (pystray's Xorg backend
+    connects to the display at import). Dispatch must fall back to terminal mode
+    instead of crashing. Simulated by poisoning sys.modules so the import fails."""
+    monkeypatch.delenv("JOB_CANNON_NO_TRAY", raising=False)
+    mock_terminal, mock_tray_cls = _dispatch_env
+    # `None` in sys.modules makes `from job_finder.tray import TrayApp` raise
+    # ImportError — the documented way to simulate an unimportable module.
+    with (
+        patch.dict(sys.modules, {"job_finder.tray": None}),
+        patch("job_finder.__main__.sys.argv", ["job-cannon"]),
+    ):
         main_mod.main()
     mock_terminal.assert_called_once()
     mock_tray_cls.assert_not_called()

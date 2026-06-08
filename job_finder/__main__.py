@@ -515,9 +515,19 @@ def main() -> None:
     if args.terminal or os.environ.get("JOB_CANNON_NO_TRAY"):
         _run_terminal_mode(cfg, bind_host, port, debug, url)
     else:
-        from job_finder.tray import TrayApp
-
-        TrayApp(cfg).run()
+        # Importing job_finder.tray pulls in pystray, whose Linux backend
+        # connects to the X display AT IMPORT TIME — on a headless box ($DISPLAY
+        # unset) that raises before TrayApp can even be constructed. Treat an
+        # import failure the same as an Icon-construction failure: fall back to
+        # terminal mode rather than crashing. (TrayApp.run() handles the
+        # post-import Icon / event-loop failures itself.)
+        try:
+            from job_finder.tray import TrayApp
+        except Exception as exc:
+            logger.warning("Tray mode unavailable (%s); falling back to terminal mode", exc)
+            _run_terminal_mode(cfg, bind_host, port, debug, url)
+        else:
+            TrayApp(cfg).run()
 
 
 if __name__ == "__main__":
