@@ -26,10 +26,26 @@ import re
 import time
 from typing import Any
 
-from job_finder.config import JD_STORAGE_MAX_CHARS
+from job_finder.config import DEFAULT_AGENTIC_BATCH_LIMIT, JD_STORAGE_MAX_CHARS
 from job_finder.db._jd_full import set_jd_full as _set_jd_full
 
 logger = logging.getLogger(__name__)
+
+
+def _resolve_batch_limit(config: dict, limit: int | None) -> int:
+    """Resolve the agentic per-run job cap.
+
+    An explicit ``limit`` (e.g. from the one-shot CLI) always wins. When
+    ``limit is None`` (the scheduled-job path), read ``agentic.batch_limit``
+    from config, falling back to ``DEFAULT_AGENTIC_BATCH_LIMIT``.
+    """
+    if limit is not None:
+        return limit
+    try:
+        return int(config.get("agentic", {}).get("batch_limit", DEFAULT_AGENTIC_BATCH_LIMIT))
+    except (TypeError, ValueError):
+        return DEFAULT_AGENTIC_BATCH_LIMIT
+
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -568,7 +584,7 @@ def enrich_one_job(
 def run_agentic_backfill(
     db_path: str,
     config: dict,
-    limit: int = 50,
+    limit: int | None = None,
 ) -> int:
     """Run agentic enrichment on exhausted jobs missing jd_full.
 
@@ -582,12 +598,17 @@ def run_agentic_backfill(
     Args:
         db_path: Path to SQLite database.
         config: Application config dict for provider routing.
-        limit: Maximum jobs to process.
+        limit: Maximum jobs to process this run. When None (the scheduled-job
+            path), resolved from ``agentic.batch_limit`` in config, defaulting
+            to ``DEFAULT_AGENTIC_BATCH_LIMIT`` (50). An explicit value (e.g.
+            from the one-shot CLI) overrides config.
 
     Returns:
         Number of jobs successfully enriched. Always returns 0 when
         prerequisites (Playwright) are unavailable.
     """
+    limit = _resolve_batch_limit(config, limit)
+
     # Guard: import Playwright before any DB or network work.
     try:
         from playwright.sync_api import sync_playwright

@@ -67,6 +67,13 @@ DEFAULT_LOOKBACK_DAYS = 7
 # --- Output ---
 DEFAULT_MAX_RESULTS = 50
 
+# --- Agentic backfill ---
+# Max jobs the nightly agentic enricher (Ollama + DDG + Playwright) processes
+# per run. This is a RUNTIME-BUDGET bound: each job is ~30-60s of network +
+# render + LLM validation, so the cap keeps the 4:15 AM run clear of the 5:00 AM
+# careers_crawl. Overridable via config: agentic.batch_limit.
+DEFAULT_AGENTIC_BATCH_LIMIT = 50
+
 # --- Job-description storage cap ---
 # Maximum characters of job-description text persisted to jobs.jd_full /
 # jobs.description. This is a STORAGE bound (DB size + a guard against

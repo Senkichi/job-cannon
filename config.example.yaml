@@ -310,6 +310,14 @@ ats:
 scheduler:
   cadence_preset: standard  # one of: light (1x/day 08:00), standard (3x/day 0/8/16), heavy (6x/day every 4h)
 
+# --- Agentic backfill (nightly 4:15 AM Ollama + DDG + Playwright recovery) ---
+agentic:
+  # Max jobs processed per run. Each job is ~30-60s (search + render + LLM
+  # validation), so this is effectively a runtime budget that keeps the
+  # 4:15 AM run clear of careers_crawl at 5:00 AM. Raise to drain a large
+  # backlog faster (at the cost of a longer run); default 50.
+  batch_limit: 50
+
 # --- Development server ---
 server:
   # Host to bind Flask to (use 0.0.0.0 to accept connections from other machines)
