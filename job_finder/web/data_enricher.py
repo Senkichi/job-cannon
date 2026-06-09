@@ -286,11 +286,15 @@ def enrich_job(
                         conn, job_row, config, reason="enrichment_ddg_apply_url"
                     )
 
-                # The DDG tier no longer hands off to a separate LLM
-                # extraction tier — the Haiku/Sonnet synthesis tiers were
-                # removed in Phase 2b sub-fix RC4 (see module docstring).
-                # If DDG returned nothing, we still continue to the next
-                # tier (SerpAPI) with an empty fragment.
+                # Resolve + persist what DDG found (mirrors the free tier).
+                # _resolve_from_fragments maps fragments["url_jd"] -> jd_full
+                # and applies _is_stub_jd's 200-char gate; a stub yields
+                # enriched == {} so escalation to SerpAPI/agentic proceeds.
+                enriched = _resolve_from_fragments(fragments, missing, job_row)
+                if enriched:
+                    enriched = _apply_post_fetch_extraction(enriched, job_row, conn, config)
+                    _persist(conn, job_row, enriched, "ddg")
+                    return enriched
 
             except Exception as e:
                 logger.debug("DDG tier failed for '%s': %s", title, e)

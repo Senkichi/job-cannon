@@ -522,6 +522,194 @@ class TestEnrichJobTierOrder:
 
 
 # ---------------------------------------------------------------------------
+# Tests for DDG tier persistence (issue #224 — silent JD drop)
+# ---------------------------------------------------------------------------
+
+
+class TestDDGTierPersist:
+    """DDG-fetched JDs must be persisted under enrichment_tier='ddg' rather than
+    being captured into ``fragments`` then discarded when control falls through to
+    the terminal exhausted-persist.
+    """
+
+    def test_ddg_jd_persisted_under_ddg_tier(self, sparse_job_row, temp_db):
+        """A real DDG-fetched JD (>= 200 chars) is written with enrichment_tier='ddg'.
+
+        Free tier yields nothing, fetch_ddg_jds returns a usable JD, no SerpAPI
+        key — the row must end up with jd_full set and enrichment_tier='ddg'
+        (not 'exhausted').
+        """
+        from job_finder.web.data_enricher import enrich_job
+
+        sparse_job_row["source_urls"] = "[]"
+        sparse_job_row["company_id"] = None
+
+        temp_db.execute(
+            "INSERT INTO jobs (dedup_key, title, company, location, source_urls) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (
+                sparse_job_row["dedup_key"],
+                sparse_job_row["title"],
+                sparse_job_row["company"],
+                sparse_job_row["location"],
+                sparse_job_row["source_urls"],
+            ),
+        )
+        temp_db.commit()
+
+        ddg_jd = "DuckDuckGo-fetched job description with lots of detail. " * 5
+        assert len(ddg_jd) >= 200  # sanity: must pass the stub gate
+
+        with (
+            patch("job_finder.web.data_enricher.fetch_direct_jd") as mock_fetch,
+            patch("job_finder.web.data_enricher.search_ddg_web") as mock_ddg_web,
+            patch("job_finder.web.data_enricher.fetch_ddg_jds") as mock_ddg_jds,
+            patch("job_finder.web.data_enricher.search_duckduckgo") as mock_ddg,
+            patch("job_finder.web.data_enricher.search_serpapi") as mock_serp,
+        ):
+            mock_fetch.return_value = None
+            mock_ddg_web.return_value = {
+                "ddg_urls": ["https://example.com/posting"],
+                "ddg_snippet": "snippet",
+            }
+            mock_ddg_jds.return_value = (ddg_jd, "https://example.com/posting")
+            mock_ddg.return_value = None
+            mock_serp.return_value = (None, [])
+
+            result = enrich_job(sparse_job_row, serpapi_key=None, conn=temp_db)
+
+        row = temp_db.execute(
+            "SELECT jd_full, enrichment_tier FROM jobs WHERE dedup_key = ?",
+            (sparse_job_row["dedup_key"],),
+        ).fetchone()
+
+        assert row is not None
+        assert row["jd_full"] == ddg_jd, "DDG JD must be persisted, not dropped"
+        assert row["enrichment_tier"] == "ddg", (
+            "Tier must reflect DDG (not 'exhausted')"
+        )
+        assert result.get("jd_full") == ddg_jd
+        # SerpAPI never invoked when DDG already satisfied JD
+        mock_serp.assert_not_called()
+
+    def test_ddg_stub_jd_rejected_and_escalates(self, sparse_job_row, temp_db):
+        """A DDG-returned stub (< 200 chars) is rejected by _is_stub_jd; the row
+        is not persisted under 'ddg' and escalation to SerpAPI/agentic proceeds.
+        """
+        from job_finder.web.data_enricher import enrich_job
+
+        sparse_job_row["source_urls"] = "[]"
+        sparse_job_row["company_id"] = None
+
+        temp_db.execute(
+            "INSERT INTO jobs (dedup_key, title, company, location, source_urls) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (
+                sparse_job_row["dedup_key"],
+                sparse_job_row["title"],
+                sparse_job_row["company"],
+                sparse_job_row["location"],
+                sparse_job_row["source_urls"],
+            ),
+        )
+        temp_db.commit()
+
+        stub_jd = "Apply now"  # < 200 chars — must be rejected
+
+        with (
+            patch("job_finder.web.data_enricher.fetch_direct_jd") as mock_fetch,
+            patch("job_finder.web.data_enricher.search_ddg_web") as mock_ddg_web,
+            patch("job_finder.web.data_enricher.fetch_ddg_jds") as mock_ddg_jds,
+            patch("job_finder.web.data_enricher.search_duckduckgo") as mock_ddg,
+            patch("job_finder.web.data_enricher.search_serpapi") as mock_serp,
+        ):
+            mock_fetch.return_value = None
+            mock_ddg_web.return_value = {
+                "ddg_urls": ["https://example.com/posting"],
+                "ddg_snippet": "snippet",
+            }
+            mock_ddg_jds.return_value = (stub_jd, "https://example.com/posting")
+            mock_ddg.return_value = None
+            mock_serp.return_value = (None, [])
+
+            enrich_job(sparse_job_row, serpapi_key=None, conn=temp_db)
+
+        row = temp_db.execute(
+            "SELECT jd_full, enrichment_tier FROM jobs WHERE dedup_key = ?",
+            (sparse_job_row["dedup_key"],),
+        ).fetchone()
+
+        assert row is not None
+        assert row["jd_full"] is None, "Stub DDG JD must NOT be persisted"
+        # No serpapi key + no agentic JD => cascade terminates at 'exhausted'
+        assert row["enrichment_tier"] == "exhausted"
+
+    def test_ddg_jd_triggers_post_fetch_salary_extraction(
+        self, sparse_job_row, temp_db
+    ):
+        """The DDG-fetched JD must flow through _apply_post_fetch_extraction so
+        salary regex sees the description (proves effective_jd is populated).
+        """
+        from job_finder.web.data_enricher import enrich_job
+
+        sparse_job_row["source_urls"] = "[]"
+        sparse_job_row["company_id"] = None
+
+        temp_db.execute(
+            "INSERT INTO jobs (dedup_key, title, company, location, source_urls) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (
+                sparse_job_row["dedup_key"],
+                sparse_job_row["title"],
+                sparse_job_row["company"],
+                sparse_job_row["location"],
+                sparse_job_row["source_urls"],
+            ),
+        )
+        temp_db.commit()
+
+        ddg_jd = (
+            "Senior Data Scientist role at Acme Corp. "
+            "Salary range: $150,000 - $200,000 USD per year. "
+            "Build ML models and collaborate cross-functionally. "
+            "We work on large-scale ML systems and value engineering rigor. "
+            "Required: 5+ years Python; strong SQL; experience with cloud platforms."
+        )
+        assert len(ddg_jd) >= 200
+
+        with (
+            patch("job_finder.web.data_enricher.fetch_direct_jd") as mock_fetch,
+            patch("job_finder.web.data_enricher.search_ddg_web") as mock_ddg_web,
+            patch("job_finder.web.data_enricher.fetch_ddg_jds") as mock_ddg_jds,
+            patch("job_finder.web.data_enricher.search_duckduckgo") as mock_ddg,
+            patch("job_finder.web.data_enricher.search_serpapi") as mock_serp,
+        ):
+            mock_fetch.return_value = None
+            mock_ddg_web.return_value = {
+                "ddg_urls": ["https://example.com/posting"],
+                "ddg_snippet": "snippet",
+            }
+            mock_ddg_jds.return_value = (ddg_jd, "https://example.com/posting")
+            mock_ddg.return_value = None
+            mock_serp.return_value = (None, [])
+
+            enrich_job(sparse_job_row, serpapi_key=None, conn=temp_db)
+
+        row = temp_db.execute(
+            "SELECT jd_full, enrichment_tier, salary_min, salary_max "
+            "FROM jobs WHERE dedup_key = ?",
+            (sparse_job_row["dedup_key"],),
+        ).fetchone()
+
+        assert row is not None
+        assert row["enrichment_tier"] == "ddg"
+        assert row["jd_full"] == ddg_jd
+        # Regex-based salary extractor should have picked up "$150,000 - $200,000"
+        assert row["salary_min"] == 150_000
+        assert row["salary_max"] == 200_000
+
+
+# ---------------------------------------------------------------------------
 # Tests for per-field cost ceilings (Phase 10 — NEW)
 # ---------------------------------------------------------------------------
 
