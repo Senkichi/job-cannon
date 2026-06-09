@@ -459,20 +459,25 @@ def _fetch_portal_search(
 
     max_serp_queries = portal_cfg.get("max_serp_queries", 30)
 
-    # Build DataForSEO source if configured (cheapest SERP backend)
+    # Build DataForSEO source if configured (cheapest SERP backend).
+    # Gate-before-fetch: resolving the secret unconditionally would trip the
+    # one-time "plaintext at rest" warning even when the source is disabled,
+    # so we mirror the ordering used by _submit_dataforseo_tasks and the CSE
+    # branch below — a disabled source must touch no credentials.
     dataforseo_source = None
     dfse_cfg = config.get("sources", {}).get("dataforseo", {})
-    dfse_api_key = get_secret("sources.dataforseo.api_key", config=config) or ""
-    if dfse_cfg.get("enabled") and dfse_api_key:
-        from job_finder.sources.dataforseo_source import DataForSEOSource
+    if dfse_cfg.get("enabled"):
+        dfse_api_key = get_secret("sources.dataforseo.api_key", config=config) or ""
+        if dfse_api_key:
+            from job_finder.sources.dataforseo_source import DataForSEOSource
 
-        dataforseo_source = DataForSEOSource(
-            api_key=dfse_api_key,
-            depth=10,  # site: queries return few results; 10 is plenty
-            priority=dfse_cfg.get("priority", 1),
-            poll_interval_seconds=dfse_cfg.get("poll_interval_seconds", 30),
-            poll_timeout_seconds=dfse_cfg.get("poll_timeout_seconds", 360),
-        )
+            dataforseo_source = DataForSEOSource(
+                api_key=dfse_api_key,
+                depth=10,  # site: queries return few results; 10 is plenty
+                priority=dfse_cfg.get("priority", 1),
+                poll_interval_seconds=dfse_cfg.get("poll_interval_seconds", 30),
+                poll_timeout_seconds=dfse_cfg.get("poll_timeout_seconds", 360),
+            )
 
     # Build Google CSE source as the free SERP fallback. Only constructed when
     # caller permits CSE this run (include_cse=True) — load-bearing decision #8
