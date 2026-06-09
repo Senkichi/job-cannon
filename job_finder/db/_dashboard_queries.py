@@ -97,11 +97,12 @@ def get_pipeline_summary(conn: sqlite3.Connection) -> dict:
 def get_jobs_by_status(conn: sqlite3.Connection) -> dict:
     """Return all jobs grouped by pipeline_status.
 
-    Each job dict includes dedup_key, title, company, sub_scores_json (the v3.0
-    fit signal — the kanban card derives the 6-30 composite from it), salary_min,
-    salary_max, location, pipeline_status, first_seen, and days_in_stage (days
-    since the job entered its current pipeline stage, based on the most recent
-    pipeline_events record with matching to_status, falling back to first_seen).
+    Each job dict includes dedup_key, title, company, classification (v3.0
+    bucket), sub_scores_json (the v3.0 fit signal — the kanban card derives the
+    6-30 composite from it), salary_min, salary_max, location, pipeline_status,
+    first_seen, and days_in_stage (days since the job entered its current
+    pipeline stage, based on the most recent pipeline_events record with
+    matching to_status, falling back to first_seen).
 
     Ordered by the live 6-30 composite, NOT the legacy `jobs.score` column (which
     v3.0 scoring no longer writes — every current row would tie at 0).
@@ -110,7 +111,8 @@ def get_jobs_by_status(conn: sqlite3.Connection) -> dict:
         dict mapping pipeline_status (str) -> list of job dicts
     """
     rows = conn.execute(
-        f"""SELECT j.dedup_key, j.title, j.company, j.sub_scores_json,
+        f"""SELECT j.dedup_key, j.title, j.company,
+                  j.classification, j.sub_scores_json,
                   j.salary_min, j.salary_max, j.location,
                   j.pipeline_status, j.first_seen,
                   (

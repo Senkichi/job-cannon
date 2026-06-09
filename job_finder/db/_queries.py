@@ -352,27 +352,22 @@ def get_filtered_jobs(
         params.extend(sorted(classification_candidates))
 
     # Legacy min_score/max_score back-compat — Plan 4 removes this shim entirely.
-    # The translation matches OR on either:
-    #   (a) the row has a classification that maps to the legacy threshold, OR
-    #   (b) the row has NULL classification but its heuristic `score` column
-    #       still satisfies the threshold (covers pre-v3 rows that never went
-    #       through the unified scorer).
+    # The legacy `jobs.score` column is vestigial under v3.0 (the LLM scoring
+    # path never writes it; ~40% of classified rows carry score=0), so the
+    # translation now matches on classification alone. Rows with NULL
+    # classification (pre-v3 or unscored) are filtered out by this shim — they
+    # were already noise in the old score-disjunct path since v3.0 never
+    # populates `score`.
     if min_score is not None:
         mapped = _classifications_for_min_score(min_score)
         placeholders = ", ".join("?" * len(mapped))
-        conditions.append(
-            f"(classification IN ({placeholders}) OR (classification IS NULL AND score >= ?))"
-        )
+        conditions.append(f"classification IN ({placeholders})")
         params.extend(mapped)
-        params.append(min_score)
     if max_score is not None:
         mapped = _classifications_for_max_score(max_score)
         placeholders = ", ".join("?" * len(mapped))
-        conditions.append(
-            f"(classification IN ({placeholders}) OR (classification IS NULL AND score <= ?))"
-        )
+        conditions.append(f"classification IN ({placeholders})")
         params.extend(mapped)
-        params.append(max_score)
     if salary_min is not None:
         conditions.append("salary_min >= ?")
         params.append(salary_min)

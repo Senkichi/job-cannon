@@ -216,3 +216,194 @@ class TestPipelineMove:
             data={"job_id": "test-job-key-01", "new_status": "flying_pigs"},
         )
         assert response.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# Issue #214 — vestigial jobs.score column is not consulted by the Kanban path
+# ---------------------------------------------------------------------------
+
+
+class TestKanbanReadsCompositeNotLegacyScore:
+    """Regression coverage for issue #214 (vestigial `jobs.score` column).
+
+    Under v3.0 scoring, `jobs.score` is only populated by the ingestion-time
+    heuristic. Jobs that reach scoring via enrichment-backfill or re-sighting
+    keep score=0.0 forever, even though they have a full v3.0 assessment in
+    `sub_scores_json`. The Kanban board must render and sort by the live 6-30
+    composite derived from `sub_scores_json` — never by the dead `score`.
+    """
+
+    def test_kanban_card_shows_composite_when_score_is_zero(self, client, tmp_db_with_job):
+        """A v3.0-scored row with score=0.0 surfaces its non-zero composite, not '0.0'.
+
+        Seed shape mirrors the production "enrichment-backfilled" cohort:
+        score=0.0 (heuristic never ran) + a populated sub_scores_json that sums
+        to a non-zero composite. The card MUST display the composite badge, not
+        a 0.0 from the legacy column.
+        """
+        conn = sqlite3.connect(tmp_db_with_job)
+        conn.execute(
+            """INSERT INTO jobs
+                   (dedup_key, title, company, location, sources, source_urls,
+                    salary_min, salary_max, first_seen, last_seen, score,
+                    classification, sub_scores_json, pipeline_status)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?,
+                       datetime('now'), datetime('now'), ?, ?, ?, ?)""",
+            (
+                "v3only|ml-engineer|nyc",
+                "ML Engineer",
+                "V3Only Inc",
+                "New York, NY",
+                '["greenhouse"]',
+                '["https://boards.greenhouse.io/v3only/jobs/9"]',
+                190000,
+                250000,
+                0.0,  # vestigial heuristic column — never populated by v3.0
+                "apply",
+                # composite = 5+5+4+5+5+4 = 28 (great bucket >=24)
+                '{"title_fit": 5, "location_fit": 5, "comp_fit": 4, '
+                '"domain_match": 5, "seniority_match": 5, "skills_match": 4}',
+                "applied",
+            ),
+        )
+        conn.commit()
+        conn.close()
+
+        response = client.get("/pipeline")
+        assert response.status_code == 200
+        html = response.data.decode()
+
+        # The card must render (data-job-id present)
+        assert 'data-job-id="v3only|ml-engineer|nyc"' in html
+
+        # Slice the HTML around the V3Only card's data-job-id and confirm the
+        # 6-30 composite (28) renders inside the score badge. The macro emits
+        # whitespace around the composite number, so match the span with a
+        # regex tolerant of newlines/indentation.
+        import re
+
+        anchor = 'data-job-id="v3only|ml-engineer|nyc"'
+        anchor_idx = html.index(anchor)
+        # The score row + badge sit within ~2000 chars after the anchor.
+        card_slice = html[anchor_idx : anchor_idx + 2000]
+        badge_match = re.search(
+            r'<span[^>]*class="[^"]*rounded[^"]*"[^>]*>\s*(\S+)\s*</span>',
+            card_slice,
+        )
+        assert badge_match, (
+            "Could not locate the score badge span in the V3Only kanban card. "
+            "Slice: " + card_slice[:800]
+        )
+        badge_value = badge_match.group(1).strip()
+        assert badge_value == "28", (
+            f"Kanban card badge shows {badge_value!r}; expected '28' (the 6-30 "
+            "composite). The vestigial jobs.score column appears to be leaking "
+            "back into the template."
+        )
+        # And must NOT show '0.0' anywhere in the card — would indicate the
+        # template fell back to the dead score column.
+        assert "0.0" not in card_slice, (
+            "Kanban card shows '0.0' — the vestigial jobs.score column has "
+            "leaked back into the template. Card slice: " + card_slice[:500]
+        )
+
+    def test_get_jobs_by_status_does_not_select_score_column(self, tmp_db_with_job):
+        """get_jobs_by_status must not depend on the vestigial jobs.score column.
+
+        Direct query-level regression: returned job dicts should not carry a
+        'score' key, must carry 'sub_scores_json' and 'classification' for the
+        Kanban template to derive the composite + classification bucket.
+        """
+        from job_finder.db._dashboard_queries import get_jobs_by_status
+
+        conn = sqlite3.connect(tmp_db_with_job)
+        conn.row_factory = sqlite3.Row
+        try:
+            result = get_jobs_by_status(conn)
+        finally:
+            conn.close()
+
+        # Seed job is in 'discovered'
+        assert "discovered" in result
+        job = result["discovered"][0]
+        assert "sub_scores_json" in job
+        assert "classification" in job
+        assert "score" not in job, (
+            "get_jobs_by_status leaked the legacy `jobs.score` column into the "
+            "Kanban result — the Kanban path must derive its score signal from "
+            "sub_scores_json instead."
+        )
+
+    def test_get_jobs_by_status_orders_by_composite_not_score(self, tmp_db_with_job):
+        """Sort order on the Kanban must reflect the composite, NOT jobs.score.
+
+        Two rows in 'reviewing': row A has high `score` (legacy heuristic) but
+        no sub_scores_json (composite=0); row B has score=0 but a high
+        composite (28). If the query still ordered by `score`, A would lead.
+        With composite ordering, B leads.
+        """
+        from job_finder.db._dashboard_queries import get_jobs_by_status
+
+        conn = sqlite3.connect(tmp_db_with_job)
+        conn.row_factory = sqlite3.Row
+        conn.execute(
+            """INSERT INTO jobs
+                   (dedup_key, title, company, location, sources, source_urls,
+                    salary_min, salary_max, first_seen, last_seen, score,
+                    classification, sub_scores_json, pipeline_status)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?,
+                       datetime('now'), datetime('now'), ?, ?, ?, ?)""",
+            (
+                "legacy-high-score|x|y",
+                "Legacy High Score",
+                "Heuristic Co",
+                "Remote",
+                "[]",
+                "[]",
+                100000,
+                150000,
+                93.0,  # legacy heuristic top of range — would win if score ordered
+                "reject",
+                None,  # no v3.0 assessment -> composite=0
+                "reviewing",
+            ),
+        )
+        conn.execute(
+            """INSERT INTO jobs
+                   (dedup_key, title, company, location, sources, source_urls,
+                    salary_min, salary_max, first_seen, last_seen, score,
+                    classification, sub_scores_json, pipeline_status)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?,
+                       datetime('now'), datetime('now'), ?, ?, ?, ?)""",
+            (
+                "v3-high-composite|x|y",
+                "V3 High Composite",
+                "Composite Co",
+                "Remote",
+                "[]",
+                "[]",
+                100000,
+                150000,
+                0.0,  # v3.0-only — heuristic never ran
+                "apply",
+                '{"title_fit": 5, "location_fit": 5, "comp_fit": 4, '
+                '"domain_match": 5, "seniority_match": 5, "skills_match": 4}',
+                "reviewing",
+            ),
+        )
+        conn.commit()
+        try:
+            result = get_jobs_by_status(conn)
+        finally:
+            conn.close()
+
+        reviewing = result.get("reviewing", [])
+        keys = [j["dedup_key"] for j in reviewing]
+        # The v3-only row (composite=28) MUST sort before the legacy row
+        # (score=93, composite=0). If it doesn't, ORDER BY is still using
+        # the vestigial score column.
+        v3_idx = keys.index("v3-high-composite|x|y")
+        legacy_idx = keys.index("legacy-high-score|x|y")
+        assert v3_idx < legacy_idx, (
+            f"Kanban sort still favors legacy score=93 over v3 composite=28. keys order: {keys}"
+        )
