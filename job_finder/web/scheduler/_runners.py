@@ -101,10 +101,25 @@ def run_health_check(app) -> None:
     Logs ``HEALTH_OK`` (info) when ingestion + stale detection + OAuth all
     look nominal, otherwise logs ``HEALTH_DEGRADED`` (warning) with a
     semicolon-joined list of issues. Best-effort; never raises.
+
+    Routes the verdict to durable channels: writes one ``scheduled_health``
+    row to ``user_activity`` (surfaces in the dashboard "User Activity" table
+    via the existing ``meta.status`` branch) and emits a ``run_events``
+    ``run_start``/``run_end`` envelope with ``disposition='degraded'`` when
+    any issue was detected, ``'completed'`` otherwise. Both writers are
+    no-raise, so the heartbeat's best-effort contract holds.
     """
+    import time as _time
+
+    from job_finder.web import run_events
+    from job_finder.web.activity_tracker import ACTION_SCHEDULED_HEALTH, log_activity
+
     with app.app_context():
         db_path = app.config.get("DB_PATH", "jobs.db")
-        issues = []
+        issues: list[str] = []
+
+        t0 = _time.time()
+        run_id = run_events.start(job="health", source="scheduler", db_path=db_path)
 
         try:
             from job_finder.web.db_helpers import standalone_connection as _sc
@@ -152,7 +167,23 @@ def run_health_check(app) -> None:
         except Exception as e:
             issues.append(f"Health check DB error: {e}")
 
+        status = "degraded" if issues else "success"
         if issues:
             logger.warning("HEALTH_DEGRADED: %s", "; ".join(issues))
         else:
             logger.info("HEALTH_OK: ingestion, stale detection, OAuth all nominal")
+
+        log_activity(
+            db_path,
+            ACTION_SCHEDULED_HEALTH,
+            metadata={"status": status, "issues": issues},
+        )
+        run_events.end(
+            run_id,
+            job="health",
+            source="scheduler",
+            disposition="degraded" if issues else "completed",
+            db_path=db_path,
+            duration_s=round(_time.time() - t0, 2),
+            result={"issues": issues},
+        )
