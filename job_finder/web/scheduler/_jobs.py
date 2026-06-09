@@ -169,6 +169,7 @@ def register_staleness(scheduler, app) -> None:
                 "batch_companies_skipped": r.get("phase_b", {}).get("companies_skipped", 0),
                 "batch_live": r.get("phase_b", {}).get("live", 0),
                 "batch_expired": r.get("phase_b", {}).get("expired", 0),
+                "batch_unparseable": r.get("phase_b", {}).get("unparseable", 0),
                 # Phase A (time-based stale detector)
                 "stale_marked": r.get("phase_a", {}).get("stale_marked", 0),
                 "stale_cleared": r.get("phase_a", {}).get("stale_cleared", 0),

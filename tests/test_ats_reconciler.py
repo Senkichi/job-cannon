@@ -10,6 +10,7 @@ Covers:
 - reconcile_all_companies orchestrator aggregates per-company results.
 """
 
+import logging
 import sqlite3
 from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
@@ -569,6 +570,216 @@ class TestReconcileCompany:
         conn.close()
         assert row["pipeline_status"] == "discovered"
         assert row["expiry_status"] is None
+
+    @patch("job_finder.web.ats_reconciler.run_platform_scan")
+    def test_source_id_rescues_unparseable_greenhouse_job(self, mock_scan, tmp_db_path):
+        """Issue #218: a greenhouse-tracked job whose stored URLs are aggregator-only
+        (no greenhouse posting-id segment) but whose `source_id` column carries the
+        live-board id must be rescued from `unparseable` and classified live/expired.
+
+        Cohort: tracked jobs ingested via Gmail aggregator alerts whose ATS scanner
+        later populated `source_id`. Without the fallback, the set-diff sees the
+        aggregator URL → None, lands in `unparseable`, gets no liveness signal.
+        """
+        from job_finder.web.ats_reconciler import reconcile_company
+        from job_finder.web.db_helpers import standalone_connection
+
+        # Job's only URL is an aggregator (LinkedIn) — _extract_posting_id → None.
+        _, dedup_keys = _setup_company_and_jobs(
+            tmp_db_path,
+            platform="greenhouse",
+            slug="airbnb",
+            job_urls=["https://www.linkedin.com/jobs/view/4384362665/"],
+        )
+        # But the ATS scanner persisted the canonical greenhouse id earlier.
+        conn = sqlite3.connect(tmp_db_path)
+        conn.execute(
+            "UPDATE jobs SET source_id = ? WHERE dedup_key = ?",
+            ("12345", dedup_keys[0]),
+        )
+        conn.commit()
+        conn.close()
+
+        # Live greenhouse board includes that id.
+        mock_scan.return_value = [
+            {"source_url": "https://boards.greenhouse.io/airbnb/jobs/12345"},
+        ]
+
+        with standalone_connection(tmp_db_path) as conn:
+            company_row = dict(
+                conn.execute("SELECT id, ats_platform, ats_slug FROM companies").fetchone()
+            )
+            result = reconcile_company(conn, company_row)
+
+        assert result["unparseable"] == 0
+        assert result["live"] == 1
+        assert result["expired"] == 0
+
+        conn = sqlite3.connect(tmp_db_path)
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT expiry_status FROM jobs WHERE dedup_key = ?",
+            (dedup_keys[0],),
+        ).fetchone()
+        conn.close()
+        assert row["expiry_status"] == "live"
+
+    @patch("job_finder.web.ats_reconciler.run_platform_scan")
+    def test_source_id_rescue_expires_absent_greenhouse_job(self, mock_scan, tmp_db_path):
+        """source_id rescue path lands a job in `expired` when the id is NOT in the
+        live set — symmetric to the live case above, proves the diff actually runs."""
+        from job_finder.web.ats_reconciler import reconcile_company
+        from job_finder.web.db_helpers import standalone_connection
+
+        _, dedup_keys = _setup_company_and_jobs(
+            tmp_db_path,
+            platform="greenhouse",
+            slug="airbnb",
+            job_urls=["https://www.linkedin.com/jobs/view/4384362665/"],
+        )
+        conn = sqlite3.connect(tmp_db_path)
+        conn.execute(
+            "UPDATE jobs SET source_id = ? WHERE dedup_key = ?",
+            ("99999", dedup_keys[0]),  # not on live board
+        )
+        conn.commit()
+        conn.close()
+
+        mock_scan.return_value = [
+            {"source_url": "https://boards.greenhouse.io/airbnb/jobs/12345"},
+        ]
+
+        with standalone_connection(tmp_db_path) as conn:
+            company_row = dict(
+                conn.execute("SELECT id, ats_platform, ats_slug FROM companies").fetchone()
+            )
+            result = reconcile_company(conn, company_row)
+
+        assert result["unparseable"] == 0
+        assert result["live"] == 0
+        assert result["expired"] == 1
+
+    @patch("job_finder.web.ats_reconciler.run_platform_scan")
+    def test_source_id_fallback_gated_off_for_lever(self, mock_scan, tmp_db_path):
+        """Namespace guard: lever's source_id (when present) is NOT in the
+        live-board UUID namespace, so blindly union-ing it would risk cross-namespace
+        false-`live`/false-`expired`. The fallback must be gated to
+        greenhouse/smartrecruiters only — a lever job with an unparseable URL and a
+        populated source_id stays `unparseable`."""
+        from job_finder.web.ats_reconciler import reconcile_company
+        from job_finder.web.db_helpers import standalone_connection
+
+        _, dedup_keys = _setup_company_and_jobs(
+            tmp_db_path,
+            platform="lever",
+            slug="acme",
+            job_urls=["https://www.linkedin.com/jobs/view/4384362665/"],  # not lever-parseable
+        )
+        # Populate source_id with a string that COINCIDENTALLY matches a live
+        # lever UUID — if the fallback were not platform-gated, this would
+        # produce a false-LIVE.
+        conn = sqlite3.connect(tmp_db_path)
+        conn.execute(
+            "UPDATE jobs SET source_id = ? WHERE dedup_key = ?",
+            ("abc-def-123", dedup_keys[0]),
+        )
+        conn.commit()
+        conn.close()
+
+        mock_scan.return_value = [
+            {"source_url": "https://jobs.lever.co/acme/abc-def-123"},
+        ]
+
+        with standalone_connection(tmp_db_path) as conn:
+            company_row = dict(
+                conn.execute("SELECT id, ats_platform, ats_slug FROM companies").fetchone()
+            )
+            result = reconcile_company(conn, company_row)
+
+        # Lever stays in the deferred-to-Phase-C `unparseable` bucket; no
+        # false liveness signal manufactured from a cross-namespace coincidence.
+        assert result["unparseable"] == 1
+        assert result["live"] == 0
+        assert result["expired"] == 0
+
+    @patch("job_finder.web.ats_reconciler.run_platform_scan")
+    def test_warning_when_all_jobs_unparseable(self, mock_scan, tmp_db_path, caplog):
+        """IA-13 visibility: when every tracked job for a company is unparseable,
+        Phase B produced no real liveness signal. A `WARNING` line must be emitted
+        so the silent blind spot is greppable (mirrors no_parseable_live_ids)."""
+        from job_finder.web.ats_reconciler import reconcile_company
+        from job_finder.web.db_helpers import standalone_connection
+
+        _setup_company_and_jobs(
+            tmp_db_path,
+            platform="greenhouse",
+            slug="airbnb",
+            job_urls=[
+                "https://www.linkedin.com/jobs/view/1/",
+                "https://www.glassdoor.com/job-listing/x/2",
+            ],
+        )
+        mock_scan.return_value = [
+            {"source_url": "https://boards.greenhouse.io/airbnb/jobs/12345"},
+        ]
+
+        with (
+            caplog.at_level(logging.WARNING, logger="job_finder.web.ats_reconciler"),
+            standalone_connection(tmp_db_path) as conn,
+        ):
+            company_row = dict(
+                conn.execute("SELECT id, ats_platform, ats_slug FROM companies").fetchone()
+            )
+            result = reconcile_company(conn, company_row)
+
+        assert result["checked"] == 2
+        assert result["unparseable"] == 2
+        warnings = [
+            r
+            for r in caplog.records
+            if r.levelno == logging.WARNING and "unparseable" in r.getMessage()
+        ]
+        assert warnings, "expected a WARNING when unparseable == checked"
+
+    @patch("job_finder.web.ats_reconciler.run_platform_scan")
+    def test_no_warning_when_mixed_unparseable(self, mock_scan, tmp_db_path, caplog):
+        """The 100%-unparseable warn must NOT fire when at least one job parses
+        — partial coverage is not a silent blind spot."""
+        from job_finder.web.ats_reconciler import reconcile_company
+        from job_finder.web.db_helpers import standalone_connection
+
+        _setup_company_and_jobs(
+            tmp_db_path,
+            platform="greenhouse",
+            slug="airbnb",
+            job_urls=[
+                "https://boards.greenhouse.io/airbnb/jobs/12345",  # parseable → live
+                "https://www.linkedin.com/jobs/view/1/",  # unparseable
+            ],
+        )
+        mock_scan.return_value = [
+            {"source_url": "https://boards.greenhouse.io/airbnb/jobs/12345"},
+        ]
+
+        with (
+            caplog.at_level(logging.WARNING, logger="job_finder.web.ats_reconciler"),
+            standalone_connection(tmp_db_path) as conn,
+        ):
+            company_row = dict(
+                conn.execute("SELECT id, ats_platform, ats_slug FROM companies").fetchone()
+            )
+            result = reconcile_company(conn, company_row)
+
+        assert result["live"] == 1
+        assert result["unparseable"] == 1
+        unparseable_warnings = [
+            r
+            for r in caplog.records
+            if r.levelno == logging.WARNING and "all unparseable" in r.getMessage()
+        ]
+        assert not unparseable_warnings, (
+            "100%-unparseable warn must only fire when every checked job is unparseable"
+        )
 
 
 # ---------------------------------------------------------------------------

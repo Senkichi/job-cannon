@@ -457,6 +457,71 @@ class TestSchedulerExpiryCheck:
         assert "liveness_check" not in job_ids_kw
         assert "stale_detection" not in job_ids_kw
 
+    def test_staleness_extract_metadata_surfaces_batch_unparseable(self):
+        """Issue #218 / IA-13: the staleness `extract_metadata` lambda must
+        pass `batch_unparseable` through from the Phase-B summary. Without it,
+        `reconcile_all_companies` computes the unparseable count, sums it, and
+        the scheduler then drops it before it reaches the activity-tracker
+        metadata — silently hiding the cohort with no liveness signal.
+        """
+        from unittest.mock import MagicMock, patch
+
+        from job_finder.web.scheduler import reset_scheduler
+
+        reset_scheduler()
+
+        mock_app = MagicMock()
+        mock_app.config.get.side_effect = lambda key, default=None: {
+            "TESTING": False,
+        }.get(key, default)
+
+        with patch("job_finder.web.scheduler.os.environ.get", return_value=None):
+            with patch("job_finder.web.scheduler.BackgroundScheduler") as mock_scheduler_cls:
+                mock_sched = MagicMock()
+                mock_scheduler_cls.return_value = mock_sched
+
+                from job_finder.web.scheduler import init_scheduler
+
+                init_scheduler(mock_app)
+
+        staleness_call = next(
+            call
+            for call in mock_sched.add_job.call_args_list
+            if call[1].get("id") == "staleness_check"
+        )
+        wrapper = staleness_call[0][0]
+        closure_vars = {
+            cell_name: cell.cell_contents
+            for cell_name, cell in zip(
+                wrapper.__code__.co_freevars, wrapper.__closure__ or (), strict=False
+            )
+        }
+        extract_metadata = closure_vars["extract_metadata"]
+
+        realistic_summary = {
+            "phase_b": {
+                "companies_checked": 50,
+                "companies_skipped": 5,
+                "checked": 847,
+                "live": 60,
+                "expired": 11,
+                "unparseable": 776,
+            },
+            "phase_a": {"stale_marked": 0, "stale_cleared": 0, "archived": 0},
+            "phase_c": {"checked": 0, "live": 0, "archived": 0, "inconclusive": 0},
+        }
+
+        metadata = extract_metadata(realistic_summary)
+
+        assert metadata["batch_unparseable"] == 776, (
+            "batch_unparseable must surface from phase_b.unparseable; "
+            "dropping it silently hides the IA-13 blind spot"
+        )
+        # Sibling keys must continue to pass through.
+        assert metadata["batch_live"] == 60
+        assert metadata["batch_expired"] == 11
+        assert metadata["batch_companies_checked"] == 50
+
 
 # ---------------------------------------------------------------------------
 # Test: Arg-order regression (Phase 11 plan 01)

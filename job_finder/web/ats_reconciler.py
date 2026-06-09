@@ -263,7 +263,7 @@ def reconcile_company(conn, company_row: dict) -> dict:
 
     rows = conn.execute(
         """
-        SELECT dedup_key, source_urls
+        SELECT dedup_key, source_urls, source_id
         FROM jobs
         WHERE company_id = ?
           AND pipeline_status IN ('discovered', 'reviewing')
@@ -279,6 +279,17 @@ def reconcile_company(conn, company_row: dict) -> dict:
     live_keys: list[str] = []
     expired_keys: list[str] = []
 
+    # source_id fallback (issue #218): for the aggregator-ingested cohort
+    # (Gmail alerts whose URLs carry no ATS posting-id segment), the stored
+    # `source_id` column may still hold the platform-native id when the same
+    # job was also seen by the ATS scanner. Gated to platforms whose scanner
+    # persists `source_id` in the live-board namespace (greenhouse numeric id,
+    # smartrecruiters id). Lever/ashby/workday use UUID/path-segment ids that
+    # the scanner does not store in `source_id`, so a blind union would risk
+    # a cross-namespace false-positive.
+    _SOURCE_ID_FALLBACK_PLATFORMS = {"greenhouse", "smartrecruiters"}
+    source_id_fallback = platform in _SOURCE_ID_FALLBACK_PLATFORMS
+
     for row in rows:
         dedup_key = row["dedup_key"]
         source_urls = safe_json_load(row["source_urls"], default=[]) or []
@@ -288,6 +299,11 @@ def reconcile_company(conn, company_row: dict) -> dict:
             pid = _extract_posting_id(url, platform)
             if pid:
                 job_ids.add(pid)
+
+        if not job_ids and source_id_fallback:
+            sid = (row["source_id"] or "").strip()
+            if sid:
+                job_ids.add(sid)
 
         result["checked"] += 1
 
@@ -382,6 +398,20 @@ def reconcile_company(conn, company_row: dict) -> dict:
         result["expired"],
         result["unparseable"],
     )
+
+    # IA-13 visibility: when every tracked job for a company is unparseable,
+    # Phase B produced no real liveness signal — the company has silently
+    # degraded to aggregator-only tracking. Mirror the no_parseable_live_ids
+    # warn so 100%-aggregator companies are greppable in app.log.
+    if result["checked"] > 0 and result["unparseable"] == result["checked"]:
+        logger.warning(
+            "reconcile_company: %s/%s checked=%d all unparseable — "
+            "no liveness signal (aggregator-only stored URLs?)",
+            platform,
+            slug,
+            result["checked"],
+        )
+
     return result
 
 
