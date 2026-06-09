@@ -296,6 +296,63 @@ def test_upsert_job_raises_ingestion_rejected(tmp_path):
         conn.close()
 
 
+def test_upsert_job_merges_what_i11_raw_index_would_reject(tmp_path):
+    """Sibling to test_i11_company_source_id_unique: at the raw-DB layer the
+    I-11 partial UNIQUE index aborts the duplicate INSERT, but the upsert_job
+    layer catches the (company_id, source_id) collision *before* it reaches
+    that index and merges into the existing row instead (Issue #219).
+    """
+    from job_finder.db._jobs import IngestionRejected, upsert_job
+    from job_finder.normalizers import normalize_company, normalize_title
+    from job_finder.parsed_job import ParsedJob
+
+    def _dk(company: str, title: str) -> str:
+        return f"{normalize_company(company)}|{normalize_title(title)}"
+
+    conn = _head_conn(tmp_path)
+    try:
+        parsed_a = ParsedJob(
+            title="Senior Analyst",
+            company="WorkdayCorp",
+            dedup_key=_dk("WorkdayCorp", "Senior Analyst"),
+            sources=["greenhouse"],
+            source_urls=["https://example.com/a"],
+            source_id="/job/Path/R-42",
+        )
+        r1 = upsert_job(conn, parsed_a, company_id=7)
+        assert r1.kind == "inserted"
+
+        # Distinct dedup_key, same (company_id, source_id) — at the raw-index
+        # layer this would raise sqlite3.IntegrityError (see
+        # test_i11_company_source_id_unique). Through upsert_job it merges.
+        parsed_b = ParsedJob(
+            title="Senior Manager",
+            company="WorkdayCorp",
+            dedup_key=_dk("WorkdayCorp", "Senior Manager"),
+            sources=["greenhouse"],
+            source_urls=["https://example.com/b"],
+            source_id="/job/Path/R-42",
+        )
+        try:
+            r2 = upsert_job(conn, parsed_b, company_id=7)
+        except IngestionRejected as e:
+            pytest.fail(
+                f"upsert_job should merge on (company_id, source_id) collision, "
+                f"not raise IngestionRejected: {e}"
+            )
+        assert r2.kind in {"updated", "touched", "unchanged"}
+        assert r2.dedup_key == parsed_a.dedup_key
+
+        # Exactly one row carries this source_id within the company.
+        count = conn.execute(
+            "SELECT COUNT(*) FROM jobs WHERE company_id = 7 AND source_id = ?",
+            (parsed_a.source_id,),
+        ).fetchone()[0]
+        assert count == 1
+    finally:
+        conn.close()
+
+
 # ---------------------------------------------------------------------------
 # m078_down
 # ---------------------------------------------------------------------------

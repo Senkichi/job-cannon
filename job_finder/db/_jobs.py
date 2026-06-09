@@ -332,6 +332,26 @@ def upsert_job(
         (parsed.dedup_key,),
     ).fetchone()
 
+    # Issue #219 — I-11 collision merge path. When the dedup_key lookup misses
+    # but the incoming row carries a real (company_id, source_id), fall back to
+    # looking up the existing row by that pair. The partial UNIQUE index
+    # ix_jobs_company_source_id would otherwise reject the second INSERT and
+    # silently drop the posting. Observed on Workday boards where a stable
+    # externalPath surfaces under drifting display titles (different dedup_key
+    # → second sighting takes the INSERT branch → I-11 violation).
+    # When matched, the UPDATE branch keys its WHERE clauses off the matched
+    # row's dedup_key rather than the incoming parsed.dedup_key.
+    matched_dedup_key = parsed.dedup_key
+    if existing is None and parsed.source_id and company_id is not None:
+        sid_row = conn.execute(
+            f"SELECT dedup_key, {_UPSERT_MERGE_COLUMNS} FROM jobs "
+            "WHERE company_id = ? AND source_id = ?",
+            (company_id, parsed.source_id),
+        ).fetchone()
+        if sid_row is not None:
+            existing = sid_row
+            matched_dedup_key = sid_row["dedup_key"]
+
     now = utc_now_iso()
     pd_str = parsed.posted_date.isoformat() if parsed.posted_date else None
 
@@ -468,7 +488,7 @@ def upsert_job(
                     company_id,
                     pd_str,
                     *unresolved_value,
-                    parsed.dedup_key,
+                    matched_dedup_key,
                 ),
             )
             conn.commit()
@@ -482,7 +502,7 @@ def upsert_job(
         if _jd_promote and merged_description:
             _set_jd_full(
                 conn,
-                parsed.dedup_key,
+                matched_dedup_key,
                 merged_description[:JD_STORAGE_MAX_CHARS],
                 source="upsert_job",
             )
@@ -492,7 +512,7 @@ def upsert_job(
         if existing["pipeline_status"] == "archived":
             update_pipeline_status(
                 conn,
-                parsed.dedup_key,
+                matched_dedup_key,
                 "discovered",
                 source="ingestion",
                 evidence="re_appeared",
@@ -506,7 +526,7 @@ def upsert_job(
             kind = "unchanged"
         return UpsertResult(
             kind=kind,
-            dedup_key=parsed.dedup_key,
+            dedup_key=matched_dedup_key,
             unresolved_reasons=list(parsed.unresolved_reasons),
         )
 

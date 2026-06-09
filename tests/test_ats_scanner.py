@@ -3690,3 +3690,98 @@ class TestHighScoreHistoryGate:
         # At threshold 20: company is gated out (highest sum is 19)
         names_20 = [r["name_raw"] for r in self._run_phase_a_select(conn, 20)]
         assert "MidScoreCo" not in names_20
+
+
+# ---------------------------------------------------------------------------
+# Issue #219 — ATS-path regression: same source_id under two display titles
+# ---------------------------------------------------------------------------
+
+
+class TestI11SourceIdMergePath:
+    """A Workday-style board surfacing the same requisition under two display
+    titles (same externalPath / source_id, different list-view title) must
+    persist as one merged row — not two INSERTs where the second is dropped
+    with an I-11 error.
+
+    Repro of the N12 finding from the 2026-06-07/08 overnight validation run
+    (Alignment Healthcare, Forrester Research). The fix lives in upsert_job;
+    this is the ATS-path integration test.
+    """
+
+    def test_two_dicts_same_source_id_distinct_titles_merge_to_one_row(self, migrated_db_path):
+        from job_finder.web.ats_scanner._run import _upsert_one_ats_api_job
+        from job_finder.web.db_helpers import standalone_connection
+
+        # Insert a company; we will pass its id explicitly to the upsert.
+        with standalone_connection(migrated_db_path) as conn:
+            cur = conn.execute(
+                """INSERT INTO companies
+                   (name, name_raw, ats_platform, ats_slug, ats_probe_status,
+                    scan_enabled, created_at, updated_at)
+                   VALUES ('workdayco', 'WorkdayCo', 'workday',
+                           'workdayco.wd5/external', 'hit', 1,
+                           '2026-01-01T00:00:00', '2026-01-01T00:00:00')""",
+            )
+            company_id = cur.lastrowid
+            conn.commit()
+
+        # Two payloads with the same Workday externalPath (source_id) but
+        # different list-view titles → distinct dedup_keys → second posting
+        # would historically take the INSERT branch and trip I-11.
+        ext_path = "/job/Mexico---Mexico-City/Brand-Campaign-Operations_R-12345"
+        job_a = {
+            "title": "Brand Campaign Operations Sr. Analyst",
+            "company_source": "Workday",
+            "source_url": "https://workdayco.wd5/external/job/abc?title=analyst",
+            "source_id": ext_path,
+            "location": "Remote",
+            "description": ("Drive campaign analytics across paid, organic, and lifecycle. " * 8),
+        }
+        job_b = {
+            "title": "Brand Campaign Operations Manager",
+            "company_source": "Workday",
+            "source_url": "https://workdayco.wd5/external/job/abc?title=manager",
+            "source_id": ext_path,
+            "location": "Remote",
+            "description": ("Drive campaign analytics across paid, organic, and lifecycle. " * 8),
+        }
+
+        summary: dict = {"jobs_new": 0, "errors": []}
+        all_new_job_keys: list = []
+
+        with standalone_connection(migrated_db_path) as conn_outer:
+            with standalone_connection(migrated_db_path) as scan_conn:
+                _upsert_one_ats_api_job(
+                    conn_outer,
+                    scan_conn,
+                    "WorkdayCo",
+                    job_a,
+                    summary,
+                    all_new_job_keys,
+                    company_id=company_id,
+                )
+                _upsert_one_ats_api_job(
+                    conn_outer,
+                    scan_conn,
+                    "WorkdayCo",
+                    job_b,
+                    summary,
+                    all_new_job_keys,
+                    company_id=company_id,
+                )
+
+        # Acceptance — no I-11 error logged, posting not dropped.
+        assert summary["errors"] == []
+        assert "I-11" not in " ".join(summary["errors"])
+
+        # One persisted row carrying this source_id within the company.
+        with standalone_connection(migrated_db_path) as conn:
+            rows = conn.execute(
+                "SELECT dedup_key, source_urls FROM jobs WHERE company_id = ? AND source_id = ?",
+                (company_id, ext_path),
+            ).fetchall()
+        assert len(rows) == 1
+        # Both source_urls merged onto the single surviving row.
+        urls = rows[0][1]
+        assert "title=analyst" in urls
+        assert "title=manager" in urls
