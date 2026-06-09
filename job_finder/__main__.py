@@ -45,6 +45,31 @@ _LOCK_RETRY_COUNT = 3
 _LOCK_RETRY_DELAY_SEC = 0.2
 
 
+def _reconfigure_stdio_utf8() -> None:
+    """Force ``sys.stdout`` / ``sys.stderr`` to utf-8 (issue #234).
+
+    Single point of enforcement for the invariant "console log output is encoded
+    losslessly regardless of OS console codepage." On Windows, the default
+    console codec is cp1252, which crashes on the non-Latin-1 characters (`→`,
+    `—`, `·`, `…`, accented company/title text) that pepper our INFO logs.
+    Two stream handlers write to these streams without overriding the encoding:
+    Werkzeug's auto-attached ``_ColorStreamHandler`` and the stdlib
+    ``logging.lastResort`` fallback. Reconfiguring the underlying streams once
+    at process start fixes both at the source, no per-handler patching to
+    maintain.
+
+    ``errors="backslashreplace"`` so the destination console can never drop a
+    line — un-renderable glyphs degrade to ``\\uXXXX`` escapes instead of a
+    traceback. The narrow exception set covers streams that don't support
+    reconfigure (pipes / redirected files / wrapped non-text streams).
+    """
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="backslashreplace")
+        except (AttributeError, ValueError, OSError):
+            pass
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="job-cannon",
@@ -425,6 +450,14 @@ def _run_terminal_mode(cfg: dict, bind_host: str, port: int, debug: bool, url: s
 
 def main() -> None:
     """Resolve config, build the Flask app, and start the dev server."""
+    # Force stdio to utf-8 BEFORE any logging or Flask import (issue #234).
+    # Werkzeug's auto-handler and logging.lastResort both write to the OS
+    # console encoding (cp1252 on Windows) and crash on the non-Latin-1 chars
+    # our INFO logs routinely emit (→, —, accented titles). Reconfiguring
+    # the underlying streams here makes the invalid state unrepresentable
+    # for any future console handler in this process.
+    _reconfigure_stdio_utf8()
+
     # SHORT-CIRCUIT: parse --help / --version BEFORE any config / Flask imports.
     # argparse calls sys.exit(0) on --help and --version, so we never touch
     # load_config() if those flags are passed. This is what makes
