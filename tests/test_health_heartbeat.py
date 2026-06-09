@@ -38,11 +38,7 @@ def _make_app(db_path: str) -> Flask:
 
 
 def _utc_naive(offset_hours: float = 0.0) -> str:
-    return (
-        (datetime.now(UTC) + timedelta(hours=offset_hours))
-        .replace(tzinfo=None)
-        .isoformat()
-    )
+    return (datetime.now(UTC) + timedelta(hours=offset_hours)).replace(tzinfo=None).isoformat()
 
 
 def _fetch_health_rows(conn) -> list:
@@ -120,8 +116,7 @@ def test_nominal_writes_success_row_and_completed_run_end(migrated_db, events_fi
     # empty. Signal 4 (OAuth) is mocked to succeed.
     now_iso = _utc_naive(-0.5)  # 30 minutes ago, well within both windows
     conn.executemany(
-        "INSERT INTO user_activity (action, entity_id, metadata, occurred_at) "
-        "VALUES (?, ?, ?, ?)",
+        "INSERT INTO user_activity (action, entity_id, metadata, occurred_at) VALUES (?, ?, ?, ?)",
         [
             ("scheduled_sync", None, "{}", now_iso),
             ("scheduled_staleness", None, "{}", now_iso),
