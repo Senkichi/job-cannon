@@ -585,9 +585,7 @@ class TestDDGTierPersist:
 
         assert row is not None
         assert row["jd_full"] == ddg_jd, "DDG JD must be persisted, not dropped"
-        assert row["enrichment_tier"] == "ddg", (
-            "Tier must reflect DDG (not 'exhausted')"
-        )
+        assert row["enrichment_tier"] == "ddg", "Tier must reflect DDG (not 'exhausted')"
         assert result.get("jd_full") == ddg_jd
         # SerpAPI never invoked when DDG already satisfied JD
         mock_serp.assert_not_called()
@@ -644,9 +642,7 @@ class TestDDGTierPersist:
         # No serpapi key + no agentic JD => cascade terminates at 'exhausted'
         assert row["enrichment_tier"] == "exhausted"
 
-    def test_ddg_jd_triggers_post_fetch_salary_extraction(
-        self, sparse_job_row, temp_db
-    ):
+    def test_ddg_jd_triggers_post_fetch_salary_extraction(self, sparse_job_row, temp_db):
         """The DDG-fetched JD must flow through _apply_post_fetch_extraction so
         salary regex sees the description (proves effective_jd is populated).
         """
