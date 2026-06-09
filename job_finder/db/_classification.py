@@ -23,6 +23,14 @@ _SUB_SCORE_KEYS: tuple[str, ...] = (
     "skills_match",
 )
 
+# Tiers from which no further automatic enrichment will run. A job at one of
+# these tiers with a short JD has genuinely no signal -> low_signal, not a
+# rubric-noise reject. Keep in sync with the tier writers in agentic_enricher.py
+# (the only writer of 'agentic' / 'agentic_exhausted').
+_TERMINAL_ENRICHMENT_TIERS: frozenset[str] = frozenset(
+    {"exhausted", "agentic", "agentic_exhausted"}
+)
+
 
 @dataclass(frozen=True)
 class JobAssessment:
@@ -82,9 +90,10 @@ def derive_classification(
         legitimacy_note: value of the jobs.legitimacy_note column; truthy means
             ingestion-time scam/exclusion detection flagged this row.
         enrichment_tier: value of jobs.enrichment_tier ('free' | 'ddg' | 'low'
-            | 'serpapi' | 'mid' | 'exhausted' | None). Only 'exhausted'
-            participates in the low_signal rule; other tiers are still
-            re-enrichment candidates.
+            | 'serpapi' | 'mid' | 'exhausted' | 'agentic' | 'agentic_exhausted'
+            | None). Only terminal tiers (those in _TERMINAL_ENRICHMENT_TIERS:
+            'exhausted', 'agentic', 'agentic_exhausted') participate in the
+            low_signal rule; other tiers are still re-enrichment candidates.
         jd_full_length: character length of jobs.jd_full (0 when NULL).
         low_signal_threshold: jd_full_length below this triggers low_signal
             when enrichment is exhausted. Configurable via
@@ -95,7 +104,7 @@ def derive_classification(
     """
     if legitimacy_note:
         return "reject"
-    if enrichment_tier == "exhausted" and jd_full_length < low_signal_threshold:
+    if enrichment_tier in _TERMINAL_ENRICHMENT_TIERS and jd_full_length < low_signal_threshold:
         return "low_signal"
     if any(v == 1 for v in sub_scores.values()):
         return "reject"
