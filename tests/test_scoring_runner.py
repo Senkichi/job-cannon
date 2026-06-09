@@ -482,7 +482,7 @@ class TestRunScoring:
 
         scored_keys: list[str] = []
 
-        def fake_persist(job_dict, conn, cfg, client=None):
+        def fake_persist(job_dict, conn, cfg, client=None, run_id=None):
             scored_keys.append(job_dict["dedup_key"])
             return ScoringResult(
                 status="ok",
