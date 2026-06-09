@@ -379,12 +379,8 @@ class TestNormalizedDedupKey:
         """
         from job_finder.models import Job
 
-        key_with_space = Job.normalized_dedup_key(
-            "Capital One", "84 Data Scientist Jobs"
-        )
-        key_without_space = Job.normalized_dedup_key(
-            "Capital One", "84Data Scientist Jobs"
-        )
+        key_with_space = Job.normalized_dedup_key("Capital One", "84 Data Scientist Jobs")
+        key_without_space = Job.normalized_dedup_key("Capital One", "84Data Scientist Jobs")
         assert key_with_space == key_without_space
 
 
