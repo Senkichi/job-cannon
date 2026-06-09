@@ -6,6 +6,7 @@ synthesis tiers (Phase 2b sub-fix RC4). Schema deliberately excludes
 jd_full so the model cannot summarize the job description.
 """
 
+import logging
 from unittest.mock import MagicMock
 
 from job_finder.web.enrichment_tiers import parse_structured_fields
@@ -171,6 +172,153 @@ def test_enrich_job_skips_parse_when_no_field_is_empty(monkeypatch):
     data_enricher.enrich_job(row, serpapi_key=None, conn=None, config={})
 
     assert invoked["called"] is False, "no missing fields => no parse_structured_fields call"
+
+
+# ---------------------------------------------------------------------------
+# Plausibility-bound guard on the LLM path (issue #228)
+# ---------------------------------------------------------------------------
+
+
+def _bounded_call(data: dict) -> MagicMock:
+    """Build a fake call_model return shaped like a schema-valid result."""
+    return MagicMock(return_value=MagicMock(data=data, schema_valid=True))
+
+
+def test_drops_implausibly_inflated_salary_min_only(monkeypatch, caplog):
+    """A single salary_min above $5M is dropped (and salary_max with it).
+
+    The 100×-inflation case the issue cites: LLM emits salary_min=12800000
+    on a $128K role. Both salary fields must be omitted from the output to
+    preserve the both-or-neither semantics _apply_post_fetch_extraction
+    relies on; location stays.
+    """
+    fake_call = _bounded_call(
+        {"salary_min": 12_800_000, "location": "Remote US"},
+    )
+    monkeypatch.setattr("job_finder.web.enrichment_tiers.call_model", fake_call)
+
+    with caplog.at_level(logging.WARNING, logger="job_finder.web.enrichment_tiers"):
+        out = parse_structured_fields(
+            jd_full="Long description. " * 50,
+            job_row={"dedup_key": "anthropic|ds", "title": "DS", "company": "Anthropic"},
+            conn=MagicMock(),
+            config={},
+        )
+
+    assert "salary_min" not in out
+    assert "salary_max" not in out
+    assert out.get("location") == "Remote US"
+    assert any(
+        "implausible salary" in rec.message and "anthropic|ds" in rec.message
+        for rec in caplog.records
+    ), "WARNING with job_id must be emitted on drop"
+
+
+def test_drops_implausibly_inflated_ordered_pair(monkeypatch, caplog):
+    """An ordered both-inflated pair (e.g. 27.5M/37M) is fully dropped.
+
+    This is the exact case _reconcile_salary_for_write (F2) misses: ratio
+    is sane, ordering is sane, so F2 leaves it alone. The bound must catch
+    it at the parse boundary instead.
+    """
+    fake_call = _bounded_call(
+        {"salary_min": 27_500_000, "salary_max": 37_000_000, "location": "SF"},
+    )
+    monkeypatch.setattr("job_finder.web.enrichment_tiers.call_model", fake_call)
+
+    with caplog.at_level(logging.WARNING, logger="job_finder.web.enrichment_tiers"):
+        out = parse_structured_fields(
+            jd_full="Long description. " * 50,
+            job_row={"dedup_key": "anth|safe", "title": "DS Safeguards", "company": "Anthropic"},
+            conn=MagicMock(),
+            config={},
+        )
+
+    assert "salary_min" not in out
+    assert "salary_max" not in out
+    assert out.get("location") == "SF"
+    assert any("implausible salary" in rec.message for rec in caplog.records)
+
+
+def test_drops_salary_when_only_salary_max_out_of_bounds(monkeypatch):
+    """When salary_max is over $5M but salary_min looks sane, drop both.
+
+    Half-open ranges (salary_min set, salary_max NULL after a one-sided
+    drop) would leak through _apply_post_fetch_extraction's both-or-
+    neither contract — the regex extractor also returns both-or-None.
+    """
+    fake_call = _bounded_call(
+        {"salary_min": 150_000, "salary_max": 18_000_000},
+    )
+    monkeypatch.setattr("job_finder.web.enrichment_tiers.call_model", fake_call)
+
+    out = parse_structured_fields(
+        jd_full="Long description. " * 50,
+        job_row={"dedup_key": "x|y", "title": "T", "company": "C"},
+        conn=MagicMock(),
+        config={},
+    )
+
+    assert "salary_min" not in out
+    assert "salary_max" not in out
+
+
+def test_drops_salary_below_minimum_plausible(monkeypatch):
+    """Sub-$30K annual salary (likely an hourly-as-annual confusion) is dropped.
+
+    The regex extractor enforces _MIN_PLAUSIBLE_SALARY=$30K; the LLM path
+    must do the same so a $15 hourly value the model treated as an annual
+    figure can't slip through.
+    """
+    fake_call = _bounded_call({"salary_min": 15, "salary_max": 25})
+    monkeypatch.setattr("job_finder.web.enrichment_tiers.call_model", fake_call)
+
+    out = parse_structured_fields(
+        jd_full="Long description. " * 50,
+        job_row={"dedup_key": "x|y", "title": "T", "company": "C"},
+        conn=MagicMock(),
+        config={},
+    )
+
+    assert "salary_min" not in out
+    assert "salary_max" not in out
+
+
+def test_plausible_salary_passes_through(monkeypatch, caplog):
+    """A normal $128K salary is preserved and no WARNING is emitted."""
+    fake_call = _bounded_call(
+        {"salary_min": 128_000, "salary_max": 160_000, "location": "Remote US"},
+    )
+    monkeypatch.setattr("job_finder.web.enrichment_tiers.call_model", fake_call)
+
+    with caplog.at_level(logging.WARNING, logger="job_finder.web.enrichment_tiers"):
+        out = parse_structured_fields(
+            jd_full="Long description. " * 50,
+            job_row={"dedup_key": "ok|y", "title": "T", "company": "C"},
+            conn=MagicMock(),
+            config={},
+        )
+
+    assert out == {"salary_min": 128_000, "salary_max": 160_000, "location": "Remote US"}
+    assert not any("implausible salary" in rec.message for rec in caplog.records)
+
+
+def test_plausible_boundary_values_pass_through(monkeypatch):
+    """Boundary values exactly at $30K and $5M are accepted (inclusive bounds)."""
+    fake_call = _bounded_call(
+        {"salary_min": 30_000, "salary_max": 5_000_000},
+    )
+    monkeypatch.setattr("job_finder.web.enrichment_tiers.call_model", fake_call)
+
+    out = parse_structured_fields(
+        jd_full="Long description. " * 50,
+        job_row={"dedup_key": "edge|y", "title": "T", "company": "C"},
+        conn=MagicMock(),
+        config={},
+    )
+
+    assert out.get("salary_min") == 30_000
+    assert out.get("salary_max") == 5_000_000
 
 
 def test_enrich_job_fills_only_empty_fields(monkeypatch):

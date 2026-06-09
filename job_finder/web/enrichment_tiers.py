@@ -491,11 +491,46 @@ def parse_structured_fields(
     if not result.data or not result.schema_valid:
         return {}
 
+    # Mirror the regex path's plausibility bound on the LLM path so an
+    # inflated value (e.g. salary_min=27_500_000 on a $275K role — the
+    # model emits a string of digits without unit-checking) cannot reach
+    # _persist. The regex extractor enforces [$30K, $5M] at
+    # salary_extractor.py:132; without this mirror, only inverted pairs
+    # are caught downstream by _reconcile_salary_for_write — both-ordered
+    # inflated pairs and single-field-inflated rows sail through. Drop
+    # BOTH salary fields when EITHER is out of bounds to preserve the
+    # both-or-neither semantics _apply_post_fetch_extraction expects.
+    from job_finder.web.salary_extractor import (
+        _MAX_PLAUSIBLE_SALARY,
+        _MIN_PLAUSIBLE_SALARY,
+    )
+
+    raw_min = result.data.get("salary_min")
+    raw_max = result.data.get("salary_max")
+
+    def _implausible(v: int | None) -> bool:
+        return v is not None and (v < _MIN_PLAUSIBLE_SALARY or v > _MAX_PLAUSIBLE_SALARY)
+
+    drop_salary = _implausible(raw_min) or _implausible(raw_max)
+    if drop_salary:
+        logger.warning(
+            "parse_structured_fields: dropping implausible salary for %s "
+            "(min=%s max=%s, bounds=[%d,%d])",
+            job_id,
+            raw_min,
+            raw_max,
+            _MIN_PLAUSIBLE_SALARY,
+            _MAX_PLAUSIBLE_SALARY,
+        )
+
     out = {}
     for k in ("salary_min", "salary_max", "location"):
         v = result.data.get(k)
-        if v is not None:
-            out[k] = v
+        if v is None:
+            continue
+        if drop_salary and k in ("salary_min", "salary_max"):
+            continue
+        out[k] = v
     return out
 
 
