@@ -462,3 +462,191 @@ class TestNonScannablePlatformsConstant:
         from job_finder.web.ats_platforms import NON_SCANNABLE_PLATFORMS, SCANNERS_BY_NAME
 
         assert set(SCANNERS_BY_NAME) >= NON_SCANNABLE_PLATFORMS
+
+
+# ---------------------------------------------------------------------------
+# NON_SCANNABLE_PLATFORMS as a load-bearing scan-path enforcement point (#222)
+# ---------------------------------------------------------------------------
+
+
+class TestPhaseAShortCircuitsNonScannable:
+    """Phase A's per-company dispatch short-circuits non-scannable platforms.
+
+    Before #222, a ``hit + jobvite`` company would dispatch into the
+    ``return []`` stub and silently produce zero jobs while looking healthy.
+    The fix routes these companies into Phase C (HTML fallback) instead and
+    skips the no-op API call here.
+    """
+
+    def test_jobvite_dispatch_does_not_call_run_platform_scan(self, caplog):
+        """A ``jobvite`` row must not flow into ``run_platform_scan`` — that
+        would re-introduce the silent ``[]`` shadow and the meaningless
+        autoheal break-capture against an always-empty steady state."""
+        import logging
+
+        from job_finder.web.ats_scanner._run import _scan_one_company_via_ats_api
+
+        company = {
+            "id": 1,
+            "name_raw": "Havas Media Network",
+            "ats_platform": "jobvite",
+            "ats_slug": "thehavasgroup",
+        }
+        summary: dict = {
+            "companies_scanned": 0,
+            "jobs_discovered": 0,
+            "jobs_new": 0,
+            "errors": [],
+        }
+        all_new_job_keys: list = []
+
+        with patch("job_finder.web.ats_scanner._run.run_platform_scan") as mock_scan:
+            with caplog.at_level(logging.INFO, logger="job_finder.web.ats_scanner._run"):
+                _scan_one_company_via_ats_api(
+                    conn=None,  # never reached — short-circuit returns first
+                    db_path="ignored",
+                    company=company,
+                    target_titles=[],
+                    title_exclusions=[],
+                    summary=summary,
+                    all_new_job_keys=all_new_job_keys,
+                )
+
+        mock_scan.assert_not_called()
+        assert any(
+            "no public API" in rec.getMessage() and "jobvite" in rec.getMessage()
+            for rec in caplog.records
+        ), "expected an info-level 'no public API' log line for jobvite"
+        # Short-circuit must not touch the summary or job-key list.
+        assert summary["companies_scanned"] == 0
+        assert summary["jobs_discovered"] == 0
+        assert all_new_job_keys == []
+
+
+class TestPhaseCCohortIncludesNonScannableHits:
+    """The Phase C SELECT and its matching COUNT both treat NON_SCANNABLE_PLATFORMS
+    as load-bearing — a ``hit + jobvite + homepage_url`` company is eligible for
+    HTML scraping even though its probe status is ``hit`` (the legacy gate was
+    ``ats_probe_status IN ('miss','error')``)."""
+
+    def _migrated_conn(self, tmp_path):
+        import sqlite3
+
+        from job_finder.web.db_migrate import run_migrations
+
+        path = str(tmp_path / "jobs.db")
+        run_migrations(path)
+        conn = sqlite3.connect(path)
+        conn.row_factory = sqlite3.Row
+        return conn
+
+    def _insert_company(
+        self,
+        conn,
+        name,
+        *,
+        ats_probe_status,
+        ats_platform=None,
+        homepage_url=None,
+    ):
+        from datetime import datetime
+
+        now = datetime.now().isoformat()
+        cur = conn.execute(
+            """INSERT INTO companies
+               (name, name_raw, homepage_url, ats_platform, ats_probe_status,
+                scan_enabled, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, 1, ?, ?)""",
+            (name.lower(), name, homepage_url, ats_platform, ats_probe_status, now, now),
+        )
+        conn.commit()
+        return cur.lastrowid
+
+    def test_count_phase_c_eligible_includes_jobvite_hits_with_homepage(self, tmp_path):
+        from job_finder.web.ats_scanner._run import _count_phase_c_eligible
+
+        conn = self._migrated_conn(tmp_path)
+        try:
+            # Legacy-cohort baseline: one miss + homepage company.
+            self._insert_company(
+                conn,
+                "MissCo",
+                ats_probe_status="miss",
+                homepage_url="https://miss.example",
+            )
+            # The #222 cohort: hit + jobvite + homepage.
+            self._insert_company(
+                conn,
+                "Rodan + Fields",
+                ats_probe_status="hit",
+                ats_platform="jobvite",
+                homepage_url="https://www.rodanandfields.com",
+            )
+            # Negative case: hit + greenhouse + homepage MUST NOT be in Phase C.
+            self._insert_company(
+                conn,
+                "GreenhouseCo",
+                ats_probe_status="hit",
+                ats_platform="greenhouse",
+                homepage_url="https://greenhouse.example",
+            )
+            # Negative case: hit + jobvite WITHOUT homepage_url is excluded
+            # (HTML scraping needs a homepage to start from).
+            self._insert_company(
+                conn,
+                "Wild Fork Foods",
+                ats_probe_status="hit",
+                ats_platform="jobvite",
+                homepage_url=None,
+            )
+
+            assert _count_phase_c_eligible(conn, threshold=20) == 2
+        finally:
+            conn.close()
+
+    def test_phase_c_select_picks_jobvite_hit_with_homepage(self, tmp_path):
+        """Drive the real Phase C query body and confirm a jobvite ``hit`` is
+        selected. Mirrors the SELECT in ``_run_html._run_html_fallback_scan``."""
+        from job_finder.web.ats_platforms import NON_SCANNABLE_PLATFORMS
+        from job_finder.web.ats_scanner._run import _high_score_history_clause
+
+        conn = self._migrated_conn(tmp_path)
+        try:
+            jobvite_id = self._insert_company(
+                conn,
+                "Rodan + Fields",
+                ats_probe_status="hit",
+                ats_platform="jobvite",
+                homepage_url="https://www.rodanandfields.com",
+            )
+            self._insert_company(
+                conn,
+                "GreenhouseCo",
+                ats_probe_status="hit",
+                ats_platform="greenhouse",
+                homepage_url="https://greenhouse.example",
+            )
+
+            non_scannable = sorted(NON_SCANNABLE_PLATFORMS)
+            placeholders = ",".join("?" * len(non_scannable))
+            rows = conn.execute(
+                f"""SELECT id, name_raw FROM companies
+                   WHERE (
+                       ats_probe_status IN ('miss', 'error')
+                       OR (ats_probe_status = 'hit' AND ats_platform IN ({placeholders}))
+                   )
+                     AND homepage_url IS NOT NULL
+                     AND scan_enabled = 1
+                     AND {_high_score_history_clause()}""",
+                (*non_scannable, 20),
+            ).fetchall()
+
+            ids = {r["id"] for r in rows}
+            assert jobvite_id in ids, "jobvite hit + homepage must be Phase C eligible"
+            # Greenhouse hit is NOT in NON_SCANNABLE_PLATFORMS → still excluded.
+            greenhouse_row = [r for r in rows if r["name_raw"] == "GreenhouseCo"]
+            assert greenhouse_row == [], (
+                "scannable hit platforms must remain excluded from Phase C"
+            )
+        finally:
+            conn.close()

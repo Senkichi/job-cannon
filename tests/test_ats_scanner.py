@@ -2190,6 +2190,115 @@ class TestRunAtsScanHtmlFallback:
 
 
 # ---------------------------------------------------------------------------
+# Tests: NON_SCANNABLE_PLATFORMS scan-path routing (#222)
+# ---------------------------------------------------------------------------
+
+
+class TestRunAtsScanNonScannableRouting:
+    """End-to-end: a ``hit + jobvite + homepage_url`` company flows into Phase C
+    HTML fallback (not the no-op Phase A stub) for ``run_ats_scan``.
+
+    Pre-#222 the legacy ``ats_probe_status IN ('miss','error')`` gate locked
+    these companies out of every productive discovery path. The fix routes
+    them through Phase C using NON_SCANNABLE_PLATFORMS as the single
+    enforcement point.
+    """
+
+    def _insert_jobvite_hit_company(
+        self, conn, name, *, homepage_url, ats_slug="thehavasgroup", scan_enabled=1
+    ):
+        from datetime import datetime
+
+        now = datetime.now().isoformat()
+        cur = conn.execute(
+            """INSERT INTO companies
+               (name, name_raw, homepage_url, ats_platform, ats_slug,
+                ats_probe_status, scan_enabled, created_at, updated_at)
+               VALUES (?, ?, ?, 'jobvite', ?, 'hit', ?, ?, ?)""",
+            (name.lower(), name, homepage_url, ats_slug, scan_enabled, now, now),
+        )
+        conn.commit()
+        return cur.lastrowid
+
+    def test_jobvite_hit_with_homepage_reaches_phase_c_html_fallback(
+        self, migrated_db_path
+    ):
+        from job_finder.web.ats_scanner import run_ats_scan
+
+        conn = sqlite3.connect(migrated_db_path)
+        conn.row_factory = sqlite3.Row
+        self._insert_jobvite_hit_company(
+            conn, "Rodan + Fields", homepage_url="https://www.rodanandfields.com"
+        )
+        conn.close()
+
+        config = {
+            "TESTING": False,
+            "profile": {"target_titles": ["engineer"], "exclusions": {"title_keywords": []}},
+        }
+
+        with (
+            patch(
+                "job_finder.web.ats_scanner._run_html.find_careers_url",
+                return_value="https://www.rodanandfields.com/careers",
+            ) as mock_find,
+            patch(
+                "job_finder.web.ats_scanner._run_html.scrape_careers_page", return_value=[]
+            ) as mock_scrape,
+            patch("job_finder.web.ats_scanner._run.run_platform_scan") as mock_run_platform_scan,
+            patch("job_finder.web.ats_scanner._run.score_and_persist_job", return_value=None),
+            patch("job_finder.web.ats_scanner._run.time.sleep"),
+            patch("job_finder.web.ats_scanner._run_html.time.sleep"),
+        ):
+            run_ats_scan(migrated_db_path, config=config)
+
+        # The stub Phase A dispatch is never invoked for a non-scannable hit.
+        mock_run_platform_scan.assert_not_called()
+        # Phase C scrapes the careers page that the homepage discovers.
+        mock_find.assert_called_once()
+        assert mock_find.call_args[0][0] == "https://www.rodanandfields.com"
+        mock_scrape.assert_called_once()
+        assert mock_scrape.call_args[0][0] == "https://www.rodanandfields.com/careers"
+
+    def test_jobvite_hit_short_circuit_logs_info_not_silent(
+        self, migrated_db_path, caplog
+    ):
+        """The zero-yield jobvite scan is no longer silent — an info-level log
+        line explicitly defers the company to HTML fallback."""
+        import logging
+
+        from job_finder.web.ats_scanner import run_ats_scan
+
+        conn = sqlite3.connect(migrated_db_path)
+        conn.row_factory = sqlite3.Row
+        self._insert_jobvite_hit_company(
+            conn, "Havas Media Network", homepage_url="https://havasgroup.com"
+        )
+        conn.close()
+
+        config = {
+            "TESTING": False,
+            "profile": {"target_titles": ["engineer"], "exclusions": {"title_keywords": []}},
+        }
+
+        with (
+            patch(
+                "job_finder.web.ats_scanner._run_html.find_careers_url", return_value=None
+            ),
+            patch("job_finder.web.ats_scanner._run.score_and_persist_job", return_value=None),
+            patch("job_finder.web.ats_scanner._run.time.sleep"),
+            patch("job_finder.web.ats_scanner._run_html.time.sleep"),
+            caplog.at_level(logging.INFO, logger="job_finder.web.ats_scanner._run"),
+        ):
+            run_ats_scan(migrated_db_path, config=config)
+
+        assert any(
+            "no public API" in rec.getMessage() and "jobvite" in rec.getMessage()
+            for rec in caplog.records
+        ), "expected an info-level 'no public API' log line on the jobvite Phase A short-circuit"
+
+
+# ---------------------------------------------------------------------------
 # Tests: HTML-scraped jobs included in Haiku scoring (Phase 08 Plan 01)
 # ---------------------------------------------------------------------------
 

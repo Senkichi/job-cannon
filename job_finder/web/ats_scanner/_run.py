@@ -24,6 +24,7 @@ from job_finder.db import derive_classification
 from job_finder.db._jd_full import set_jd_full as _set_jd_full
 from job_finder.json_utils import utc_now_iso
 from job_finder.secrets import get_secret
+from job_finder.web.ats_platforms import NON_SCANNABLE_PLATFORMS
 from job_finder.web.ats_platforms._platforms_ashby import SCANNER as _ASHBY_SCANNER
 from job_finder.web.ats_platforms._platforms_bamboohr import (
     SCANNER as _BAMBOOHR_SCANNER,
@@ -189,14 +190,25 @@ def _count_phase_a_eligible(conn: sqlite3.Connection, threshold: int) -> int:
 
 
 def _count_phase_c_eligible(conn: sqlite3.Connection, threshold: int) -> int:
-    """Count Phase C companies (miss/error with homepage) subject to the gate."""
+    """Count Phase C companies (miss/error with homepage, plus hit + non-scannable) subject to the gate.
+
+    Non-scannable platforms (NON_SCANNABLE_PLATFORMS — currently ``jobvite``)
+    have no public API, so their ``hit`` companies cannot yield jobs via the
+    Phase A dispatch and are routed through Phase C instead. See
+    ``_run_html._run_html_fallback_scan`` for the matching SELECT.
+    """
+    non_scannable = sorted(NON_SCANNABLE_PLATFORMS)
+    placeholders = ",".join("?" * len(non_scannable)) if non_scannable else "NULL"
     row = conn.execute(
         f"""SELECT COUNT(*) FROM companies
-           WHERE ats_probe_status IN ('miss', 'error')
+           WHERE (
+               ats_probe_status IN ('miss', 'error')
+               OR (ats_probe_status = 'hit' AND ats_platform IN ({placeholders}))
+           )
              AND homepage_url IS NOT NULL
              AND scan_enabled = 1
              AND {_high_score_history_clause()}""",
-        (threshold,),
+        (*non_scannable, threshold),
     ).fetchone()
     return int(row[0]) if row else 0
 
@@ -394,6 +406,20 @@ def _scan_one_company_via_ats_api(
     platform = company["ats_platform"]
     slug = company["ats_slug"]
     now = utc_now_iso()
+
+    # Non-scannable platforms (e.g. jobvite) have no public API. Skip the no-op
+    # dispatch — and the meaningless autoheal break-capture that ``[]`` would
+    # otherwise trip — and let Phase C HTML fallback handle these companies
+    # (which is widened to include their hit cohort). Single point of
+    # enforcement: NON_SCANNABLE_PLATFORMS, not scattered per-platform checks.
+    if platform in NON_SCANNABLE_PLATFORMS:
+        logger.info(
+            "ATS scan: %s (%s/%s) — no public API, deferring to HTML fallback",
+            company_name,
+            platform,
+            slug,
+        )
+        return
 
     logger.info("ATS scan: scanning %s (%s/%s)", company_name, platform, slug)
 

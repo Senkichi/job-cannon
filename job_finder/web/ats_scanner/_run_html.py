@@ -15,6 +15,7 @@ import sqlite3
 import time
 
 from job_finder.json_utils import utc_now_iso
+from job_finder.web.ats_platforms import NON_SCANNABLE_PLATFORMS
 from job_finder.web.db_helpers import standalone_connection
 
 # Lazy import of HTML careers scraper (ImportError guard — Plan 03)
@@ -48,13 +49,25 @@ def _run_html_fallback_scan(
     if find_careers_url is None or scrape_careers_page is None:
         return
 
+    # Phase C cohort = miss/error companies with a homepage, PLUS hit companies
+    # whose ats_platform has no public API (NON_SCANNABLE_PLATFORMS — currently
+    # ``jobvite``). Without the second branch, a jobvite ``hit`` is shadowed
+    # out of every productive discovery path: Phase A dispatches to a ``[]``
+    # stub, and the legacy miss/error gate locks it out of HTML scraping. See
+    # ``_run._count_phase_c_eligible`` for the matching COUNT query and
+    # ``_run._scan_one_company_via_ats_api`` for the Phase A short-circuit.
+    non_scannable = sorted(NON_SCANNABLE_PLATFORMS)
+    placeholders = ",".join("?" * len(non_scannable)) if non_scannable else "NULL"
     miss_companies = conn.execute(
         f"""SELECT id, name_raw, homepage_url, careers_url FROM companies
-           WHERE ats_probe_status IN ('miss', 'error')
+           WHERE (
+               ats_probe_status IN ('miss', 'error')
+               OR (ats_probe_status = 'hit' AND ats_platform IN ({placeholders}))
+           )
              AND homepage_url IS NOT NULL
              AND scan_enabled = 1
              AND {_high_score_history_clause()}""",
-        (high_score_threshold,),
+        (*non_scannable, high_score_threshold),
     ).fetchall()
 
     for miss_company in miss_companies:
