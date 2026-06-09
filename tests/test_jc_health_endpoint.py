@@ -73,11 +73,59 @@ def test_jc_health_pid_is_current_process(client):
 
 
 def test_jc_health_start_time_utc_is_string(client):
-    """start_time_utc must be a non-empty string (UTC ISO format)."""
+    """start_time_utc must be a non-empty naive UTC ISO string.
+
+    Issue #233 (N9): the stamp must come from utc_now_iso() — a *naive* ISO
+    datetime with no "Z" suffix and no ``+HH:MM`` offset. That locks the
+    store-UTC-render-local invariant at the producer site so any future
+    consumer that parses the value cannot be misled into thinking it is
+    timezone-aware.
+    """
+    from datetime import datetime
+
     resp = client.get("/__jc_health")
     data = resp.get_json()
-    assert isinstance(data["start_time_utc"], str)
-    assert len(data["start_time_utc"]) > 0
+    value = data["start_time_utc"]
+    assert isinstance(value, str)
+    assert len(value) > 0
+    # Must not advertise a timezone — the value is naive UTC.
+    assert not value.endswith("Z"), (
+        f"start_time_utc must be a naive ISO datetime (no 'Z' suffix), got: {value!r}"
+    )
+    assert "+" not in value, f"start_time_utc must not carry a UTC offset, got: {value!r}"
+    # Parses as a naive datetime via fromisoformat (no tzinfo attached).
+    parsed = datetime.fromisoformat(value)
+    assert parsed.tzinfo is None, (
+        f"start_time_utc must parse to a naive datetime, got tzinfo={parsed.tzinfo!r}"
+    )
+
+
+def test_create_app_does_not_emit_deprecation_warning(monkeypatch):
+    """Issue #233 (N9): create_app must not trip a DeprecationWarning.
+
+    Specifically the start-time stamp must use the canonical ``utc_now_iso()``
+    producer, not the deprecated ``datetime.utcnow()`` path.
+    """
+    import tempfile
+    import warnings
+
+    with tempfile.TemporaryDirectory() as tmp:
+        monkeypatch.setenv("JOB_CANNON_USER_DATA_DIR", tmp)
+        from job_finder.web import create_app
+
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            create_app(config={"TESTING": True, "db": {"path": f"{tmp}/test.db"}})
+
+        utcnow_warnings = [
+            w
+            for w in caught
+            if issubclass(w.category, DeprecationWarning) and "utcnow" in str(w.message).lower()
+        ]
+        assert utcnow_warnings == [], (
+            "create_app() must not call the deprecated datetime.utcnow() — "
+            f"observed: {[str(w.message) for w in utcnow_warnings]}"
+        )
 
 
 def test_jc_health_not_via_blueprint(app):

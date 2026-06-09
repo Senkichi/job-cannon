@@ -1533,6 +1533,115 @@ class TestFetchPortalSearchWiring:
         assert result == []
         assert not mock_fetch.called
 
+    # Issue #233 (N8) — gate-before-fetch invariant for DataForSEO.
+    # Before the fix, get_secret() was called unconditionally and the resolved
+    # value was discarded one line later by the `enabled` guard. That tripped
+    # the one-time "plaintext at rest" warning on every Flask boot for a
+    # source the user had explicitly disabled. The fix moves the enabled
+    # check ahead of the secret resolution; these tests pin that ordering.
+
+    def test_disabled_dataforseo_does_not_resolve_secret(self, base_config, monkeypatch):
+        """dataforseo.enabled=false with a plaintext key present → get_secret
+        is not called for the dataforseo path (gate-before-fetch invariant)."""
+        # Plaintext key sits in config but the source is disabled.
+        base_config["sources"]["dataforseo"] = {
+            "enabled": False,
+            "api_key": "plaintext-key-should-not-be-touched",
+        }
+
+        from job_finder.web import ingestion_runner
+
+        calls: list[str] = []
+        real_get_secret = ingestion_runner.get_secret
+
+        def spy(name, *, config=None):
+            calls.append(name)
+            return real_get_secret(name, config=config)
+
+        monkeypatch.setattr(ingestion_runner, "get_secret", spy)
+
+        with patch(
+            "job_finder.sources.portal_search_source.fetch_all_portals",
+            return_value=[],
+        ):
+            ingestion_runner._fetch_portal_search(base_config, {})
+
+        assert "sources.dataforseo.api_key" not in calls, (
+            f"get_secret must not be called for a disabled source — observed calls: {calls}"
+        )
+
+    def test_disabled_dataforseo_does_not_log_plaintext_warning(
+        self, base_config, monkeypatch, caplog
+    ):
+        """dataforseo.enabled=false with a plaintext key present → no
+        'plaintext at rest' warning is emitted by job_finder.secrets."""
+        from job_finder import secrets as secrets_mod
+
+        # Clear any prior one-time-warning state from earlier tests so a
+        # genuine emission here would be observable.
+        monkeypatch.setattr(secrets_mod, "_warned", set())
+
+        base_config["sources"]["dataforseo"] = {
+            "enabled": False,
+            "api_key": "plaintext-key-should-not-be-touched",
+        }
+
+        from job_finder.web.ingestion_runner import _fetch_portal_search
+
+        with (
+            caplog.at_level("WARNING", logger="job_finder.secrets"),
+            patch(
+                "job_finder.sources.portal_search_source.fetch_all_portals",
+                return_value=[],
+            ),
+        ):
+            _fetch_portal_search(base_config, {})
+
+        plaintext_warnings = [
+            rec
+            for rec in caplog.records
+            if rec.name == "job_finder.secrets"
+            and "plaintext at rest" in rec.getMessage()
+            and "sources.dataforseo.api_key" in rec.getMessage()
+        ]
+        assert plaintext_warnings == [], (
+            "Disabled DataForSEO source must not trip the plaintext warning — "
+            f"saw: {[r.getMessage() for r in plaintext_warnings]}"
+        )
+
+    def test_enabled_dataforseo_still_constructs_source(self, base_config, monkeypatch):
+        """Regression guard: with enabled=true and a key present the
+        DataForSEOSource is constructed exactly as before."""
+        base_config["sources"]["dataforseo"] = {
+            "enabled": True,
+            "api_key": "real-key",
+            "priority": 2,
+            "poll_interval_seconds": 15,
+            "poll_timeout_seconds": 120,
+        }
+
+        from job_finder.web.ingestion_runner import _fetch_portal_search
+
+        with (
+            patch("job_finder.sources.dataforseo_source.DataForSEOSource") as mock_source_cls,
+            patch(
+                "job_finder.sources.portal_search_source.fetch_all_portals",
+                return_value=[],
+            ) as mock_fetch,
+        ):
+            _fetch_portal_search(base_config, {})
+
+        mock_source_cls.assert_called_once_with(
+            api_key="real-key",
+            depth=10,
+            priority=2,
+            poll_interval_seconds=15,
+            poll_timeout_seconds=120,
+        )
+        # The constructed instance is forwarded to fetch_all_portals.
+        kwargs = mock_fetch.call_args.kwargs
+        assert kwargs["dataforseo_source"] is mock_source_cls.return_value
+
     # Stage 7.9 observability: surface whether the 7.4 fallback fired so the
     # dashboard's recent-activity panel can distinguish explicit-keyword runs
     # from implicit-target_titles runs.

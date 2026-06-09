@@ -11,7 +11,6 @@ import logging
 import os
 import secrets
 import sys
-from datetime import datetime
 from logging.handlers import RotatingFileHandler
 
 from dotenv import load_dotenv
@@ -27,6 +26,7 @@ from job_finder.config import (
     DEFAULT_MIN_SCORE_THRESHOLD,
     load_config,
 )
+from job_finder.json_utils import utc_now_iso
 from job_finder.web import user_data_dirs
 from job_finder.web.db_helpers import close_db
 from job_finder.web.db_migrate import run_migrations
@@ -110,8 +110,10 @@ def create_app(config_path: str = "config.yaml", config: dict | None = None) -> 
     user_data_dirs.ensure_user_data_dir()
 
     # Stamp the app-start wall-clock time for the /__jc_health endpoint.
-    # Stored as a naive UTC ISO string (Store-UTC-render-local invariant).
-    app.config["_JF_START_TIME_UTC"] = datetime.utcnow().isoformat() + "Z"
+    # Stored as a naive UTC ISO string (Store-UTC-render-local invariant);
+    # utc_now_iso() is the canonical producer (tz-aware-then-strip), so we
+    # avoid the deprecated naive datetime.utcnow() call.
+    app.config["_JF_START_TIME_UTC"] = utc_now_iso()
 
     # --- Configuration ---
     if config is None:
