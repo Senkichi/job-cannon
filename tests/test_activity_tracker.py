@@ -169,6 +169,7 @@ class TestActionConstants:
             ACTION_RESCORE,
             ACTION_SAVE_JD,
             ACTION_SCHEDULED_ATS_SCAN,
+            ACTION_SCHEDULED_HEALTH,
             ACTION_SCHEDULED_STALENESS,
             ACTION_SCHEDULED_SYNC,
             ACTION_STATUS_CHANGE,
@@ -186,9 +187,10 @@ class TestActionConstants:
             ACTION_SCHEDULED_ATS_SCAN,
             ACTION_SCHEDULED_STALENESS,
             ACTION_SAVE_JD,
+            ACTION_SCHEDULED_HEALTH,
         ]
         # Unique string values
-        assert len(set(constants)) == 10, f"Duplicate ACTION_* values found: {constants}"
+        assert len(set(constants)) == 11, f"Duplicate ACTION_* values found: {constants}"
 
     def test_constants_match_expected_names(self):
         """All ACTION_* constants have the expected string values."""
@@ -199,6 +201,7 @@ class TestActionConstants:
             ACTION_RESCORE,
             ACTION_SAVE_JD,
             ACTION_SCHEDULED_ATS_SCAN,
+            ACTION_SCHEDULED_HEALTH,
             ACTION_SCHEDULED_STALENESS,
             ACTION_SCHEDULED_SYNC,
             ACTION_STATUS_CHANGE,
@@ -215,6 +218,7 @@ class TestActionConstants:
         assert ACTION_SCHEDULED_ATS_SCAN == "scheduled_ats_scan"
         assert ACTION_SCHEDULED_STALENESS == "scheduled_staleness"
         assert ACTION_SAVE_JD == "save_jd"
+        assert ACTION_SCHEDULED_HEALTH == "scheduled_health"
 
 
 # ---------------------------------------------------------------------------

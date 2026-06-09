@@ -41,6 +41,7 @@ ACTION_SCHEDULED_CAREERS_CRAWL = "scheduled_careers_crawl"
 # read-only history.
 ACTION_SCHEDULED_STALENESS = "scheduled_staleness"
 ACTION_SOURCE_DEGRADED = "source_degraded"
+ACTION_SCHEDULED_HEALTH = "scheduled_health"
 
 # ---------------------------------------------------------------------------
 # Core helper
