@@ -565,7 +565,8 @@ def _upsert_one_ats_api_job(
 
         if result.kind == "inserted":
             summary["jobs_new"] += 1
-            all_new_job_keys.append(job.dedup_key)
+            # #223: enqueue the PERSISTED key (clean_title-normalized).
+            all_new_job_keys.append(result.dedup_key)
 
             # Store comp_json for new jobs only (first-seen wins)
             comp_json = job_dict.get("comp_json")

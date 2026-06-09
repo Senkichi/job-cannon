@@ -156,7 +156,8 @@ def _scan_one_company_via_html(
                     result = upsert_job(html_conn, parsed, company_id=miss_company_id)
                     if result.kind == "inserted":
                         summary["jobs_new"] += 1
-                        all_new_job_keys.append(job.dedup_key)
+                        # #223: enqueue the PERSISTED key (clean_title-normalized).
+                        all_new_job_keys.append(result.dedup_key)
                     summary["html_scraped"] += 1
                 except Exception as job_err:
                     error_msg = f"{miss_company_name} HTML job error: {job_err}"
