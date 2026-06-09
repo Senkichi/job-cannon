@@ -36,7 +36,7 @@ def persist_job_assessment(
     model: str | None = None,
     *,
     config: dict | None = None,
-) -> None:
+) -> str | None:
     """Persist a v3.0 JobAssessment. Replaces persist_haiku_score + persist_sonnet_score.
 
     Writes classification (derived at persist time), sub_scores_json (JSON),
@@ -67,6 +67,14 @@ def persist_job_assessment(
         config: Optional application config dict. When provided, reads
             scoring.low_signal_jd_chars to set the low_signal threshold;
             otherwise the default (1500 chars) is used.
+
+    Returns:
+        The Python-derived ``final_classification`` string just written to the
+        row, or ``None`` when the dedup_key did not match any row (silent
+        no-op path). Lets callers observe the verdict that landed on disk
+        without a redundant re-SELECT — used by the orchestrator's per-job
+        ``run_events`` ``score`` emission (issue #215). Existing callers that
+        ignore the return are unaffected.
     """
     cur = conn.cursor()
     cur.execute(
@@ -77,7 +85,7 @@ def persist_job_assessment(
     row = cur.fetchone()
     if row is None:
         # Silent no-op matches SQLite UPDATE-no-match semantics.
-        return
+        return None
     legitimacy_note, enrichment_tier, jd_full_length = row[0], row[1], row[2] or 0
 
     # Resolve low_signal threshold from config (Phase 2d sub-fix 3/4). Default
@@ -121,3 +129,4 @@ def persist_job_assessment(
         ),
     )
     conn.commit()
+    return final_classification

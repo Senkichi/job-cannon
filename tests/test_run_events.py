@@ -135,3 +135,92 @@ def test_emit_never_raises_when_path_unwritable(tmp_path, monkeypatch):
     monkeypatch.setenv("JC_RUN_EVENTS_PATH", str(blocker))
     run_id = run_events.start(job="x", source="harness", pid=1)  # must not raise
     assert run_id == run_events.make_run_id("x", 1)
+
+
+# ---------------------------------------------------------------------------
+# Per-job score event (issue #215)
+# ---------------------------------------------------------------------------
+
+
+def test_mark_score_event_round_trip(events_file):
+    """mark('score', ...) lands a single record carrying the full audit payload.
+
+    Acceptance criteria (#215): one ``"event": "score"`` line per successfully-
+    scored job, carrying ``dedup_key``, all 6 ``sub_scores`` axes,
+    ``classification``, ``provider``, ``model``, and ``jd_len``. Same envelope
+    fields (v / ts / run_id / job / source) as run_start / run_end so the
+    supervisor's terminal-event scan stays uniform.
+    """
+    run_id = "enrichment:7777:1700000000"
+    sub_scores = {
+        "title_fit": 4,
+        "location_fit": 3,
+        "comp_fit": 5,
+        "domain_match": 4,
+        "seniority_match": 4,
+        "skills_match": 3,
+    }
+    run_events.mark(
+        "score",
+        run_id,
+        job="scoring",
+        source="orchestrator",
+        dedup_key="acme|senior-ds|remote",
+        sub_scores=sub_scores,
+        classification="apply",
+        provider="ollama",
+        model="qwen2.5:14b",
+        jd_len=1842,
+    )
+    records = _read(events_file)
+    assert len(records) == 1
+    rec = records[0]
+    assert rec["event"] == "score"
+    assert rec["run_id"] == run_id
+    assert rec["job"] == "scoring"
+    assert rec["source"] == "orchestrator"
+    assert rec["dedup_key"] == "acme|senior-ds|remote"
+    assert rec["sub_scores"] == sub_scores  # all 6 axes preserved
+    assert set(rec["sub_scores"].keys()) == {
+        "title_fit",
+        "location_fit",
+        "comp_fit",
+        "domain_match",
+        "seniority_match",
+        "skills_match",
+    }
+    assert rec["classification"] == "apply"
+    assert rec["provider"] == "ollama"
+    assert rec["model"] == "qwen2.5:14b"
+    assert rec["jd_len"] == 1842
+    assert rec["v"] == run_events.SCHEMA_VERSION
+
+
+def test_mark_score_event_adhoc_sentinel_run_id(events_file):
+    """Ad-hoc scoring paths (manual rescore, eval, tests) carry the
+    ``scoring:adhoc`` sentinel so the event is still produced, just
+    uncorrelated to any run envelope.
+    """
+    run_events.mark(
+        "score",
+        "scoring:adhoc",
+        job="scoring",
+        source="orchestrator",
+        dedup_key="dk-1",
+        sub_scores={
+            "title_fit": 3,
+            "location_fit": 3,
+            "comp_fit": 3,
+            "domain_match": 3,
+            "seniority_match": 3,
+            "skills_match": 3,
+        },
+        classification="apply",
+        provider="ollama",
+        model=None,
+        jd_len=0,
+    )
+    rec = _read(events_file)[0]
+    assert rec["run_id"] == "scoring:adhoc"
+    # model=None gets dropped per the existing compactness convention.
+    assert "model" not in rec

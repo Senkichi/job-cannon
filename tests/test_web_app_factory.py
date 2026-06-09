@@ -25,5 +25,13 @@ class TestAppFactoryDBPath:
 
         app = create_app()
 
-        assert app.config["JF_CONFIG"] == {}
+        # The scheduler's Ollama probe (scheduler/__init__.py) mutates
+        # JF_CONFIG to set `_jf_ollama_unavailable=True` when the probe can't
+        # reach the configured target model. Those `_jf_*` keys are internal
+        # probe state, not user config — filter them out so this assertion
+        # captures its actual intent (no user config was loaded).
+        user_config = {
+            k: v for k, v in app.config["JF_CONFIG"].items() if not k.startswith("_jf_")
+        }
+        assert user_config == {}
         assert app.config["DB_PATH"] == str(tmp_path / "jobs.db")

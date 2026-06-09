@@ -146,6 +146,8 @@ def score_and_persist_job(
     conn: sqlite3.Connection,
     config: dict,
     scorer_fn: Callable | None = None,
+    *,
+    run_id: str | None = None,
 ):
     """Unified v3.0 scoring entry point.
 
@@ -162,6 +164,13 @@ def score_and_persist_job(
     - Returns the underlying ScoringResult (status='ok'/'skipped'/'error')
       or None if the scorer returned nothing. Missing dedup_key rows are
       silent no-ops (matches SQLite UPDATE-no-match semantics).
+    - run_id: optional correlation id from the scheduler / harness run
+      wrapper. When supplied, the per-job ``score`` event emitted onto the
+      ``run_events`` stream after a successful persist carries it; ad-hoc
+      paths (manual rescore, eval, tests) that don't have a run envelope
+      fall back to the sentinel ``"scoring:adhoc"`` so the event is still
+      produced, just uncorrelated. ``skipped`` / ``error`` results emit no
+      event (mirrors the existing pass-through-no-write branch). Issue #215.
 
     Plan 4 Commit E removed the legacy haiku_score / sonnet_score /
     haiku_summary dual-write shim now that all readers consume
@@ -197,7 +206,7 @@ def score_and_persist_job(
     provider = result.provider
     model = getattr(result, "model", None)
 
-    persist_job_assessment(
+    classification = persist_job_assessment(
         conn,
         dedup_key,
         assessment,
@@ -206,6 +215,28 @@ def score_and_persist_job(
         config=config,
     )
     conn.commit()
+
+    # Per-job audit event (issue #215). The F4 substrate already swallows
+    # emission errors in run_events._append, so instrumentation can never
+    # raise into the scoring path — no try/except needed here. Missing-row
+    # silent no-ops return classification=None and skip emission (nothing
+    # landed on disk to audit).
+    if classification is not None:
+        from job_finder.web import run_events
+
+        run_events.mark(
+            "score",
+            run_id or "scoring:adhoc",
+            job="scoring",
+            source="orchestrator",
+            dedup_key=dedup_key,
+            sub_scores=dict(assessment.sub_scores),
+            classification=classification,
+            provider=provider,
+            model=model,
+            jd_len=len(job.get("jd_full") or ""),
+        )
+
     return result
 
 
