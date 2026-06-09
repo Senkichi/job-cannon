@@ -31,6 +31,8 @@ def run_scoring(
     new_job_keys: list[str],
     config: dict,
     db_path: str,
+    *,
+    run_id: str | None = None,
 ) -> dict:
     """Unified v3.0 scoring runner -- replaced run_haiku_scoring +
     run_sonnet_evaluation (Plan 4 Commit E removed the legacy two-tier path).
@@ -49,6 +51,13 @@ def run_scoring(
     and per-classification breakdown. Counter keys match the new pipeline
     summary shape introduced in Plan 2 commit A (Plan 3 Commit E collapses
     the legacy haiku_scored / sonnet_queued / sonnet_evaluated keys).
+
+    ``run_id`` (issue #215): the run-envelope correlation id from the
+    scheduler / harness wrapper. Threaded into ``score_and_persist_job`` so
+    each per-job ``score`` event on the ``run_events`` stream carries the
+    same id as the run's ``run_start`` / ``run_end`` envelope. Callers that
+    don't have a run envelope (e.g. tests, ad-hoc scripts) leave it ``None``
+    and the orchestrator emits the ``"scoring:adhoc"`` sentinel.
     """
     summary = {
         "scored": 0,
@@ -149,7 +158,7 @@ def run_scoring(
                             leg_note,
                         )
 
-                result = score_and_persist_job(job, conn, config)
+                result = score_and_persist_job(job, conn, config, run_id=run_id)
 
                 if result is None:
                     summary["skipped_no_jd"] += 1

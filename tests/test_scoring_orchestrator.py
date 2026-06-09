@@ -412,3 +412,273 @@ class TestCascadeModelPersisted:
         # reads providers.scoring.model (absent) and ignores .overrides.
         assert row["scoring_provider"] == "ollama"
         assert row["scoring_model"] == "qwen2.5:14b"
+
+
+class TestScoreEventEmission:
+    """Per-job ``score`` event on run_events.jsonl (issue #215).
+
+    Single observability seam: every successful ``score_and_persist_job`` call
+    must emit one structured record carrying ``dedup_key`` / ``sub_scores`` /
+    ``classification`` / ``provider`` / ``model`` / ``jd_len`` to the F4 stream.
+    Skipped/error envelopes emit nothing; emission failures must not break the
+    scoring path.
+    """
+
+    def _ok_scorer(self, provider="ollama", model="qwen2.5:14b"):
+        assessment = _make_assessment(provider=provider)
+
+        def _scorer(job, conn_arg, cfg, candidate_context):
+            return ScoringResult(
+                status="ok",
+                data=assessment,
+                provider=provider,
+                model=model,
+            )
+
+        return _scorer
+
+    def _read_events(self, path):
+        import json
+
+        return [
+            json.loads(line)
+            for line in path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+
+    @pytest.fixture
+    def events_file(self, tmp_path, monkeypatch):
+        path = tmp_path / "run_events.jsonl"
+        monkeypatch.setenv("JC_RUN_EVENTS_PATH", str(path))
+        return path
+
+    def test_ok_status_emits_one_score_event_with_full_payload(
+        self, db_conn, seeded_job, base_config, events_file
+    ):
+        """A successful persist emits exactly one ``score`` record carrying
+        every audit field the acceptance criteria call out."""
+        conn, _ = db_conn
+        so.score_and_persist_job(
+            seeded_job,
+            conn,
+            base_config,
+            scorer_fn=self._ok_scorer(),
+            run_id="enrichment:42:1700000000",
+        )
+        records = self._read_events(events_file)
+        score_events = [r for r in records if r["event"] == "score"]
+        assert len(score_events) == 1
+        rec = score_events[0]
+        assert rec["run_id"] == "enrichment:42:1700000000"
+        assert rec["job"] == "scoring"
+        assert rec["source"] == "orchestrator"
+        assert rec["dedup_key"] == "job-abc"
+        # All 6 sub-score axes present.
+        assert set(rec["sub_scores"].keys()) == {
+            "title_fit",
+            "location_fit",
+            "comp_fit",
+            "domain_match",
+            "seniority_match",
+            "skills_match",
+        }
+        # classification matches what landed on the row (Python-derived).
+        row = conn.execute(
+            "SELECT classification FROM jobs WHERE dedup_key = ?",
+            ("job-abc",),
+        ).fetchone()
+        assert rec["classification"] == row["classification"]
+        assert rec["provider"] == "ollama"
+        assert rec["model"] == "qwen2.5:14b"
+        # jd_len reflects len(job['jd_full']) — non-zero on the seeded row.
+        assert rec["jd_len"] == len(seeded_job["jd_full"])
+
+    def test_adhoc_run_id_sentinel_when_caller_omits(
+        self, db_conn, seeded_job, base_config, events_file
+    ):
+        """Callers that don't have a run envelope (manual rescore, tests)
+        emit the ``scoring:adhoc`` sentinel so the event is still produced."""
+        conn, _ = db_conn
+        so.score_and_persist_job(
+            seeded_job,
+            conn,
+            base_config,
+            scorer_fn=self._ok_scorer(),
+            # run_id omitted on purpose.
+        )
+        records = self._read_events(events_file)
+        score_events = [r for r in records if r["event"] == "score"]
+        assert len(score_events) == 1
+        assert score_events[0]["run_id"] == "scoring:adhoc"
+
+    def test_skipped_status_emits_no_score_event(
+        self, db_conn, seeded_job, base_config, events_file
+    ):
+        """ScoringResult(status='skipped') is a pass-through — no DB write and
+        no per-job event (mirrors the existing no-write branch)."""
+        conn, _ = db_conn
+        so.score_and_persist_job(
+            seeded_job,
+            conn,
+            base_config,
+            scorer_fn=lambda j, c, cfg, candidate_context: ScoringResult(
+                status="skipped", data=None
+            ),
+            run_id="enrichment:42:1700000000",
+        )
+        # Either no file or no score events in it.
+        if events_file.exists():
+            records = self._read_events(events_file)
+            assert [r for r in records if r["event"] == "score"] == []
+
+    def test_error_status_emits_no_score_event(
+        self, db_conn, seeded_job, base_config, events_file
+    ):
+        """ScoringResult(status='error') is a pass-through — no DB write and
+        no per-job event."""
+        conn, _ = db_conn
+        so.score_and_persist_job(
+            seeded_job,
+            conn,
+            base_config,
+            scorer_fn=lambda j, c, cfg, candidate_context: ScoringResult(
+                status="error", data=None, error="synthetic"
+            ),
+            run_id="enrichment:42:1700000000",
+        )
+        if events_file.exists():
+            records = self._read_events(events_file)
+            assert [r for r in records if r["event"] == "score"] == []
+
+    def test_missing_dedup_key_emits_no_score_event(self, db_conn, base_config, events_file):
+        """When the dedup_key has no matching row, persist_job_assessment
+        returns None (silent no-op). No on-disk verdict -> no event."""
+        conn, _ = db_conn
+        result = so.score_and_persist_job(
+            {"dedup_key": "nonexistent", "jd_full": "x" * 200},
+            conn,
+            base_config,
+            scorer_fn=self._ok_scorer(),
+            run_id="enrichment:42:1700000000",
+        )
+        assert result is not None and result.status == "ok"
+        if events_file.exists():
+            records = self._read_events(events_file)
+            assert [r for r in records if r["event"] == "score"] == []
+
+    def test_event_emission_failure_does_not_break_scoring(
+        self, db_conn, seeded_job, base_config, tmp_path, monkeypatch
+    ):
+        """Per spec: instrumentation must never raise into the scoring path.
+
+        ``run_events._append`` already swallows emission errors (lines 98-104),
+        so the orchestrator does not wrap the ``mark`` call in try/except.
+        Force a realistic failure by pointing the events path at a directory:
+        ``open(dir, 'a')`` raises inside ``_append``, which the existing
+        try/except swallows — proving the invariant holds end-to-end.
+        """
+        # Realistic failure path: events_path resolves to a directory, so
+        # the open() inside _append raises IsADirectoryError / PermissionError
+        # (platform-dependent) and the existing try/except swallows.
+        blocker = tmp_path / "is_a_dir"
+        blocker.mkdir()
+        monkeypatch.setenv("JC_RUN_EVENTS_PATH", str(blocker))
+
+        conn, _ = db_conn
+        result = so.score_and_persist_job(
+            seeded_job,
+            conn,
+            base_config,
+            scorer_fn=self._ok_scorer(),
+            run_id="enrichment:42:1700000000",
+        )
+        # Scoring still succeeds.
+        assert result is not None
+        assert result.status == "ok"
+        # And the row got written despite the bad emit.
+        row = conn.execute(
+            "SELECT classification FROM jobs WHERE dedup_key = ?",
+            ("job-abc",),
+        ).fetchone()
+        assert row["classification"] is not None
+
+    def test_emitted_classification_matches_persisted_value(
+        self, db_conn, seeded_job, base_config, events_file
+    ):
+        """Round-trip: the event's classification equals the DB column
+        (single-source: derive_classification at persist time)."""
+        conn, _ = db_conn
+        # Force the legitimacy_note branch so we get 'reject' regardless of
+        # sub-scores — proves the event carries the Python-derived value,
+        # not anything the LLM emitted.
+        conn.execute(
+            "UPDATE jobs SET legitimacy_note = ? WHERE dedup_key = ?",
+            ("scam-detected", "job-abc"),
+        )
+        conn.commit()
+        so.score_and_persist_job(
+            seeded_job,
+            conn,
+            base_config,
+            scorer_fn=self._ok_scorer(),
+            run_id="enrichment:42:1700000000",
+        )
+        rec = next(r for r in self._read_events(events_file) if r["event"] == "score")
+        assert rec["classification"] == "reject"
+        row = conn.execute(
+            "SELECT classification FROM jobs WHERE dedup_key = ?",
+            ("job-abc",),
+        ).fetchone()
+        assert rec["classification"] == row["classification"]
+
+
+class TestPersistJobAssessmentReturn:
+    """``persist_job_assessment`` returns the derived classification (#215).
+
+    Lets the orchestrator emit the verdict on the F4 stream without a
+    redundant re-SELECT. Existing callers ignore the return — non-breaking
+    widening.
+    """
+
+    def test_returns_derived_classification_on_write(self, db_conn, seeded_job):
+        """Happy path: the return matches what the column got."""
+        from job_finder.db import persist_job_assessment
+
+        conn, _ = db_conn
+        assessment = _make_assessment()
+        result = persist_job_assessment(
+            conn,
+            "job-abc",
+            assessment,
+            provider="ollama",
+            model="qwen2.5:14b",
+        )
+        row = conn.execute(
+            "SELECT classification FROM jobs WHERE dedup_key = ?",
+            ("job-abc",),
+        ).fetchone()
+        assert result == row["classification"]
+        # Sub-scores were all 3 with no legitimacy_note -> apply.
+        assert result == "apply"
+
+    def test_returns_legitimacy_note_derived_value(self, db_conn, seeded_job):
+        """Legitimacy_note on the row forces 'reject' — the return
+        reflects that derived value, not anything the assessment carried."""
+        from job_finder.db import persist_job_assessment
+
+        conn, _ = db_conn
+        conn.execute(
+            "UPDATE jobs SET legitimacy_note = ? WHERE dedup_key = ?",
+            ("scam-detected", "job-abc"),
+        )
+        conn.commit()
+        result = persist_job_assessment(conn, "job-abc", _make_assessment())
+        assert result == "reject"
+
+    def test_returns_none_on_missing_dedup_key(self, db_conn):
+        """Silent no-op path returns None so callers can skip emission."""
+        from job_finder.db import persist_job_assessment
+
+        conn, _ = db_conn
+        result = persist_job_assessment(conn, "no-such-key", _make_assessment())
+        assert result is None

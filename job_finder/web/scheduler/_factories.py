@@ -10,6 +10,7 @@ of heavy job modules until the job actually runs in the background thread,
 rather than at scheduler-setup time inside ``init_scheduler``.
 """
 
+import inspect
 import logging
 
 from job_finder.web import run_events
@@ -17,6 +18,24 @@ from job_finder.web.db_helpers import get_config_snapshot
 from job_finder.web.live_events import publish as _publish_live
 
 logger = logging.getLogger(__name__)
+
+
+def _invoke_job(fn, db_path, config, *, run_id):
+    """Invoke a scheduled-job function, passing ``run_id`` only when it's
+    in the function's signature.
+
+    Per-job opt-in via signature lets enrichment_backfill (issue #215) thread
+    the run-envelope id down into ``run_scoring`` without touching the call
+    contract for every other scheduled job. Most jobs take ``(db_path, config)``
+    and ignore correlation entirely; only the scoring path needs it.
+    """
+    try:
+        params = inspect.signature(fn).parameters
+    except (TypeError, ValueError):
+        return fn(db_path, config)
+    if "run_id" in params:
+        return fn(db_path, config, run_id=run_id)
+    return fn(db_path, config)
 
 
 def _publish_all(events) -> None:
@@ -50,7 +69,7 @@ def _make_simple_job(app, name, import_func, *, publish_events=()):
                 job=name, source="scheduler", db_path=db_path, db_before=counters0
             )
             try:
-                result = import_func()(db_path, config)
+                result = _invoke_job(import_func(), db_path, config, run_id=run_id)
                 logger.info("%s: %s", name, result)
                 run_events.end(
                     run_id,
@@ -123,7 +142,7 @@ def _make_tracked_job(
                 job=name, source="scheduler", db_path=db_path, db_before=counters0
             )
             try:
-                result = import_func()(db_path, config)
+                result = _invoke_job(import_func(), db_path, config, run_id=run_id)
                 logger.info("%s: %s", name, result)
                 metadata = extract_metadata(result)
                 duration = round(_time.time() - t0, 2)

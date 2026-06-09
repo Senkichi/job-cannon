@@ -24,7 +24,9 @@ from job_finder.secrets import get_secret
 logger = logging.getLogger(__name__)
 
 
-def run_enrichment_backfill_two_stage(db_path: str, config: dict) -> dict[str, Any]:
+def run_enrichment_backfill_two_stage(
+    db_path: str, config: dict, *, run_id: str | None = None
+) -> dict[str, Any]:
     """Run the post-ingestion enrichment backfill, then score new rows.
 
     Stage 1: fill ``jd_full`` via the cost-ordered tier pipeline.
@@ -36,6 +38,12 @@ def run_enrichment_backfill_two_stage(db_path: str, config: dict) -> dict[str, A
 
     Returns a metrics dict consumed by the scheduler's tracked-job
     extract_metadata callable.
+
+    ``run_id`` (issue #215): the run-envelope correlation id from the
+    scheduler/harness wrapper. Threaded into ``run_scoring`` so each
+    per-job ``score`` event the orchestrator emits onto
+    ``run_events.jsonl`` carries the same id as this run's
+    ``run_start`` / ``run_end`` envelope.
     """
     from job_finder.web.data_enricher import run_enrichment_backfill
     from job_finder.web.db_helpers import standalone_connection
@@ -81,7 +89,7 @@ def run_enrichment_backfill_two_stage(db_path: str, config: dict) -> dict[str, A
         if not dedup_keys:
             logger.info("Post-enrichment scoring: nothing to score")
             return result
-        summary = run_scoring(dedup_keys, config, db_path)
+        summary = run_scoring(dedup_keys, config, db_path, run_id=run_id)
         result["scored"] = summary.get("scored", 0)
         result["classified_apply"] = summary.get("classified_apply", 0)
         result["classified_consider"] = summary.get("classified_consider", 0)

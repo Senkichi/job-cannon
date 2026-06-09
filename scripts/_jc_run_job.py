@@ -134,6 +134,7 @@ def main() -> int:
         )
 
     import importlib
+    import inspect as _inspect
 
     mod = importlib.import_module(mod_path)
     func = getattr(mod, func_name)
@@ -145,7 +146,18 @@ def main() -> int:
                 result = func(app)
         else:
             with app.app_context():
-                result = func(db_path, cfg)
+                # Per-job opt-in: thread run_id only when the target accepts it
+                # (issue #215). Lets the scoring path correlate per-job `score`
+                # events to this run's envelope without changing the contract
+                # for every other harness-runnable job.
+                try:
+                    _params = _inspect.signature(func).parameters
+                except (TypeError, ValueError):
+                    _params = {}
+                if "run_id" in _params:
+                    result = func(db_path, cfg, run_id=run_id)
+                else:
+                    result = func(db_path, cfg)
         elapsed = round(time.time() - t0, 1)
         log.info("RUNNER done job=%s elapsed=%ss", key, elapsed)
         print(f"\n>>> RESULT[{key}] ({elapsed}s): {result!r}", flush=True)

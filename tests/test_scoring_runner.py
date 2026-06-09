@@ -138,7 +138,7 @@ class TestRunScoring:
 
         seen: list[str] = []
 
-        def fake_persist(job, conn, cfg, client=None):
+        def fake_persist(job, conn, cfg, client=None, **kwargs):
             seen.append(job["dedup_key"])
             from job_finder.db import JobAssessment
             from job_finder.web.job_scorer import ScoringResult
@@ -200,7 +200,7 @@ class TestRunScoring:
 
         scored_keys: list[str] = []
 
-        def fake_persist(job, conn, cfg, client=None):
+        def fake_persist(job, conn, cfg, client=None, **kwargs):
             scored_keys.append(job["dedup_key"])
             from job_finder.db import JobAssessment
             from job_finder.web.job_scorer import ScoringResult
@@ -340,7 +340,7 @@ class TestRunScoring:
 
         import job_finder.web.scoring_runner as sr
 
-        def fake_persist(job, conn, cfg, client=None):
+        def fake_persist(job, conn, cfg, client=None, **kwargs):
             from job_finder.db import JobAssessment
             from job_finder.web.job_scorer import ScoringResult
 
@@ -387,7 +387,7 @@ class TestRunScoring:
 
         import job_finder.web.scoring_runner as sr
 
-        def fake_persist(job, conn, cfg, client=None):
+        def fake_persist(job, conn, cfg, client=None, **kwargs):
             from job_finder.web.job_scorer import ScoringResult
 
             return ScoringResult(status="skipped", data=None)
@@ -412,7 +412,7 @@ class TestRunScoring:
 
         import job_finder.web.scoring_runner as sr
 
-        def fake_persist(job, conn, cfg, client=None):
+        def fake_persist(job, conn, cfg, client=None, **kwargs):
             from job_finder.web.job_scorer import ScoringResult
 
             return ScoringResult(
