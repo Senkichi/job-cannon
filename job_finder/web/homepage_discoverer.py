@@ -24,6 +24,14 @@ import requests
 from job_finder.secrets import get_secret
 from job_finder.web.db_helpers import standalone_connection
 
+# Lazy import of careers-page resolver (ImportError guard — mirrors
+# _run_html.py and enrichment_tiers.py). Keeps homepage_discoverer
+# importable when careers_scraper is unavailable.
+try:
+    from job_finder.web.careers_scraper import find_careers_url
+except ImportError:
+    find_careers_url = None  # type: ignore[assignment]
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -203,14 +211,14 @@ def run_homepage_discovery(db_path: str, config: dict | None = None) -> dict:
 
     with standalone_connection(db_path) as conn:
         companies = conn.execute(
-            f"SELECT id, name_raw, ats_platform, ats_slug "
+            f"SELECT id, name_raw, ats_platform, ats_slug, ats_probe_status "
             f"FROM companies "
             f"WHERE homepage_url IS NULL AND homepage_probe_attempted_at IS NULL "
             f"LIMIT {_BATCH_CAP}"
         ).fetchall()
 
         for row in companies:
-            company_id, name_raw, ats_platform, ats_slug = row
+            company_id, name_raw, ats_platform, ats_slug, ats_probe_status = row
             companies_checked += 1
 
             # Fetch source_urls for this company from jobs table (FK join)
@@ -258,10 +266,35 @@ def run_homepage_discovery(db_path: str, config: dict | None = None) -> dict:
                 continue
 
             if url:
+                # Close the discovery loop (Issue #221): in the same UPDATE
+                # that writes homepage_url, also derive careers_url
+                # (mechanical, $0 — no conn/config passed) and reset
+                # ats_probe_status to 'pending' unless already 'hit' so the
+                # next probe_ats_slugs run picks this row up. Never downgrade
+                # a confirmed hit.
+                careers_url = None
+                if find_careers_url is not None:
+                    try:
+                        careers_url = find_careers_url(url)
+                    except Exception as e:
+                        logger.debug("find_careers_url failed for %s: %s", url, e)
+
+                set_clauses = [
+                    "homepage_url = ?",
+                    "homepage_probe_attempted_at = datetime('now')",
+                ]
+                params: list = [url]
+                if careers_url:
+                    set_clauses.append("careers_url = ?")
+                    params.append(careers_url)
+                if ats_probe_status != "hit":
+                    set_clauses.append("ats_probe_status = 'pending'")
+                params.append(company_id)
+
                 try:
                     conn.execute(
-                        "UPDATE companies SET homepage_url = ?, homepage_probe_attempted_at = datetime('now') WHERE id = ?",
-                        (url, company_id),
+                        f"UPDATE companies SET {', '.join(set_clauses)} WHERE id = ?",
+                        tuple(params),
                     )
                     conn.commit()
                     homepages_found += 1
@@ -394,7 +427,7 @@ def _try_claude_enricher(company_name: str) -> str | None:
 
 
 def _search_serpapi(company_name: str, api_key: str) -> str | None:
-    """Tier 3: SerpAPI Google web search for company homepage.
+    """Tier 4: SerpAPI Google web search for company homepage.
 
     Queries '{company_name} homepage' via SerpAPI engine=google.
     Iterates organic_results, skips _SKIP_DOMAINS, validates first

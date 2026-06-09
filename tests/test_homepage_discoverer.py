@@ -352,6 +352,7 @@ class TestDiscoverHomepagesBatch:
         count: int,
         with_homepage: int = 0,
         with_probe_attempted: int = 0,
+        initial_ats_probe_status: str | None = "miss",
     ) -> str:
         """Create temp SQLite DB with `count` companies.
 
@@ -359,6 +360,10 @@ class TestDiscoverHomepagesBatch:
             count: Total companies to create.
             with_homepage: First N companies get homepage_url set.
             with_probe_attempted: First N companies get homepage_probe_attempted_at set.
+            initial_ats_probe_status: Initial ats_probe_status value for all
+                inserted rows. Defaults to 'miss' to match the real-world
+                cohort that homepage discovery actually drains (the smoking
+                gun in Issue #221).
         """
         fd, path = tempfile.mkstemp(suffix=".db")
         os.close(fd)
@@ -372,7 +377,9 @@ class TestDiscoverHomepagesBatch:
                 homepage_url TEXT DEFAULT NULL,
                 homepage_probe_attempted_at TEXT DEFAULT NULL,
                 ats_platform TEXT DEFAULT NULL,
-                ats_slug TEXT DEFAULT NULL
+                ats_slug TEXT DEFAULT NULL,
+                ats_probe_status TEXT DEFAULT NULL,
+                careers_url TEXT DEFAULT NULL
             )
         """)
         conn.execute("""
@@ -387,8 +394,16 @@ class TestDiscoverHomepagesBatch:
             homepage = f"https://company{i}.com" if i < with_homepage else None
             probe_ts = "2026-01-01T00:00:00" if i < with_probe_attempted else None
             conn.execute(
-                "INSERT INTO companies (name, name_raw, homepage_url, homepage_probe_attempted_at, ats_platform, ats_slug) VALUES (?, ?, ?, ?, ?, ?)",
-                (f"Company {i}", f"company-{i}", homepage, probe_ts, "greenhouse", f"co{i}"),
+                "INSERT INTO companies (name, name_raw, homepage_url, homepage_probe_attempted_at, ats_platform, ats_slug, ats_probe_status) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (
+                    f"Company {i}",
+                    f"company-{i}",
+                    homepage,
+                    probe_ts,
+                    "greenhouse",
+                    f"co{i}",
+                    initial_ats_probe_status,
+                ),
             )
 
         conn.commit()
@@ -396,17 +411,29 @@ class TestDiscoverHomepagesBatch:
         return path
 
     def test_batch_updates_db(self):
-        """Batch discovers homepages, updates DB, stamps all with probe timestamp."""
+        """Batch discovers homepages, derives careers_url, resets to pending, stamps probe ts.
+
+        Issue #221: success branch must close the loop to ATS detection by
+        deriving careers_url via find_careers_url and resetting
+        ats_probe_status='pending' so the next probe_ats_slugs run sees it.
+        """
         from job_finder.web.homepage_discoverer import run_homepage_discovery
 
         path = self._make_db_with_companies(3)
 
         try:
-            with patch("job_finder.web.homepage_discoverer.discover_homepage") as mock_discover:
+            with (
+                patch("job_finder.web.homepage_discoverer.discover_homepage") as mock_discover,
+                patch("job_finder.web.homepage_discoverer.find_careers_url") as mock_find_careers,
+            ):
                 mock_discover.side_effect = [
                     "https://company0.com",
                     "https://company1.com",
                     None,  # company2 not found
+                ]
+                mock_find_careers.side_effect = [
+                    "https://company0.com/careers",
+                    "https://company1.com/jobs",
                 ]
                 result = run_homepage_discovery(path)
 
@@ -415,7 +442,8 @@ class TestDiscoverHomepagesBatch:
 
             conn = sqlite3.connect(path)
             rows = conn.execute(
-                "SELECT id, homepage_url, homepage_probe_attempted_at FROM companies ORDER BY id"
+                "SELECT id, homepage_url, homepage_probe_attempted_at, "
+                "careers_url, ats_probe_status FROM companies ORDER BY id"
             ).fetchall()
             conn.close()
 
@@ -426,6 +454,16 @@ class TestDiscoverHomepagesBatch:
             assert rows[0][2] is not None, "company0 should have probe timestamp"
             assert rows[1][2] is not None, "company1 should have probe timestamp"
             assert rows[2][2] is not None, "company2 should have probe timestamp"
+            # Issue #221: careers_url derived and persisted for the two hits
+            assert rows[0][3] == "https://company0.com/careers"
+            assert rows[1][3] == "https://company1.com/jobs"
+            assert rows[2][3] is None
+            # Issue #221: ats_probe_status reset to 'pending' for the two
+            # successful discoveries (initial 'miss' → 'pending'); company2
+            # had no homepage so it stays at 'miss'.
+            assert rows[0][4] == "pending"
+            assert rows[1][4] == "pending"
+            assert rows[2][4] == "miss"
         finally:
             if os.path.exists(path):
                 os.remove(path)
@@ -467,24 +505,114 @@ class TestDiscoverHomepagesBatch:
                 os.remove(path)
 
     def test_batch_stamps_probe_timestamp(self):
-        """All processed companies get homepage_probe_attempted_at stamped regardless of outcome."""
+        """All processed companies get probe ts stamped; non-success leaves status unchanged.
+
+        Issue #221: when discover_homepage returns None, we still stamp the
+        probe timestamp (existing behavior) but we do NOT write careers_url
+        and do NOT reset ats_probe_status — there's no positive signal yet.
+        """
         from job_finder.web.homepage_discoverer import run_homepage_discovery
 
         path = self._make_db_with_companies(2)
 
         try:
-            with patch("job_finder.web.homepage_discoverer.discover_homepage") as mock_discover:
+            with (
+                patch("job_finder.web.homepage_discoverer.discover_homepage") as mock_discover,
+                patch("job_finder.web.homepage_discoverer.find_careers_url") as mock_find_careers,
+            ):
                 mock_discover.return_value = None  # Both fail
                 run_homepage_discovery(path)
+                # find_careers_url must not be called when no homepage was
+                # discovered — it's only meaningful in the success branch.
+                assert mock_find_careers.call_count == 0
 
             conn = sqlite3.connect(path)
             rows = conn.execute(
-                "SELECT homepage_probe_attempted_at FROM companies ORDER BY id"
+                "SELECT homepage_probe_attempted_at, careers_url, ats_probe_status "
+                "FROM companies ORDER BY id"
             ).fetchall()
             conn.close()
 
             assert rows[0][0] is not None, "company0 should have probe timestamp"
             assert rows[1][0] is not None, "company1 should have probe timestamp"
+            assert rows[0][1] is None, "company0 careers_url unchanged on miss"
+            assert rows[1][1] is None, "company1 careers_url unchanged on miss"
+            # ats_probe_status untouched (initial 'miss' from helper)
+            assert rows[0][2] == "miss"
+            assert rows[1][2] == "miss"
+        finally:
+            if os.path.exists(path):
+                os.remove(path)
+
+    def test_batch_does_not_downgrade_existing_hit(self):
+        """Issue #221: a company already at ats_probe_status='hit' is never downgraded.
+
+        Edge case: homepage discovery can run on a 'hit' company if its
+        homepage_url was never written. The success branch must populate
+        homepage_url + careers_url but leave ats_probe_status='hit' intact.
+        """
+        from job_finder.web.homepage_discoverer import run_homepage_discovery
+
+        # Single company pre-seeded as 'hit' with no homepage_url yet.
+        path = self._make_db_with_companies(1, initial_ats_probe_status="hit")
+
+        try:
+            with (
+                patch("job_finder.web.homepage_discoverer.discover_homepage") as mock_discover,
+                patch("job_finder.web.homepage_discoverer.find_careers_url") as mock_find_careers,
+            ):
+                mock_discover.return_value = "https://company0.com"
+                mock_find_careers.return_value = "https://company0.com/careers"
+                result = run_homepage_discovery(path)
+
+            assert result["homepages_found"] == 1
+
+            conn = sqlite3.connect(path)
+            row = conn.execute(
+                "SELECT homepage_url, careers_url, ats_probe_status FROM companies"
+            ).fetchone()
+            conn.close()
+
+            assert row[0] == "https://company0.com"
+            assert row[1] == "https://company0.com/careers"
+            # Never downgrade a confirmed hit.
+            assert row[2] == "hit"
+        finally:
+            if os.path.exists(path):
+                os.remove(path)
+
+    def test_batch_resets_to_pending_when_careers_url_returns_none(self):
+        """Issue #221, criterion 3: find_careers_url=None still resets to 'pending'.
+
+        Behavior chosen: when find_careers_url returns None (e.g. homepage
+        redirects to an ATS domain, or no careers link found),
+        homepage_url is still written and the company is still reset to
+        'pending' so the probe's speculative ladder can try the slug
+        fast-path on the now-known homepage.
+        """
+        from job_finder.web.homepage_discoverer import run_homepage_discovery
+
+        path = self._make_db_with_companies(1)  # initial status = 'miss'
+
+        try:
+            with (
+                patch("job_finder.web.homepage_discoverer.discover_homepage") as mock_discover,
+                patch("job_finder.web.homepage_discoverer.find_careers_url") as mock_find_careers,
+            ):
+                mock_discover.return_value = "https://company0.com"
+                mock_find_careers.return_value = None  # ATS redirect or no link
+                run_homepage_discovery(path)
+
+            conn = sqlite3.connect(path)
+            row = conn.execute(
+                "SELECT homepage_url, careers_url, ats_probe_status FROM companies"
+            ).fetchone()
+            conn.close()
+
+            assert row[0] == "https://company0.com"
+            assert row[1] is None  # careers_url not written when None
+            # Reset to pending so the probe re-examines this row.
+            assert row[2] == "pending"
         finally:
             if os.path.exists(path):
                 os.remove(path)
@@ -561,6 +689,86 @@ class TestDiscoverHomepagesBatch:
 # ---------------------------------------------------------------------------
 # Tests: Homepage discovery throughput (Fix 5)
 # ---------------------------------------------------------------------------
+
+
+class TestRunHomepageDiscoveryProbeIntegration:
+    """Integration test (Issue #221): the discovery → probe chain closes.
+
+    Asserts that after run_homepage_discovery writes homepage_url +
+    careers_url + ats_probe_status='pending', the follow-on probe_ats_slugs
+    run actually selects the row and promotes it to ats_probe_status='hit'
+    via the URL-evidence fast-path. This is the integration-style assertion
+    the issue's acceptance criteria calls out — extract_ats_from_url_best
+    and _verify_fastpath_live are mocked so the test stays offline.
+    """
+
+    def test_discovery_to_probe_chain_promotes_to_hit(self, migrated_db):
+        """Pending-after-discovery row gets fast-pathed to 'hit' by the probe."""
+        from datetime import datetime
+
+        from job_finder.web.ats_scanner._probe import probe_ats_slugs
+        from job_finder.web.homepage_discoverer import run_homepage_discovery
+
+        db_path, conn = migrated_db
+        now = datetime.now().isoformat()
+
+        # Single 'miss' company without a homepage_url — the cohort the
+        # issue identifies as permanently stuck before this fix.
+        conn.execute(
+            """INSERT INTO companies (name, name_raw, ats_probe_status, created_at, updated_at)
+               VALUES (?, ?, 'miss', ?, ?)""",
+            ("acme", "Acme", now, now),
+        )
+        conn.commit()
+
+        homepage = "https://acme.example.com"
+        careers = "https://jobs.ashbyhq.com/acme"
+
+        with (
+            patch(
+                "job_finder.web.homepage_discoverer.discover_homepage",
+                return_value=homepage,
+            ),
+            patch(
+                "job_finder.web.homepage_discoverer.find_careers_url",
+                return_value=careers,
+            ),
+        ):
+            disc_result = run_homepage_discovery(db_path, None)
+
+        assert disc_result["homepages_found"] == 1
+
+        # After discovery: row is pending with careers_url populated.
+        row = conn.execute(
+            "SELECT homepage_url, careers_url, ats_probe_status FROM companies"
+        ).fetchone()
+        assert row["homepage_url"] == homepage
+        assert row["careers_url"] == careers
+        assert row["ats_probe_status"] == "pending"
+
+        # Now run the probe with the URL fast-path stubbed to recognize
+        # the careers_url as an ashby tenant. _verify_fastpath_live is also
+        # stubbed so no real HTTP call happens.
+        with (
+            patch(
+                "job_finder.web.ats_scanner._probe.extract_ats_from_url_best",
+                return_value=("ashby", "acme", 0),
+            ),
+            patch(
+                "job_finder.web.ats_scanner._probe._verify_fastpath_live",
+                return_value=True,
+            ),
+        ):
+            probe_summary = probe_ats_slugs(db_path, {})
+
+        assert probe_summary["hits"] == 1
+
+        promoted = conn.execute(
+            "SELECT ats_platform, ats_slug, ats_probe_status FROM companies"
+        ).fetchone()
+        assert promoted["ats_platform"] == "ashby"
+        assert promoted["ats_slug"] == "acme"
+        assert promoted["ats_probe_status"] == "hit"
 
 
 class TestRunHomepageDiscoveryThroughput:
