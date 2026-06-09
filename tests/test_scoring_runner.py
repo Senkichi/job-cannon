@@ -429,6 +429,108 @@ class TestRunScoring:
         assert summary["errors"] == 1
         assert summary["scored"] == 0
 
+    def test_divergent_title_lookup_hits_after_223_fix(self, migrated_db, caplog):
+        """#223 regression: a Job whose title carries a clean_title marker
+        (dash-suffix qualifier, here) must be looked up by its PERSISTED key
+        (the cleaned-title key), not the raw-title key. If the lookup uses
+        the raw key, run_scoring logs ``not found in DB -- skipping`` and the
+        job is silently never scored.
+        """
+        import logging
+
+        from job_finder.db import upsert_job
+        from job_finder.models import Job
+        from job_finder.parsed_job import ParsedJob
+
+        db_path, setup_conn = migrated_db
+
+        # Build a Job whose title diverges between Job.dedup_key (raw) and
+        # ParsedJob.dedup_key (clean_title-normalized). The Apple case from
+        # the overnight finding is the canonical example.
+        job = Job(
+            title="Staff Data Scientist - Experimentation",
+            company="Apple",
+            location="Remote",
+            source="ats_scanner_run",
+            source_url="https://jobs.apple.com/role/1",
+            description=(
+                "About the role you will design build and operate data and ML "
+                "systems at scale partnering with cross functional teams to ship "
+                "reliable features end to end Requirements strong Python and SQL "
+                "plus hands on cloud infrastructure testing and production "
+                "observability experience"
+            ),
+        )
+        parsed = ParsedJob.from_job(job)
+        result = upsert_job(setup_conn, parsed)
+        setup_conn.commit()
+
+        # Pre-condition: the two derivations actually diverge. If they no
+        # longer do for this title, switch to another divergent shape -- the
+        # bug only surfaces when persisted_key != raw_key.
+        assert job.dedup_key != parsed.dedup_key, (
+            "Test pre-condition: title must diverge under clean_title vs "
+            "normalize_title-only; otherwise this test does not exercise #223."
+        )
+        # The persisted key (what upsert_job actually wrote to the row) is
+        # the cleaned key -- the same one the #223 fix appends.
+        assert result.dedup_key == parsed.dedup_key
+
+        import job_finder.web.scoring_runner as sr
+        from job_finder.db import JobAssessment
+        from job_finder.web.job_scorer import ScoringResult
+
+        scored_keys: list[str] = []
+
+        def fake_persist(job_dict, conn, cfg, client=None):
+            scored_keys.append(job_dict["dedup_key"])
+            return ScoringResult(
+                status="ok",
+                data=JobAssessment(
+                    sub_scores={
+                        "title_fit": 3,
+                        "location_fit": 3,
+                        "comp_fit": 3,
+                        "domain_match": 3,
+                        "seniority_match": 3,
+                        "skills_match": 3,
+                    },
+                    classification="",
+                    rationale={
+                        "strengths": ["x"],
+                        "gaps": [],
+                        "talking_points": [],
+                        "resume_priority_skills": [],
+                    },
+                    provider="ollama",
+                ),
+                provider="ollama",
+            )
+
+        with (
+            patch.object(sr, "score_and_persist_job", side_effect=fake_persist),
+            patch.object(sr, "check_job_liveness", return_value="live"),
+            caplog.at_level(logging.WARNING, logger="job_finder.web.scoring_runner"),
+        ):
+            # Pass the PERSISTED key -- mirrors what the four append sites do
+            # after the #223 fix (``new_job_keys.append(result.dedup_key)``).
+            summary = sr.run_scoring(
+                [result.dedup_key],
+                self._scoring_cfg(),
+                db_path,
+            )
+
+        assert scored_keys == [result.dedup_key]
+        assert summary["scored"] == 1
+        # No silent-skip warning for this lookup (the #223 symptom).
+        skip_warnings = [
+            rec for rec in caplog.records if "not found in DB -- skipping" in rec.getMessage()
+        ]
+        assert not skip_warnings, (
+            f"#223 regression: run_scoring logged 'not found in DB' for a "
+            f"persisted-key lookup: {[rec.getMessage() for rec in skip_warnings]}"
+        )
+
     def test_classification_counter_accumulates(self, migrated_db):
         """Each 'apply' classification increments classified_apply.
 

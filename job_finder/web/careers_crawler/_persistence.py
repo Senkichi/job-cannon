@@ -66,7 +66,8 @@ def _upsert_and_log(
                 if result.kind == "inserted":
                     summary["jobs_new"] += 1
                     company_jobs_new += 1
-                    all_new_job_keys.append(job.dedup_key)
+                    # #223: enqueue the PERSISTED key (clean_title-normalized).
+                    all_new_job_keys.append(result.dedup_key)
             except Exception as job_err:
                 error_msg = f"{company_name} job error: {job_err}"
                 summary["errors"].append(error_msg)

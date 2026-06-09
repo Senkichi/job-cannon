@@ -1146,6 +1146,101 @@ class TestDataForSEOIngestion:
 # ---------------------------------------------------------------------------
 
 
+class TestDivergentTitleScoredOnSameRun:
+    """#223 regression: a Job whose raw title diverges from its ParsedJob
+    (clean_title-normalized) title must still be LLM-scored on the inserting
+    run. The symptom the bug produced was the off-by-one in the run summary:
+    ``jobs_new=N`` but ``scored=N-1`` because ``run_scoring`` looked up the
+    raw key (which was never persisted) and silently skipped the row.
+
+    This class exercises the full ``run_ingestion`` -> ``run_scoring`` chain
+    against a real (migrated) SQLite DB so the offending append-site is
+    exercised end-to-end. ``score_job`` (the inner LLM call) is stubbed.
+    """
+
+    def test_divergent_title_yields_scored_equals_jobs_new(self, minimal_config, migrated_db_path):
+        """``run_ingestion`` over a single divergent-title job: ``scored``
+        must equal ``jobs_new`` (no off-by-one)."""
+        from job_finder.db import JobAssessment
+        from job_finder.models import Job
+        from job_finder.web.job_scorer import ScoringResult
+
+        # Sufficient body so the row is not skipped by run_scoring's no-jd gate.
+        long_desc = (
+            "About the role you will design build and operate data and ML "
+            "systems at scale partnering with cross functional teams to ship "
+            "reliable features end to end Requirements strong Python and SQL "
+            "plus hands on cloud infrastructure testing and production "
+            "observability experience"
+        )
+        divergent_job = Job(
+            title="Staff Data Scientist - Experimentation",
+            company="Apple",
+            location="Remote",
+            source="gmail",
+            source_url="https://example.com/apple-sds-exp",
+            description=long_desc,
+        )
+
+        def fake_inner_scorer(job, conn, cfg, candidate_context):
+            return ScoringResult(
+                status="ok",
+                data=JobAssessment(
+                    sub_scores={
+                        "title_fit": 3,
+                        "location_fit": 3,
+                        "comp_fit": 3,
+                        "domain_match": 3,
+                        "seniority_match": 3,
+                        "skills_match": 3,
+                    },
+                    classification="",
+                    rationale={
+                        "strengths": ["x"],
+                        "gaps": [],
+                        "talking_points": [],
+                        "resume_priority_skills": [],
+                    },
+                    provider="ollama",
+                ),
+                provider="ollama",
+            )
+
+        # Cascade-shaped scoring config (mirrors prod). run_scoring requires
+        # providers.scoring to resolve a model.
+        cfg = dict(minimal_config)
+        cfg["providers"] = {
+            "scoring": {
+                "provider": "ollama",
+                "model": "qwen2.5:14b",
+            },
+        }
+
+        with (
+            patch("job_finder.web.ingestion_runner.GmailSource") as MockGmail,
+            patch("job_finder.sources.serpapi_source.SerpAPISource") as MockSerp,
+            patch("job_finder.web.scoring_runner.check_job_liveness", return_value="live"),
+            patch("job_finder.web.job_scorer.score_job", side_effect=fake_inner_scorer),
+        ):
+            MockGmail.return_value.fetch_jobs.return_value = ([divergent_job], set())
+            MockSerp.return_value.fetch_jobs.return_value = []
+
+            from job_finder.web.pipeline_runner import run_ingestion
+
+            summary = run_ingestion(migrated_db_path, cfg)
+
+        # The #223 symptom in the overnight finding was: jobs_new=12, scored=11
+        # (one inserted job silently skipped because the raw dedup_key never
+        # matched the persisted cleaned key). With the fix, the inserting run
+        # scores every inserted job: scored == jobs_new.
+        assert summary["jobs_new"] == 1, summary
+        assert summary["scored"] == summary["jobs_new"], (
+            f"#223 off-by-one regression: jobs_new={summary['jobs_new']} but "
+            f"scored={summary['scored']} -- the divergent-title row was "
+            f"persisted but never looked up by run_scoring."
+        )
+
+
 class TestUnifiedScorerFlagGate:
     """Phase 34 Plan 3 Commit E — use_unified_scorer flag after legacy else-branch deletion.
 

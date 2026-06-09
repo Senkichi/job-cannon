@@ -753,7 +753,11 @@ def _score_and_persist(
         )
         if result.kind == "inserted":
             summary["jobs_new"] += 1
-            new_job_keys.append(job.dedup_key)
+            # #223: enqueue the PERSISTED key (clean_title-normalized) so the
+            # scorer's lookup hits. Job.dedup_key normalizes the raw title and
+            # diverges from ParsedJob's key whenever clean_title strips a
+            # req-id / location suffix / dash qualifier / logo letter.
+            new_job_keys.append(result.dedup_key)
         elif result.kind == "updated":
             summary["jobs_updated"] += 1
         elif result.kind == "touched":
