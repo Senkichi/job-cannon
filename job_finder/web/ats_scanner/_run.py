@@ -24,6 +24,7 @@ from job_finder.db import derive_classification
 from job_finder.db._jd_full import set_jd_full as _set_jd_full
 from job_finder.json_utils import utc_now_iso
 from job_finder.secrets import get_secret
+from job_finder.web.ats_platforms import NON_SCANNABLE_PLATFORMS
 from job_finder.web.ats_platforms._platforms_ashby import SCANNER as _ASHBY_SCANNER
 from job_finder.web.ats_platforms._platforms_bamboohr import (
     SCANNER as _BAMBOOHR_SCANNER,
@@ -189,14 +190,28 @@ def _count_phase_a_eligible(conn: sqlite3.Connection, threshold: int) -> int:
 
 
 def _count_phase_c_eligible(conn: sqlite3.Connection, threshold: int) -> int:
-    """Count Phase C companies (miss/error with homepage) subject to the gate."""
+    """Count Phase C companies (miss/error with homepage, plus non-scannable hits)."""
+    non_scannable = sorted(NON_SCANNABLE_PLATFORMS)
+    placeholders = ",".join("?" * len(non_scannable))
+    # Non-scannable platforms (e.g. jobvite) have a registered scanner that
+    # is intentionally a stub. Their 'hit' companies have a real careers
+    # page but no public API, so the HTML fallback is the only productive
+    # path — include them here so progress totals are accurate.
+    non_scannable_clause = (
+        f"OR (ats_probe_status = 'hit' AND ats_platform IN ({placeholders}))"
+        if non_scannable
+        else ""
+    )
     row = conn.execute(
         f"""SELECT COUNT(*) FROM companies
-           WHERE ats_probe_status IN ('miss', 'error')
+           WHERE (
+               ats_probe_status IN ('miss', 'error')
+               {non_scannable_clause}
+           )
              AND homepage_url IS NOT NULL
              AND scan_enabled = 1
              AND {_high_score_history_clause()}""",
-        (threshold,),
+        (*non_scannable, threshold),
     ).fetchone()
     return int(row[0]) if row else 0
 
@@ -398,18 +413,34 @@ def _scan_one_company_via_ats_api(
     logger.info("ATS scan: scanning %s (%s/%s)", company_name, platform, slug)
 
     try:
-        scanner = _PLATFORM_SCANNERS.get(platform)
-        if scanner is None:
-            logger.warning("Unknown ATS platform '%s' for company '%s'", platform, company_name)
+        if platform in NON_SCANNABLE_PLATFORMS:
+            # Registered scanner that intentionally has no public API
+            # (e.g. jobvite). Skip the no-op run_platform_scan + autoheal
+            # break-capture — a steady-state [] from a stub would otherwise
+            # look like a "previously-productive platform broke" signal.
+            # Phase C (HTML fallback) is the productive path for these and
+            # picks up the company in the same scan when homepage_url is set.
+            logger.info(
+                "ATS scan: '%s' has no public API for %s; deferring to HTML fallback",
+                platform,
+                company_name,
+            )
             job_dicts = []
         else:
-            # Pass conn so run_platform_scan captures the raw pre-filter
-            # API response with detect=True (Phase B).  The Phase-A
-            # detect=False post-filter hook has been removed; raw capture
-            # at the registry chokepoint supersedes it.
-            job_dicts = run_platform_scan(
-                scanner, slug, target_titles, title_exclusions, conn=conn
-            )
+            scanner = _PLATFORM_SCANNERS.get(platform)
+            if scanner is None:
+                logger.warning(
+                    "Unknown ATS platform '%s' for company '%s'", platform, company_name
+                )
+                job_dicts = []
+            else:
+                # Pass conn so run_platform_scan captures the raw pre-filter
+                # API response with detect=True (Phase B).  The Phase-A
+                # detect=False post-filter hook has been removed; raw capture
+                # at the registry chokepoint supersedes it.
+                job_dicts = run_platform_scan(
+                    scanner, slug, target_titles, title_exclusions, conn=conn
+                )
 
         company_jobs_found = len(job_dicts)
         summary["jobs_discovered"] += company_jobs_found

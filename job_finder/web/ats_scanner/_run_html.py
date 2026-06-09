@@ -15,6 +15,7 @@ import sqlite3
 import time
 
 from job_finder.json_utils import utc_now_iso
+from job_finder.web.ats_platforms import NON_SCANNABLE_PLATFORMS
 from job_finder.web.db_helpers import standalone_connection
 
 # Lazy import of HTML careers scraper (ImportError guard — Plan 03)
@@ -38,9 +39,14 @@ def _run_html_fallback_scan(
     high_score_threshold: int,
     tracker=None,
 ) -> None:
-    """Phase C: HTML scrape miss/error companies that have a homepage_url."""
-    # Companies with ats_probe_status='miss' but with homepage_url get scraped.
-    # This loop runs AFTER the ATS API loop (which handles hit companies).
+    """Phase C: HTML scrape miss/error companies (+ non-scannable hits) with homepage."""
+    # Eligible cohort:
+    #   - ats_probe_status in ('miss', 'error') with a homepage (original gate), OR
+    #   - ats_probe_status='hit' for a NON_SCANNABLE_PLATFORMS platform (e.g. jobvite).
+    # The second branch is the load-bearing fix for #222: a registered-but-stub
+    # scanner used to mark its companies 'hit', which excluded them from this
+    # query entirely and silently shadowed the only viable discovery path (the
+    # tenant's real careers page, often on a redirected custom domain).
     # Same high-score-history gate as Phase A — see _run.py for the clause.
     # Function-local import breaks the _run <-> _run_html cycle.
     from job_finder.web.ats_scanner._run import _high_score_history_clause
@@ -48,13 +54,24 @@ def _run_html_fallback_scan(
     if find_careers_url is None or scrape_careers_page is None:
         return
 
+    non_scannable = sorted(NON_SCANNABLE_PLATFORMS)
+    placeholders = ",".join("?" * len(non_scannable))
+    non_scannable_clause = (
+        f"OR (ats_probe_status = 'hit' AND ats_platform IN ({placeholders}))"
+        if non_scannable
+        else ""
+    )
+
     miss_companies = conn.execute(
         f"""SELECT id, name_raw, homepage_url, careers_url FROM companies
-           WHERE ats_probe_status IN ('miss', 'error')
+           WHERE (
+               ats_probe_status IN ('miss', 'error')
+               {non_scannable_clause}
+           )
              AND homepage_url IS NOT NULL
              AND scan_enabled = 1
              AND {_high_score_history_clause()}""",
-        (high_score_threshold,),
+        (*non_scannable, high_score_threshold),
     ).fetchall()
 
     for miss_company in miss_companies:

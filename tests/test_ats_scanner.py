@@ -2190,6 +2190,227 @@ class TestRunAtsScanHtmlFallback:
 
 
 # ---------------------------------------------------------------------------
+# Tests: NON_SCANNABLE_PLATFORMS routing (#222)
+#
+# A registered-but-stub scanner (e.g. jobvite) used to mark its companies
+# 'hit' which silently shadowed them out of every productive discovery path
+# (the no-op API scan returned [], and the HTML fallback's
+# `ats_probe_status IN ('miss','error')` gate excluded them). The fix routes
+# NON_SCANNABLE_PLATFORMS hits to the HTML fallback and short-circuits the
+# no-op API dispatch so the zero-yield is no longer silent.
+# ---------------------------------------------------------------------------
+
+
+class TestNonScannablePlatformRouting:
+    """Jobvite ('hit') companies are routed to HTML fallback and skip the API dispatch."""
+
+    def _insert_jobvite_hit_company(self, conn, name, homepage_url, scan_enabled=1):
+        """Insert a company with ats_probe_status='hit' AND ats_platform='jobvite'."""
+        from datetime import datetime
+
+        now = datetime.now().isoformat()
+        cursor = conn.execute(
+            """INSERT INTO companies
+               (name, name_raw, ats_platform, ats_slug, ats_probe_status,
+                homepage_url, scan_enabled, created_at, updated_at)
+               VALUES (?, ?, 'jobvite', ?, 'hit', ?, ?, ?, ?)""",
+            (name.lower(), name, "jobvite-slug", homepage_url, scan_enabled, now, now),
+        )
+        conn.commit()
+        return cursor.lastrowid
+
+    def test_jobvite_registered_and_non_scannable(self):
+        """Invariant: jobvite is in BOTH registries — registered for dispatch,
+        and flagged as non-scannable so the scan path knows to skip its API."""
+        from job_finder.web.ats_platforms import NON_SCANNABLE_PLATFORMS, SCANNERS_BY_NAME
+        from job_finder.web.ats_scanner._run import _PLATFORM_SCANNERS
+
+        assert "jobvite" in SCANNERS_BY_NAME
+        assert "jobvite" in _PLATFORM_SCANNERS
+        assert "jobvite" in NON_SCANNABLE_PLATFORMS
+
+    def test_jobvite_hit_with_homepage_is_selected_for_html_fallback(self, migrated_db_path):
+        """A jobvite 'hit' company with a homepage_url is reachable by Phase C."""
+        from job_finder.web.ats_scanner import run_ats_scan
+
+        conn = sqlite3.connect(migrated_db_path)
+        conn.row_factory = sqlite3.Row
+        self._insert_jobvite_hit_company(
+            conn, "RodanCo", homepage_url="https://rodanandfields.com"
+        )
+        conn.close()
+
+        config = {
+            "TESTING": False,
+            "profile": {"target_titles": ["data scientist"], "exclusions": {"title_keywords": []}},
+        }
+
+        with (
+            patch(
+                "job_finder.web.ats_scanner._run_html.find_careers_url",
+                return_value="https://rodanandfields.com/careers",
+            ) as mock_find,
+            patch(
+                "job_finder.web.ats_scanner._run_html.scrape_careers_page", return_value=[]
+            ) as mock_scrape,
+            patch("job_finder.web.ats_scanner._run.score_and_persist_job", return_value=None),
+            patch("job_finder.web.ats_scanner._run.time.sleep"),
+            patch("job_finder.web.ats_scanner._run_html.time.sleep"),
+        ):
+            run_ats_scan(migrated_db_path, config=config)
+
+        # Phase C selected the jobvite hit and ran HTML fallback against the homepage.
+        mock_find.assert_called_once()
+        assert mock_find.call_args[0][0] == "https://rodanandfields.com"
+        mock_scrape.assert_called_once()
+        assert mock_scrape.call_args[0][0] == "https://rodanandfields.com/careers"
+
+    def test_jobvite_hit_short_circuits_api_dispatch(self, migrated_db_path):
+        """`run_platform_scan` is never called for jobvite 'hit' companies in Phase A."""
+        from job_finder.web.ats_scanner import run_ats_scan
+
+        conn = sqlite3.connect(migrated_db_path)
+        conn.row_factory = sqlite3.Row
+        self._insert_jobvite_hit_company(
+            conn, "RodanCo", homepage_url="https://rodanandfields.com"
+        )
+        conn.close()
+
+        config = {
+            "TESTING": False,
+            "profile": {"target_titles": ["data scientist"], "exclusions": {"title_keywords": []}},
+        }
+
+        with (
+            patch("job_finder.web.ats_scanner._run.run_platform_scan") as mock_run_scan,
+            patch("job_finder.web.ats_scanner._run_html.find_careers_url", return_value=None),
+            patch("job_finder.web.ats_scanner._run.score_and_persist_job", return_value=None),
+            patch("job_finder.web.ats_scanner._run.time.sleep"),
+            patch("job_finder.web.ats_scanner._run_html.time.sleep"),
+        ):
+            run_ats_scan(migrated_db_path, config=config)
+
+        # The no-op stub must not be invoked — it would also trigger the
+        # autoheal break-detector on a steady-state [] for jobvite.
+        mock_run_scan.assert_not_called()
+
+    def test_jobvite_hit_short_circuit_logs_info(self, migrated_db_path, caplog):
+        """Short-circuit emits an info-level 'deferring to HTML fallback' log."""
+        import logging as _logging
+
+        from job_finder.web.ats_scanner import run_ats_scan
+
+        conn = sqlite3.connect(migrated_db_path)
+        conn.row_factory = sqlite3.Row
+        self._insert_jobvite_hit_company(
+            conn, "RodanCo", homepage_url="https://rodanandfields.com"
+        )
+        conn.close()
+
+        config = {
+            "TESTING": False,
+            "profile": {"target_titles": ["data scientist"], "exclusions": {"title_keywords": []}},
+        }
+
+        with (
+            patch("job_finder.web.ats_scanner._run_html.find_careers_url", return_value=None),
+            patch("job_finder.web.ats_scanner._run.score_and_persist_job", return_value=None),
+            patch("job_finder.web.ats_scanner._run.time.sleep"),
+            patch("job_finder.web.ats_scanner._run_html.time.sleep"),
+            caplog.at_level(_logging.INFO, logger="job_finder.web.ats_scanner._run"),
+        ):
+            run_ats_scan(migrated_db_path, config=config)
+
+        messages = [r.getMessage() for r in caplog.records]
+        assert any("no public API" in m and "deferring to HTML fallback" in m for m in messages), (
+            f"expected info log noting jobvite deferred, got: {messages}"
+        )
+
+    def test_jobvite_hit_html_fallback_persists_scraped_jobs(self, migrated_db_path):
+        """End-to-end: a jobvite 'hit' surfaces real jobs via the HTML path."""
+        from job_finder.web.ats_scanner import run_ats_scan
+
+        conn = sqlite3.connect(migrated_db_path)
+        conn.row_factory = sqlite3.Row
+        self._insert_jobvite_hit_company(
+            conn, "RodanCo", homepage_url="https://rodanandfields.com"
+        )
+        conn.close()
+
+        config = {
+            "TESTING": False,
+            "profile": {"target_titles": ["data scientist"], "exclusions": {"title_keywords": []}},
+        }
+
+        scraped_jobs = [
+            {"title": "Senior Data Scientist", "url": "https://rodanandfields.com/jobs/1"},
+        ]
+
+        with (
+            patch(
+                "job_finder.web.ats_scanner._run_html.find_careers_url",
+                return_value="https://rodanandfields.com/careers",
+            ),
+            patch(
+                "job_finder.web.ats_scanner._run_html.scrape_careers_page",
+                return_value=scraped_jobs,
+            ),
+            patch("job_finder.web.ats_scanner._run.score_and_persist_job", return_value=None),
+            patch("job_finder.web.ats_scanner._run.time.sleep"),
+            patch("job_finder.web.ats_scanner._run_html.time.sleep"),
+        ):
+            result = run_ats_scan(migrated_db_path, config=config)
+
+        # The jobvite 'hit' company produced a job through the HTML fallback —
+        # the path it was structurally locked out of before #222.
+        conn = sqlite3.connect(migrated_db_path)
+        conn.row_factory = sqlite3.Row
+        job = conn.execute("SELECT * FROM jobs WHERE title = 'Senior Data Scientist'").fetchone()
+        conn.close()
+
+        assert job is not None
+        assert result["html_scraped"] >= 1
+
+    def test_non_jobvite_hit_does_not_appear_in_phase_c(self, migrated_db_path):
+        """Sanity: a normal 'hit' platform (e.g. greenhouse) is NOT pulled into Phase C."""
+        from job_finder.web.ats_scanner import run_ats_scan
+
+        conn = sqlite3.connect(migrated_db_path)
+        conn.row_factory = sqlite3.Row
+        from datetime import datetime
+
+        now = datetime.now().isoformat()
+        conn.execute(
+            """INSERT INTO companies
+               (name, name_raw, ats_platform, ats_slug, ats_probe_status,
+                homepage_url, scan_enabled, created_at, updated_at)
+               VALUES (?, ?, 'greenhouse', ?, 'hit', ?, 1, ?, ?)""",
+            ("ghco", "GHCo", "ghco", "https://ghco.example", now, now),
+        )
+        conn.commit()
+        conn.close()
+
+        config = {
+            "TESTING": False,
+            "profile": {"target_titles": ["data scientist"], "exclusions": {"title_keywords": []}},
+        }
+
+        with (
+            patch("job_finder.web.ats_scanner._run.run_platform_scan", return_value=[]),
+            patch("job_finder.web.ats_scanner._run_html.find_careers_url") as mock_find,
+            patch("job_finder.web.ats_scanner._run_html.scrape_careers_page") as mock_scrape,
+            patch("job_finder.web.ats_scanner._run.score_and_persist_job", return_value=None),
+            patch("job_finder.web.ats_scanner._run.time.sleep"),
+            patch("job_finder.web.ats_scanner._run_html.time.sleep"),
+        ):
+            run_ats_scan(migrated_db_path, config=config)
+
+        # Greenhouse 'hit' is NOT a NON_SCANNABLE platform — Phase C must skip it.
+        mock_find.assert_not_called()
+        mock_scrape.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
 # Tests: HTML-scraped jobs included in Haiku scoring (Phase 08 Plan 01)
 # ---------------------------------------------------------------------------
 
