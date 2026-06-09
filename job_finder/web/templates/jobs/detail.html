@@ -14,16 +14,11 @@
 </div>
 {% else %}
 
+{% import "components/_score_macros.html" as fit %}
 {% set sources_list = job.sources | from_json if job.sources else [] %}
 {% set urls_list = job.source_urls | from_json if job.source_urls else [] %}
-{% set score = job.score | float %}
-{% if score >= 8 %}
-  {% set score_badge_class = "bg-green-900/60 text-green-300 border-green-700" %}
-{% elif score >= 6 %}
-  {% set score_badge_class = "bg-yellow-900/60 text-yellow-300 border-yellow-700" %}
-{% else %}
-  {% set score_badge_class = "bg-red-900/60 text-red-300 border-red-700" %}
-{% endif %}
+{# v3.0 fit = 6-30 composite from sub_scores_json (the legacy 0-100 job.score is dead). #}
+{% set composite = fit.composite(job.sub_scores_json) | int %}
 
 <div class="max-w-4xl mx-auto space-y-6">
 
@@ -60,12 +55,12 @@
           {% endif %}
         </div>
       </div>
-      <!-- Score badge -->
+      <!-- Fit composite (sum of 6 sub-scores, 6-30) -->
       <div class="flex flex-col items-center gap-2 shrink-0">
-        <span class="text-3xl font-black {{ score_badge_class.split(' ')[1] }}">
-          {{ "%.1f" | format(score) }}
+        <span class="text-3xl font-black {{ fit.text_class(composite) }}">
+          {{ composite if composite > 0 else "—" }}
         </span>
-        <span class="text-xs text-slate-500">score</span>
+        <span class="text-xs text-slate-500">fit / 30</span>
       </div>
     </div>
 

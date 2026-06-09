@@ -5,6 +5,8 @@ from __future__ import annotations
 import sqlite3
 from datetime import UTC, date, datetime
 
+from job_finder.db._queries import _SUB_SCORE_SUM_SQL
+
 
 def get_dashboard_stats(conn: sqlite3.Connection) -> dict:
     """Return stat card data for the Dashboard page.
@@ -95,17 +97,20 @@ def get_pipeline_summary(conn: sqlite3.Connection) -> dict:
 def get_jobs_by_status(conn: sqlite3.Connection) -> dict:
     """Return all jobs grouped by pipeline_status.
 
-    Each job dict includes dedup_key, title, company, score, salary_min,
-    salary_max, location, pipeline_status, first_seen, and days_in_stage
-    (days since the job entered its current pipeline stage, based on the most
-    recent pipeline_events record with matching to_status, falling back to
-    first_seen).
+    Each job dict includes dedup_key, title, company, sub_scores_json (the v3.0
+    fit signal — the kanban card derives the 6-30 composite from it), salary_min,
+    salary_max, location, pipeline_status, first_seen, and days_in_stage (days
+    since the job entered its current pipeline stage, based on the most recent
+    pipeline_events record with matching to_status, falling back to first_seen).
+
+    Ordered by the live 6-30 composite, NOT the legacy `jobs.score` column (which
+    v3.0 scoring no longer writes — every current row would tie at 0).
 
     Returns:
         dict mapping pipeline_status (str) -> list of job dicts
     """
     rows = conn.execute(
-        """SELECT j.dedup_key, j.title, j.company, j.score,
+        f"""SELECT j.dedup_key, j.title, j.company, j.sub_scores_json,
                   j.salary_min, j.salary_max, j.location,
                   j.pipeline_status, j.first_seen,
                   (
@@ -117,7 +122,7 @@ def get_jobs_by_status(conn: sqlite3.Connection) -> dict:
                       LIMIT 1
                   ) AS stage_entered_at
            FROM jobs j
-           ORDER BY j.score DESC"""
+           ORDER BY {_SUB_SCORE_SUM_SQL} DESC"""
     ).fetchall()
 
     now = datetime.now(UTC).replace(tzinfo=None)

@@ -1,0 +1,45 @@
+{#- Single source of truth for the v3.0 fit composite and its color bucket.
+
+    The composite is the sum of the six 1-5 ordinal sub-scores (range 6-30, or
+    0 when sub_scores_json is NULL/empty). The legacy 0-100 `jobs.score` column
+    is dead under v3.0 — the scorer persists only sub_scores_json/classification
+    and never writes `score` — so every fit surface (job board, pipeline card,
+    detail page) derives from sub_scores_json via these macros. That keeps the
+    number AND its thresholds from drifting across surfaces ever again.
+
+    Canonical threshold set (mean sub-score in parens):
+      >= 24 (mean >= 4) -> great
+      >= 18 (mean >= 3) -> good
+      >= 12 (mean >= 2) -> ok
+      >  0              -> poor
+      == 0 / unscored   -> none
+-#}
+
+{%- macro composite(sub_scores_json) -%}
+  {#- Integer composite (6-30, or 0 if unscored), emitted as text. Parse with `| int`. -#}
+  {%- set s = sub_scores_json | from_json if sub_scores_json else {} -%}
+  {{- (s.get('title_fit', 0) | int)
+    + (s.get('location_fit', 0) | int)
+    + (s.get('comp_fit', 0) | int)
+    + (s.get('domain_match', 0) | int)
+    + (s.get('seniority_match', 0) | int)
+    + (s.get('skills_match', 0) | int) -}}
+{%- endmacro -%}
+
+{%- macro bucket(value) -%}
+  {#- Canonical bucket key for a composite. The ONLY place the thresholds live. -#}
+  {%- set v = value | int -%}
+  {%- if v >= 24 -%}great{%- elif v >= 18 -%}good{%- elif v >= 12 -%}ok{%- elif v > 0 -%}poor{%- else -%}none{%- endif -%}
+{%- endmacro -%}
+
+{%- macro text_class(value) -%}
+  {#- Tailwind text color for the composite (job board cell + detail headline number). -#}
+  {%- set b = bucket(value) | trim -%}
+  {%- if b == 'great' -%}text-green-400{%- elif b == 'good' -%}text-amber-400{%- elif b == 'ok' -%}text-slate-400{%- elif b == 'poor' -%}text-red-400{%- else -%}text-slate-600{%- endif -%}
+{%- endmacro -%}
+
+{%- macro badge_class(value) -%}
+  {#- Tailwind bg+text badge for the composite (pipeline kanban card). -#}
+  {%- set b = bucket(value) | trim -%}
+  {%- if b == 'great' -%}bg-emerald-700 text-emerald-100{%- elif b == 'good' -%}bg-amber-700 text-amber-100{%- elif b == 'ok' -%}bg-slate-600 text-slate-300{%- elif b == 'poor' -%}bg-red-800 text-red-100{%- else -%}bg-slate-700 text-slate-400{%- endif -%}
+{%- endmacro -%}
