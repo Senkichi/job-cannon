@@ -243,6 +243,11 @@ def normalize_title(title: str) -> str:
     for pattern, replacement in _TITLE_ABBREVS:
         normalized = pattern.sub(replacement, normalized)
 
+    # Insert a separator at digit<->letter transitions so scraper artifacts like
+    # "84Data" and "84 Data" canonicalize identically. Mirrors the whitespace
+    # collapse below — both exist to neutralize separator noise in the dedup key.
+    normalized = re.sub(r"(?<=\d)(?=[A-Za-z])|(?<=[A-Za-z])(?=\d)", " ", normalized)
+
     # Normalize whitespace and lowercase
     normalized = " ".join(normalized.split()).lower()
     return normalized

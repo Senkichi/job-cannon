@@ -283,6 +283,55 @@ class TestNormalizeTitle:
 
         assert normalize_title("  Senior Engineer  ") == "senior engineer"
 
+    def test_digit_letter_boundary_inserted(self):
+        """Missing separator at digit<->letter boundary canonicalizes the same.
+
+        SERP count-tile titles like "84Data Scientist Jobs" should collapse to
+        the same normalized form as "84 Data Scientist Jobs" so they hit the
+        same dedup_key. Issue #212.
+        """
+        from job_finder.web.dedup_normalizer import normalize_title
+
+        assert normalize_title("84Data Scientist Jobs") == normalize_title(
+            "84 Data Scientist Jobs"
+        )
+        assert normalize_title("84Data Scientist Jobs") == "84 data scientist jobs"
+        # Letter->digit transition also covered (e.g., "H1B" stays intact only
+        # because the digit->letter rule re-splits it deterministically).
+        assert normalize_title("Level3Engineer") == normalize_title("Level 3 Engineer")
+
+    def test_digit_letter_boundary_does_not_mangle_normal_titles(self):
+        """Normal titles without digit/letter adjacency are untouched.
+
+        Negative case: ordinary titles (no digits adjacent to letters) must not
+        be perturbed by the new boundary rule. Issue #212.
+        """
+        from job_finder.web.dedup_normalizer import normalize_title
+
+        assert normalize_title("Software Engineer") == "software engineer"
+        assert normalize_title("Data Scientist") == "data scientist"
+        assert normalize_title("Product Manager") == "product manager"
+
+    def test_foundation_and_web_copies_agree_on_boundary(self):
+        """Foundation and web copies of normalize_title must agree byte-for-byte.
+
+        The two implementations are duplicated by design (foundation cannot
+        depend on web). If they diverge on the digit/letter boundary case,
+        dedup_key derivation in different code paths would silently disagree.
+        Issue #212.
+        """
+        from job_finder.normalizers import normalize_title as foundation_normalize
+        from job_finder.web.dedup_normalizer import normalize_title as web_normalize
+
+        for raw in (
+            "84Data Scientist Jobs",
+            "84 Data Scientist Jobs",
+            "Level3Engineer",
+            "Senior Software Engineer",
+            "  Senior Engineer  ",
+        ):
+            assert foundation_normalize(raw) == web_normalize(raw), raw
+
 
 # ---------------------------------------------------------------------------
 # Tests: normalized_dedup_key (location excluded)
@@ -321,6 +370,18 @@ class TestNormalizedDedupKey:
         key1 = Job.normalized_dedup_key("Google", "Engineer")
         key2 = Job.normalized_dedup_key("Google", "Manager")
         assert key1 != key2
+
+    def test_digit_letter_boundary_converges_keys(self):
+        """Missing-separator title variants converge to a single dedup_key.
+
+        The two Capital One rows ("84Data..." vs "84 Data...") that surfaced
+        the dedup hole must now produce identical keys. Issue #212.
+        """
+        from job_finder.models import Job
+
+        key_with_space = Job.normalized_dedup_key("Capital One", "84 Data Scientist Jobs")
+        key_without_space = Job.normalized_dedup_key("Capital One", "84Data Scientist Jobs")
+        assert key_with_space == key_without_space
 
 
 # ---------------------------------------------------------------------------
