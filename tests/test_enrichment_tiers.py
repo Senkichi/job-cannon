@@ -625,3 +625,179 @@ class TestFetchDdgJds:
 # Cascade dispatch tests for extract_with_haiku/extract_with_sonnet were
 # removed in Phase 2b sub-fix RC4 along with the synthesis-tier functions
 # themselves (data_enricher.TIER_ORDER no longer references haiku/sonnet).
+
+
+# ---------------------------------------------------------------------------
+# parse_structured_fields() — LLM salary plausibility bound (issue #228)
+# ---------------------------------------------------------------------------
+
+
+class TestParseStructuredFieldsSalaryBound:
+    """The LLM-fallback salary path must enforce the same [$30K, $5M] bound
+    the regex path enforces in salary_extractor. Out-of-bounds values on
+    EITHER salary field drop BOTH (both-or-neither semantics — no half-open
+    range leaks through to _persist). location is unaffected.
+    """
+
+    _LONG_JD = "Job description content. " * 50  # > 200 chars
+
+    def _make_result(self, data: dict, schema_valid: bool = True):
+        result = MagicMock()
+        result.data = data
+        result.schema_valid = schema_valid
+        return result
+
+    def test_inflated_salary_min_dropped(self, caplog):
+        """A ~100x-inflated salary_min (e.g. 12_800_000 for a $128k role)
+        is omitted from the returned dict and a WARNING fires with job_id.
+        """
+        import logging
+
+        from job_finder.web.enrichment_tiers import parse_structured_fields
+
+        fake_call = MagicMock(
+            return_value=self._make_result({"salary_min": 12_800_000, "location": "Remote US"})
+        )
+        with patch("job_finder.web.enrichment_tiers.call_model", fake_call):
+            with caplog.at_level(logging.WARNING, logger="job_finder.web.enrichment_tiers"):
+                out = parse_structured_fields(
+                    jd_full=self._LONG_JD,
+                    job_row={"dedup_key": "anthropic|ds", "title": "T", "company": "C"},
+                    conn=MagicMock(),
+                    config={},
+                )
+
+        assert "salary_min" not in out
+        assert "salary_max" not in out
+        # location must still be returned — only salary fields are dropped
+        assert out.get("location") == "Remote US"
+        # WARNING with job_id fired
+        warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+        assert any("anthropic|ds" in r.getMessage() for r in warnings)
+
+    def test_plausible_salary_passes_through(self):
+        """A within-bounds salary_min (e.g. 128_000) is preserved verbatim."""
+        from job_finder.web.enrichment_tiers import parse_structured_fields
+
+        fake_call = MagicMock(
+            return_value=self._make_result(
+                {"salary_min": 128_000, "salary_max": 175_000, "location": "Remote US"}
+            )
+        )
+        with patch("job_finder.web.enrichment_tiers.call_model", fake_call):
+            out = parse_structured_fields(
+                jd_full=self._LONG_JD,
+                job_row={"dedup_key": "x|y", "title": "T", "company": "C"},
+                conn=MagicMock(),
+                config={},
+            )
+
+        assert out == {"salary_min": 128_000, "salary_max": 175_000, "location": "Remote US"}
+
+    def test_both_inflated_ordered_pair_fully_dropped(self):
+        """Both-inflated ordered pair (27_500_000 / 37_000_000) — the cohort F2
+        does NOT catch — gets BOTH salary fields dropped.
+        """
+        from job_finder.web.enrichment_tiers import parse_structured_fields
+
+        fake_call = MagicMock(
+            return_value=self._make_result(
+                {"salary_min": 27_500_000, "salary_max": 37_000_000}
+            )
+        )
+        with patch("job_finder.web.enrichment_tiers.call_model", fake_call):
+            out = parse_structured_fields(
+                jd_full=self._LONG_JD,
+                job_row={"dedup_key": "anthropic|ds", "title": "T", "company": "C"},
+                conn=MagicMock(),
+                config={},
+            )
+
+        assert "salary_min" not in out
+        assert "salary_max" not in out
+
+    def test_inflated_max_with_plausible_min_drops_both(self):
+        """Asymmetric inflation: plausible min + inflated max → BOTH dropped
+        (no half-open range leaks into _persist).
+        """
+        from job_finder.web.enrichment_tiers import parse_structured_fields
+
+        fake_call = MagicMock(
+            return_value=self._make_result(
+                {"salary_min": 150_000, "salary_max": 18_000_000}
+            )
+        )
+        with patch("job_finder.web.enrichment_tiers.call_model", fake_call):
+            out = parse_structured_fields(
+                jd_full=self._LONG_JD,
+                job_row={"dedup_key": "x|y", "title": "T", "company": "C"},
+                conn=MagicMock(),
+                config={},
+            )
+
+        assert "salary_min" not in out
+        assert "salary_max" not in out
+
+    def test_below_floor_salary_dropped(self):
+        """Below-$30K floor (e.g. an hourly value mis-emitted) → both dropped."""
+        from job_finder.web.enrichment_tiers import parse_structured_fields
+
+        fake_call = MagicMock(
+            return_value=self._make_result(
+                {"salary_min": 15_000, "salary_max": 25_000, "location": "Remote"}
+            )
+        )
+        with patch("job_finder.web.enrichment_tiers.call_model", fake_call):
+            out = parse_structured_fields(
+                jd_full=self._LONG_JD,
+                job_row={"dedup_key": "x|y", "title": "T", "company": "C"},
+                conn=MagicMock(),
+                config={},
+            )
+
+        assert "salary_min" not in out
+        assert "salary_max" not in out
+        assert out.get("location") == "Remote"
+
+    def test_inflated_salary_min_only_with_max_null(self):
+        """Single inflated salary_min with no salary_max (the 7-row cohort
+        from the issue's DB audit) is also dropped.
+        """
+        from job_finder.web.enrichment_tiers import parse_structured_fields
+
+        fake_call = MagicMock(
+            return_value=self._make_result(
+                {"salary_min": 27_670_000, "location": "Remote US"}
+            )
+        )
+        with patch("job_finder.web.enrichment_tiers.call_model", fake_call):
+            out = parse_structured_fields(
+                jd_full=self._LONG_JD,
+                job_row={"dedup_key": "reddit|staff_ds", "title": "T", "company": "C"},
+                conn=MagicMock(),
+                config={},
+            )
+
+        assert "salary_min" not in out
+        assert "salary_max" not in out
+        assert out.get("location") == "Remote US"
+
+    def test_boundary_values_pass_through(self):
+        """Inclusive boundary values $30K and $5M are preserved (not dropped)."""
+        from job_finder.web.enrichment_tiers import parse_structured_fields
+
+        fake_call = MagicMock(
+            return_value=self._make_result(
+                {"salary_min": 30_000, "salary_max": 5_000_000}
+            )
+        )
+        with patch("job_finder.web.enrichment_tiers.call_model", fake_call):
+            out = parse_structured_fields(
+                jd_full=self._LONG_JD,
+                job_row={"dedup_key": "x|y", "title": "T", "company": "C"},
+                conn=MagicMock(),
+                config={},
+            )
+
+        assert out.get("salary_min") == 30_000
+        assert out.get("salary_max") == 5_000_000

@@ -26,6 +26,7 @@ from job_finder.web.direct_link import resolve_direct_link
 from job_finder.web.domain_policy import domain_priority, is_blocked_domain
 from job_finder.web.html_extract import html_to_clean_text
 from job_finder.web.model_provider import call_model
+from job_finder.web.salary_extractor import _MAX_PLAUSIBLE_SALARY, _MIN_PLAUSIBLE_SALARY
 
 logger = logging.getLogger(__name__)
 
@@ -496,6 +497,32 @@ def parse_structured_fields(
         v = result.data.get(k)
         if v is not None:
             out[k] = v
+
+    # Plausibility bound on the LLM salary path. The parallel regex path in
+    # salary_extractor enforces [$30K, $5M]; the schema here declares only
+    # {"type": "integer"} so an inflated value (~100x annual) would otherwise
+    # persist verbatim and corrupt the scorer's compensation signal. Drop
+    # BOTH fields together when either is out of bounds — _persist's salary
+    # reconcile relies on both-or-neither semantics. location is unaffected.
+    smin = out.get("salary_min")
+    smax = out.get("salary_max")
+    out_of_bounds = (
+        smin is not None and (smin < _MIN_PLAUSIBLE_SALARY or smin > _MAX_PLAUSIBLE_SALARY)
+    ) or (
+        smax is not None and (smax < _MIN_PLAUSIBLE_SALARY or smax > _MAX_PLAUSIBLE_SALARY)
+    )
+    if out_of_bounds:
+        logger.warning(
+            "parse_structured_fields: dropped implausible salary for %s "
+            "(salary_min=%s salary_max=%s, bounds=[%s, %s])",
+            job_id,
+            smin,
+            smax,
+            _MIN_PLAUSIBLE_SALARY,
+            _MAX_PLAUSIBLE_SALARY,
+        )
+        out.pop("salary_min", None)
+        out.pop("salary_max", None)
     return out
 
 
