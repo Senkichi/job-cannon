@@ -1,4 +1,6 @@
-{% set score_color = "bg-emerald-700 text-emerald-100" if (job.score is not none and job.score >= 8) else ("bg-amber-700 text-amber-100" if (job.score is not none and job.score >= 6) else "bg-slate-600 text-slate-300") %}
+{% import "components/_score_macros.html" as fit %}
+{% set composite = fit.composite(job.sub_scores_json) | int %}
+{% set score_color = fit.badge_class(composite) %}
 {% set salary_text = "" %}
 {% if job.salary_min and job.salary_max %}
   {% set salary_text = "$" ~ (job.salary_min // 1000) ~ "k–$" ~ (job.salary_max // 1000) ~ "k" %}
@@ -28,9 +30,9 @@
   <!-- Score + metadata row -->
   <div class="flex items-center gap-2 flex-wrap">
 
-    <!-- Score badge -->
+    <!-- Fit composite badge (sum of 6 sub-scores, 6-30) -->
     <span class="text-xs font-semibold px-1.5 py-0.5 rounded {{ score_color }}">
-      {{ "%.1f" | format(job.score) if job.score is not none else "N/A" }}
+      {{ composite if composite > 0 else "—" }}
     </span>
 
     <!-- Salary -->

@@ -19,27 +19,12 @@
 {% set fit = job.fit_analysis | from_json if job.fit_analysis else {} %}
 {% set is_fresh = job.first_seen is not none and freshness_cutoff is defined and job.first_seen >= freshness_cutoff %}
 
-{# Composite = sum of 6 sub-scores (range 6-30). 0 if sub_scores missing. #}
-{% set composite = (sub_scores.get('title_fit', 0) | int)
-                 + (sub_scores.get('location_fit', 0) | int)
-                 + (sub_scores.get('comp_fit', 0) | int)
-                 + (sub_scores.get('domain_match', 0) | int)
-                 + (sub_scores.get('seniority_match', 0) | int)
-                 + (sub_scores.get('skills_match', 0) | int) %}
-
-{# Color thresholds keyed off composite (mean sub-score):
-     ≥24 (mean ≥4) green, ≥18 (mean ≥3) amber, ≥12 (mean ≥2) slate, >0 red. #}
-{% if composite >= 24 %}
-  {% set color_class = 'text-green-400' %}
-{% elif composite >= 18 %}
-  {% set color_class = 'text-amber-400' %}
-{% elif composite >= 12 %}
-  {% set color_class = 'text-slate-400' %}
-{% elif composite > 0 %}
-  {% set color_class = 'text-red-400' %}
-{% else %}
-  {% set color_class = 'text-slate-600' %}
-{% endif %}
+{# Composite (sum of 6 sub-scores, 6-30) and its color come from the shared fit
+   macro — the single source of truth so the job board, pipeline card, and detail
+   page can't diverge on the number or the thresholds (≥24/≥18/≥12, >0 red). #}
+{% import "components/_score_macros.html" as sm %}
+{% set composite = sm.composite(job.sub_scores_json) | int %}
+{% set color_class = sm.text_class(composite) %}
 
 {% set sort_score = composite %}
 {% set scored = job.sub_scores_json is not none and job.sub_scores_json != '' %}

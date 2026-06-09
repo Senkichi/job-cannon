@@ -15,7 +15,7 @@ def test_root_redirects_to_jobs(page: Page, live_server: str):
 def test_jobs_page_loads(page: Page, live_server: str):
     """Jobs page renders with the job table and sample data."""
     page.goto(f"{live_server}/jobs")
-    expect(page).to_have_title("Job Board — Job Finder")
+    expect(page).to_have_title("Job Board — Job Cannon")
     # Job table should be present
     table = page.locator("table")
     expect(table).to_be_visible()

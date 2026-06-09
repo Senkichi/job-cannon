@@ -1,11 +1,16 @@
 """Onboarding wizard blueprint (Phase 42, STRANGE-WIZ-02/05).
 
-Eight routes covering the 7 conceptual wizard steps:
+Eight routes, one screen each, numbered sequentially 1..8:
     welcome (1), provider_select (2), provider_credentials (3),
-    resume_upload + profile_edit (4), imap_credentials (5),
-    schedule (6), done (7).
+    resume_upload (4), profile_edit (5), imap_credentials (6),
+    schedule (7), done (8).
 
-Step indicator (D-21): each route passes step_num + step_label to _base.html.
+Step indicator (D-21): each route unpacks _step("<route>") into render_template,
+which supplies step_num + step_total + step_label to _base.html. The ordered
+tuple _WIZARD_STEPS is the single source of truth for both the number and the
+"of N" denominator — neither is hardcoded in the template. resume_upload (step 4)
+is optional (D-05); skipping it advances to profile_edit (step 5) and leaves
+every screen's fixed number unchanged.
 
 POST sequencing (D-13): every POST calls state.write_wizard_data(slice) to stash
 the form data, then redirects to the next step. Only /done writes to config.yaml
@@ -56,6 +61,41 @@ _MAX_RESUME_BYTES: Final[int] = 10 * 1024 * 1024
 
 # $0 CLIs that need no credentials at the provider_credentials step (D-04)
 _NO_CREDS_PROVIDERS: Final[frozenset[str]] = frozenset({"claude_code_cli", "gemini_cli", "ollama"})
+
+# Canonical ordered list of wizard screens (key, label) — the single source of
+# truth for the step indicator (D-21). The "Step N of M" number and denominator
+# AND the progress-bar width in onboarding/_base.html all derive from this tuple;
+# nothing is hardcoded template-side. Adding/removing a screen here updates every
+# screen's count automatically and keeps the numbering unique + sequential.
+_WIZARD_STEPS: Final[tuple[tuple[str, str], ...]] = (
+    ("welcome", "Welcome"),
+    ("provider_select", "AI provider"),
+    ("provider_credentials", "Credentials"),
+    ("resume_upload", "Resume"),
+    ("profile_edit", "Profile"),
+    ("imap_credentials", "Gmail"),
+    ("schedule", "Schedule"),
+    ("done", "Ready"),
+)
+_WIZARD_STEP_NUMS: Final[dict[str, int]] = {
+    key: num for num, (key, _) in enumerate(_WIZARD_STEPS, start=1)
+}
+_WIZARD_STEP_LABELS: Final[dict[str, str]] = dict(_WIZARD_STEPS)
+
+
+def _step(key: str) -> dict:
+    """Step-indicator render context for a wizard route (D-21).
+
+    Returns step_num / step_total / step_label sourced from _WIZARD_STEPS so the
+    indicator and progress bar in _base.html stay collision-free and correctly
+    denominated. Unpack into render_template, e.g. ``**_step("welcome")``. The
+    optional resume_upload screen keeps its fixed number whether shown or skipped.
+    """
+    return {
+        "step_num": _WIZARD_STEP_NUMS[key],
+        "step_total": len(_WIZARD_STEPS),
+        "step_label": _WIZARD_STEP_LABELS[key],
+    }
 
 
 # --- Helpers ---
@@ -113,8 +153,7 @@ def welcome():
     return render_template(
         "onboarding/welcome.html",
         checks=checks,
-        step_num=1,
-        step_label="Welcome",
+        **_step("welcome"),
     )
 
 
@@ -137,8 +176,7 @@ def provider_select():
     return render_template(
         "onboarding/provider_select.html",
         providers=providers,
-        step_num=2,
-        step_label="AI provider",
+        **_step("provider_select"),
     )
 
 
@@ -164,8 +202,7 @@ def provider_credentials():
         "onboarding/provider_credentials.html",
         provider_name=provider_name,
         needs_api_key=needs_api_key,
-        step_num=3,
-        step_label="Credentials",
+        **_step("provider_credentials"),
     )
 
 
@@ -188,8 +225,7 @@ def resume_upload():
             return render_template(
                 "onboarding/resume_upload.html",
                 error="Please select a PDF or DOCX file, or click Skip.",
-                step_num=4,
-                step_label="Resume",
+                **_step("resume_upload"),
             )
 
         # T-42-03: validate extension before any disk write
@@ -199,8 +235,7 @@ def resume_upload():
             return render_template(
                 "onboarding/resume_upload.html",
                 error="Only .pdf and .docx files are supported.",
-                step_num=4,
-                step_label="Resume",
+                **_step("resume_upload"),
             )
 
         # T-42-07: content-length check (10 MB cap)
@@ -209,8 +244,7 @@ def resume_upload():
             return render_template(
                 "onboarding/resume_upload.html",
                 error=f"File too large — maximum is {_MAX_RESUME_BYTES // (1024 * 1024)} MB.",
-                step_num=4,
-                step_label="Resume",
+                **_step("resume_upload"),
             )
 
         # T-42-03: use Path(filename).suffix to inherit extension WITHOUT user-supplied basename
@@ -247,8 +281,7 @@ def resume_upload():
 
     return render_template(
         "onboarding/resume_upload.html",
-        step_num=4,
-        step_label="Resume",
+        **_step("resume_upload"),
     )
 
 
@@ -289,8 +322,7 @@ def profile_edit():
         target_locations=existing_edit.get("target_locations", ""),
         skills=existing_edit.get("skills") or parsed_skills_text,
         min_salary=existing_edit.get("min_salary") or "",
-        step_num=5,
-        step_label="Profile",
+        **_step("profile_edit"),
     )
 
 
@@ -330,8 +362,7 @@ def imap_credentials():
                 "onboarding/imap_credentials.html",
                 error="Both Gmail address and app password are required.",
                 email=email,
-                step_num=6,
-                step_label="Gmail",
+                **_step("imap_credentials"),
             )
 
         result = imap_test.check_imap(
@@ -343,8 +374,7 @@ def imap_credentials():
                 "onboarding/imap_credentials.html",
                 error=result.message,
                 email=email,
-                step_num=6,
-                step_label="Gmail",
+                **_step("imap_credentials"),
             )
 
         state.write_wizard_data(
@@ -366,8 +396,7 @@ def imap_credentials():
     return render_template(
         "onboarding/imap_credentials.html",
         email=existing_imap.get("email", ""),
-        step_num=6,
-        step_label="Gmail",
+        **_step("imap_credentials"),
     )
 
 
@@ -383,8 +412,7 @@ def schedule():
 
     return render_template(
         "onboarding/schedule.html",
-        step_num=7,
-        step_label="Schedule",
+        **_step("schedule"),
     )
 
 
@@ -606,6 +634,5 @@ def done():
     return render_template(
         "onboarding/done.html",
         summary=summary,
-        step_num=8,
-        step_label="Ready",
+        **_step("done"),
     )
