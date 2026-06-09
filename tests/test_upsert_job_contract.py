@@ -239,3 +239,116 @@ def test_upsert_result_has_explicit_bool_guard() -> None:
     result = UpsertResult(kind="inserted", dedup_key="test|key")
     with pytest.raises(TypeError):
         bool(result)
+
+
+# ---------------------------------------------------------------------------
+# 7. Issue #219 — (company_id, source_id) merge path (I-11 collision)
+# ---------------------------------------------------------------------------
+
+
+def test_upsert_merges_on_company_source_id_when_dedup_key_misses(
+    conn: sqlite3.Connection,
+) -> None:
+    """A second posting with a new title but the same (company_id, source_id)
+    merges into the first row instead of tripping the I-11 partial UNIQUE index.
+
+    Repro of the N12 finding: Workday tenants surface a stable externalPath
+    (source_id) under drifting display titles. Two distinct dedup_keys collide
+    on (company_id, source_id); without the merge path the second INSERT is
+    rejected as I-11 and the posting is silently dropped.
+    """
+    # First posting: title A, source_id "abc"
+    parsed_a = ParsedJob(
+        title="Brand Campaign Operations Sr. Analyst",
+        company="WorkdayCo",
+        dedup_key=_dedup_key("WorkdayCo", "Brand Campaign Operations Sr. Analyst"),
+        sources=["greenhouse"],
+        source_urls=["https://example.com/jobs/abc?title=analyst"],
+        source_id="/job/Mexico---Mexico-City/Brand-Campaign-Operations_R-12345",
+    )
+    r1 = upsert_job(conn, parsed_a, company_id=42)
+    assert r1.kind == "inserted"
+
+    # Second posting: title drifted, same (company_id, source_id) — distinct
+    # dedup_key, would historically take the INSERT branch → I-11 violation.
+    parsed_b = ParsedJob(
+        title="Brand Campaign Operations Manager",
+        company="WorkdayCo",
+        dedup_key=_dedup_key("WorkdayCo", "Brand Campaign Operations Manager"),
+        sources=["greenhouse"],
+        source_urls=["https://example.com/jobs/abc?title=manager"],
+        source_id="/job/Mexico---Mexico-City/Brand-Campaign-Operations_R-12345",
+    )
+    r2 = upsert_job(conn, parsed_b, company_id=42)
+
+    # Acceptance: no IngestionRejected, merge kind, matched row's dedup_key
+    # returned (not the incoming one), and B's source_url present on the row.
+    assert r2.kind in {"updated", "touched", "unchanged"}
+    assert r2.dedup_key == parsed_a.dedup_key
+
+    rows = conn.execute(
+        "SELECT dedup_key, source_urls FROM jobs WHERE source_id = ?",
+        (parsed_a.source_id,),
+    ).fetchall()
+    assert len(rows) == 1
+    assert rows[0]["dedup_key"] == parsed_a.dedup_key
+    assert "https://example.com/jobs/abc?title=manager" in rows[0]["source_urls"]
+
+
+def test_upsert_still_inserts_when_source_id_is_empty(conn: sqlite3.Connection) -> None:
+    """The partial UNIQUE exemption is preserved: rows with NULL/'' source_id
+    still insert independently within the same company. The merge fallback
+    only fires when parsed.source_id is truthy.
+    """
+    parsed_a = ParsedJob(
+        title="Engineer One",
+        company="NoSidCo",
+        dedup_key=_dedup_key("NoSidCo", "Engineer One"),
+        sources=["serpapi"],
+        source_urls=["https://example.com/1"],
+        source_id=None,
+    )
+    parsed_b = ParsedJob(
+        title="Engineer Two",
+        company="NoSidCo",
+        dedup_key=_dedup_key("NoSidCo", "Engineer Two"),
+        sources=["serpapi"],
+        source_urls=["https://example.com/2"],
+        source_id=None,
+    )
+    r1 = upsert_job(conn, parsed_a, company_id=99)
+    r2 = upsert_job(conn, parsed_b, company_id=99)
+    assert r1.kind == "inserted"
+    assert r2.kind == "inserted"
+
+    count = conn.execute("SELECT COUNT(*) FROM jobs WHERE company_id = 99").fetchone()[0]
+    assert count == 2
+
+
+def test_upsert_does_not_merge_when_company_id_missing(conn: sqlite3.Connection) -> None:
+    """The merge fallback requires both source_id AND company_id to be set —
+    a None company_id (e.g. unlinked SERP rows) takes the INSERT branch.
+    """
+    parsed_a = ParsedJob(
+        title="Engineer A",
+        company="UnlinkedCo",
+        dedup_key=_dedup_key("UnlinkedCo", "Engineer A"),
+        sources=["linkedin"],
+        source_urls=["https://example.com/a"],
+        source_id="external-id-1",
+    )
+    r1 = upsert_job(conn, parsed_a, company_id=None)
+    assert r1.kind == "inserted"
+
+    # Same source_id but no company_id — partial index exempts the row,
+    # so INSERT proceeds.
+    parsed_b = ParsedJob(
+        title="Engineer B",
+        company="UnlinkedCo",
+        dedup_key=_dedup_key("UnlinkedCo", "Engineer B"),
+        sources=["linkedin"],
+        source_urls=["https://example.com/b"],
+        source_id="external-id-1",
+    )
+    r2 = upsert_job(conn, parsed_b, company_id=None)
+    assert r2.kind == "inserted"
