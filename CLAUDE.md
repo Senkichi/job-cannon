@@ -12,7 +12,7 @@ Job Cannon is a personal job search command center. Flask web app (localhost:500
 - **Frontend**: HTMX 2.x, Tailwind CSS (CDN), SortableJS, vanilla JS only
 - **Database**: SQLite with WAL mode, raw SQL (no ORM), schema migrations via `pragma user_version`
 - **Background**: APScheduler 3.11 (pinned <4.0 — 4.x has breaking async API)
-- **AI**: Multi-provider cascade via `job_finder.web.model_provider.call_model()`. Production primary is Ollama (qwen2.5:14b, Phase 33 winner); cascade falls through Groq, Cerebras, Gemini before reaching the Anthropic CLI fallback ($0 via Claude.ai subscription). The Anthropic SDK client is constructed as an availability gate (no-key clients are skipped), but inference itself dispatches through `claude -p` CLI subprocesses — see `claude_client.py` module docstring. M-2 (2026-05-20).
+- **AI**: Multi-provider cascade via `job_finder.web.model_provider.call_model()`. Production primary is Ollama (qwen2.5:14b); cascade falls through Groq, Cerebras, Gemini before reaching the Anthropic CLI fallback ($0 via Claude.ai subscription). The Anthropic SDK client is constructed as an availability gate (no-key clients are skipped), but inference itself dispatches through `claude -p` CLI subprocesses — see `claude_client.py` module docstring.
 - **APIs**: Gmail API v1 (OAuth 2.0, read-only); SerpAPI / Thordata / DataForSEO / portal-search aggregator (all optional)
 
 ## Key Commands
@@ -21,22 +21,19 @@ Job Cannon is a personal job search command center. Flask web app (localhost:500
 # Run the app
 uv run job-cannon                                 # Flask dev server on localhost:5000 (canonical)
 uv run python -m job_finder                       # equivalent module entry
-uv run python run.py                              # legacy entry, still works (now a shim)
 
-# Tests — parallel by default (addopts carries `-n auto --dist loadscope`, ~4x faster; no flag needed)
-uv run --active pytest tests/                              # Full suite (use `pytest --co` for exact count; excludes e2e by default in CI docs)
-uv run --active pytest tests/test_pipeline_detector.py -v  # Specific file
-uv run --active pytest -x                                  # Stop on first failure
-uv run --active pytest -n0                                 # Force serial (override the -n auto default — bisecting flakes, readable output)
+# Tests — parallel by default (addopts carries `-n auto --dist loadscope`)
+uv run --active pytest tests/                     # full suite
+uv run --active pytest -x                         # stop on first failure
+uv run --active pytest -n0                        # force serial (bisecting flakes, readable output)
 
 # Dependencies
-uv sync --extra dev --extra eval                  # Install pyproject deps + dev/eval extras
+uv sync --extra dev --extra eval                  # install pyproject deps + dev/eval extras
 ```
 
 ## Git Workflow
 
-- Commit directly to main for all work (phase execution, hotfixes, config tweaks)
-- Push to origin regularly
+`main` is branch-protected. Contributions go through a pull request; the CI aggregate gate (`tests-passed`) must pass before merge. Use conventional commits (`feat:`, `fix:`, `docs:`, etc.).
 
 ## Project Structure
 
@@ -45,36 +42,33 @@ job_finder/
 ├── web/
 │   ├── __init__.py              # Flask app factory (create_app)
 │   ├── blueprints/              # 14 blueprints: admin, batch_scoring, companies, costs, dashboard, detections, events, jobs, onboarding, pipeline, profile, settings, sync, updates
-│   ├── templates/               # 54 Jinja2 templates (base.html + partials)
+│   ├── templates/               # Jinja2 templates (base.html + partials)
 │   ├── claude_client.py         # Anthropic SDK wrapper + cost tracking + budget gating (paid-fallback path)
 │   ├── model_provider.py        # Multi-provider cascade dispatcher (call_model + tier resolution)
 │   ├── providers/               # Per-provider implementations (anthropic, gemini, ollama)
-│   ├── job_scorer.py            # Single-tier v3.0 ordinal scoring (replaces deleted haiku_scorer / sonnet_evaluator)
+│   ├── job_scorer.py            # Single-tier v3.0 ordinal scoring
 │   ├── scoring_orchestrator.py  # Per-run orchestration, retry, attribution
-│   ├── scheduler/               # APScheduler background jobs (split S7a 2026-05-06: __init__ lifecycle + _pidfile + _ollama + _factories + _jobs + _runners + _sync)
-│   ├── pipeline_detector/       # Multi-signal email classification (split S7b 2026-05-06: __init__ + _constants + _gmail + _signals + _db + _processing)
-│   ├── ats_platforms/           # ATS platform scanners + registry (promoted from flat ats_platforms.py + ats_platforms_internal/ in H3 2026-05-28: __init__ re-exports + _registry + _title_match + _detail_fetchers + 16 _platforms_*)
-│   ├── ats_scanner/             # ATS platform scanner (split S7c 2026-05-06: __init__ + _upsert + _probe + _promote + _run + _run_html)
-│   ├── careers_crawler/         # Multi-tier careers-page crawler (split S7e 2026-05-06: __init__ + _title_filters + _api_cache + _static_tier + _sitemap_tier + _playwright_tier + _ai_nav_tier + _tier_cache + _persistence + _scoring)
-│   ├── migrations/              # Per-version migration modules (split S6 2026-05-06; m001..m051 + _gate, _runner, _post_hooks, types)
-│   ├── _http_constants.py       # Shared HTTP _HEADERS / _TIMEOUT (extracted S7e onset; consumed by careers_crawler + enrichment_tiers)
+│   ├── scheduler/               # APScheduler background jobs
+│   ├── pipeline_detector/       # Multi-signal email classification
+│   ├── ats_platforms/           # ATS platform scanners + registry
+│   ├── ats_scanner/             # ATS platform scanner
+│   ├── careers_crawler/         # Multi-tier careers-page crawler
+│   ├── migrations/              # Per-version migration modules
 │   ├── pipeline_runner.py       # Orchestrates ingestion + scoring + detection
 │   ├── db_helpers.py            # Per-request g.db pattern
-│   ├── db_migrate.py            # Migrations driver (slim post-S6: discovers + applies modules from migrations/)
+│   ├── db_migrate.py            # Migrations driver
 │   └── stale_detector.py        # Nightly stale job detection (own DB connection)
 ├── parsers/                     # Email parsers: linkedin, glassdoor, indeed, ziprecruiter, monster, trueup, greenhouse
 ├── sources/                     # gmail_source.py, serpapi_source.py, thordata_source.py, dataforseo_source.py, portal_search_source.py
 ├── models.py                    # Job dataclass with dedup_key
-├── db/                          # CLI-era DB module split into a package by Reconciliation R3 / S7d (2026-05-06): __init__ lifecycle + _queries (read-only filters + sort_by allowlist) + _jobs (CRUD) + _persistence (writes + pipeline state machine) + _classification (JobAssessment + derive_classification). Tag portfolio/s7d-db-split.
+├── db/                          # DB package: __init__ + _queries + _jobs + _persistence + _classification
 └── config.py                    # YAML config loader (fail-fast, no defaults)
 tests/
 ├── conftest.py                  # Fixtures: app factory, test DB, mocked Claude client
-└── test_*.py                    # ~90 test files (canary + invariant suites added in S6/S7a/S7b/S7e)
+└── test_*.py                    # ~90 test files
 ```
 
 ## Architecture Decisions That Matter
-
-These decisions are documented in `.planning/STATE.md` and recur constantly:
 
 **HTMX patterns** (most common source of bugs):
 - Fragment routes MUST check `HX-Request` header and return full page for direct browser access
@@ -97,69 +91,19 @@ These decisions are documented in `.planning/STATE.md` and recur constantly:
 - `conftest.py` has fixtures for app factory, test DB, mock Claude
 
 **Scoring**:
-- v3.0 single tier: `'scoring'` tier (Plan 4 Commit E) replaces the legacy Haiku-then-Sonnet two-tier. Output is a six-axis ordinal rubric; classification is **Python-derived** from the sub-scores in `job_finder.db._classification.derive_classification` — never emitted by the LLM.
+- v3.0 single tier: `'scoring'` tier. Output is a six-axis ordinal rubric; classification is **Python-derived** from the sub-scores in `job_finder.db._classification.derive_classification` — never emitted by the LLM.
 - Cascade order (configurable in `config.yaml > providers.fallback_chain`): Ollama → Gemini → Claude Code CLI → Anthropic. Each provider can be disabled or rate-limited independently.
-- cost_gate returns bool — callers decide whether to raise BudgetExceededError. The gate excludes all members of `claude_client.FREE_PROVIDERS` (gemini, ollama, claude_cli, claude_code_cli, gemini_cli, local_bundled, google_cse) from the spend sum, so `scoring.daily_budget_usd` only trips on non-free BYO-key providers in the cascade (e.g. OpenRouter judge used by the cascade audit). The Anthropic CLI fallback is $0 via subscription and does not count. Note: groq + cerebras are *not* in FREE_PROVIDERS — they have BYO-key tiers and any spend would count against the budget. M-2 (2026-05-20).
+- cost_gate returns bool — callers decide whether to raise BudgetExceededError. The gate excludes all members of `claude_client.FREE_PROVIDERS` (gemini, ollama, claude_cli, claude_code_cli, gemini_cli, local_bundled, google_cse) from the spend sum.
 - Scoring requires `jd_full` (no cost without full JD); jobs lacking jd_full route to enrichment first.
 - Rescoring skips already-scored jobs unless `force=True` (manual rescore).
-- `description` vs `jd_full` (D-13): `description` is parser-supplied short text (when a source exposes a summary); `jd_full` is the canonical full body (often a separate fetch, promoted via `set_jd_full`). Some sources only give short text, others provide the full body separately — hence the split.
+- `description` vs `jd_full`: `description` is parser-supplied short text; `jd_full` is the canonical full body (often a separate fetch, promoted via `set_jd_full`).
 
-**Workload-class tiers:** The system now uses workload-named tiers (`quick`/`score`/`triage`):
+**Workload-class tiers:**
 - `quick`: every non-scoring LLM call (extraction, parsing, navigation, research, reformatting, agentic enricher)
 - `score`: full ordinal-rubric job scoring
 - `triage`: optional pre-scoring gate (uses quick model with triage-specific prompt)
 
 Per-provider model defaults live in `_PROVIDER_DEFAULTS` (nested provider→workload→model dict).
-Legacy tier names (`low`/`mid`/`high`/`haiku`/`sonnet`/`opus`) are removed.
-
-## Planning Documentation
-
-This project uses the GSD framework. Key docs:
-- `.planning/ROADMAP.md` — All phases complete, milestone history
-- `.planning/STATE.md` — Current state, 100+ architectural decisions
-- `.planning/codebase/` — ARCHITECTURE.md, CONVENTIONS.md, CONCERNS.md, STACK.md, TESTING.md
-
-## Current Status
-
-- **Phase 1 (Foundation)**: Complete — 11/11 plans, 36/36 must-haves verified
-- **Phase 2 (AI Scoring)**: Complete — 5/5 plans
-- **Phase 3 (Pipeline Automation)**: Complete — 2/2 plans
-- **Phase 4 (Resume Generation)**: Removed (public-repo cleanup, 2026-05) — resume_generator, drive_uploader, drive_status, docx_formatter, resume_feedback, resume_validator, resume_style_guide, resume_multi_version, resume_review blueprint, feedback blueprint, guidelines blueprint all deleted; Migration 47 dropped resume_generations / resume_preferences_detected / resume_upload_reviews tables.
-- **Phase 5 (Intelligence)**: Removed (public-repo cleanup, 2026-05) — interview_prep, rejection_analyzer, rejection_patterns, notifier all deleted; Migration 48 dropped interview_preps / rejection_reports / rejection_pattern_reports tables and the jobs.rejection_reviewed column. AI career navigator (`ai_career_navigator.py`) was retained as a Tier-4 crawler fallback (16 cached recipes, ~10 active companies use ai_navigate/ai_replay tier).
-- **Portfolio Cleanup (Track 1, Stage 1 link-shareable, 2026-05)**: Sessions 0-4 complete (`portfolio/s0-baseline` through `portfolio/s4-readme-skeleton`). Stage 1 gate held open by 3 user-action items (codecov authorization, hero GIF, "Why I Built It" narrative) — see `.planning/portfolio-cleanup/STAGE-1-GATE-BLOCKERS.md`.
-- **Portfolio Cleanup (Track 2, Lead/Staff depth, 2026-05)**: Sessions 5, 6, 7a, 7b, 7c, 7d, 7e all complete (tags `portfolio/s5-typecheck-baseline` through `portfolio/s7d-db-split` + `portfolio/s7e-careers-crawler-split`). Session 7d was originally SKIPPED in the first execution; recovered by Reconciliation Plan v1 Session R3 (concurrent session, closed 2026-05-06). Reconciliation track R1, R2, R4, R5, R6, R7 closed (tags placed); R8 (final audit) in flight. Sessions 8–11 unstarted.
-
-## Verification Standards
-
-When verifying phase completion or running `/gsd:verify-work`, self-check everything automatable before flagging items as human-needed.
-
-**Self-check (do NOT flag as human-needed):**
-- Route returns correct HTTP status — use Flask test client or curl
-- HTML response contains expected elements (IDs, classes, buttons, forms)
-- HTMX attributes are correctly wired (hx-get, hx-target, hx-swap)
-- Form submissions return expected responses
-- Fragment routes check HX-Request header
-- Collapsed/expanded sections exist in markup
-- Polling endpoints return correct fragments
-- Template variables match route context
-
-**Only flag as human-needed:**
-- Visual/aesthetic judgments (spacing, colors, sizing, "looks broken")
-- Real browser JS execution (HTMX swap animations, SortableJS drag behavior)
-- Cross-element visual layout rendering (does two-column actually render correctly?)
-- Subjective UX quality ("is this intuitive?")
-
-**Use these agents/skills proactively at the right stages:**
-- `/systematic-debugging` — when encountering any bug or test failure, BEFORE proposing fixes
-
-## Custom Agents, Skills, and Hooks
-
-- `.claude/agents/htmx-reviewer.md` — Proactive HTMX+Jinja2+Flask review agent. Use when modifying templates or hx-* attributes.
-- `.claude/agents/flask-template-auditor.md` — Audits Jinja2 template variable usage against Flask route context. Catches silent failures where routes pass variables templates never render, or templates reference variables routes don't provide. Use after editing any .html template or blueprint route.
-- `.claude/agents/arch-reviewer.md` — Reviews code changes for architectural consistency with .planning/ docs. Catches anti-patterns and component boundary violations.
-- `.claude/skills/uat-check/SKILL.md` — Post-phase UAT gap analysis against ROADMAP success criteria.
-- `/brainstorming` — Explore intent, requirements, and design before implementing features.
-- `/systematic-debugging` — Structured debugging before proposing fixes for bugs or test failures.
 
 ## Conventions
 
@@ -173,19 +117,19 @@ When verifying phase completion or running `/gsd:verify-work`, self-check everyt
 
 ## User Data Files (Not Tracked in Git)
 
-These files contain personal data and API keys. They are `.gitignore`d and must be backed up manually (`bash backup_userdata.sh`). Example templates are tracked for schema reference.
+These files contain personal data and API keys. They are `.gitignore`d.
 
 | File | Template | Purpose |
 |------|----------|---------|
 | `config.yaml` | `config.example.yaml` | App config, API keys, profile targets |
-| `experience_profile.json` | `experience_profile.example.json` | Career history (positions / skills / education) for fit-scoring personalization in the `'scoring'` tier prompt |
+| `experience_profile.json` | `experience_profile.example.json` | Career history for fit-scoring personalization in the `'scoring'` tier prompt |
 
-**config.yaml must ONLY be modified with the Edit tool (surgical string replacement), NEVER with the Write tool (full-file overwrite).** This file has been accidentally wiped 3 times by full-file rewrites that intended to change a single value. The settings save route (`_write_config`) is safe because it reads→merges→writes. The risk is Claude/GSD execution doing full-file writes.
+**config.yaml must ONLY be modified with surgical string replacement (Edit tool), NEVER with a full-file overwrite (Write tool).** The settings save route (`_write_config`) is safe because it reads→merges→writes. Full-file rewrites silently drop existing config sections.
 
 ## Environment Variables
 
 - `JOB_CANNON_USER_DATA_DIR` (optional) — absolute path to user data directory. For local development, set this to the project root if you want config.yaml and jobs.db to stay in the repository directory instead of the OS user-data directory.
-- `OLLAMA_EXE` (optional) — absolute path to `ollama.exe`. Only needed if Ollama is installed somewhere other than the Windows default (`%LOCALAPPDATA%\Programs\Ollama\ollama.exe`) and not on PATH. The scheduler auto-starts Ollama at app boot so the nightly agentic backfill (4:15 AM) has a live service.
+- `OLLAMA_EXE` (optional) — absolute path to `ollama.exe`. Only needed if Ollama is installed somewhere other than the Windows default (`%LOCALAPPDATA%\Programs\Ollama\ollama.exe`) and not on PATH.
 
 ## Don't
 
