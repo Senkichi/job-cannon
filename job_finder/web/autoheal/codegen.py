@@ -109,12 +109,19 @@ def assemble_inputs(conn: sqlite3.Connection, source: str, surface: str) -> dict
     baseline: list[str] = []
     for raw_text, output_json in rows:
         try:
-            job_count = int(_json.loads(output_json).get("job_count", 0))
-        except (ValueError, TypeError):
+            snapshot = _json.loads(output_json)
+            job_count = int(snapshot.get("job_count", 0))
+            extractor = snapshot.get("extractor", "legacy")
+        except (ValueError, TypeError, AttributeError):
             job_count = 0
+            extractor = "legacy"
         if job_count == 0 and len(failing) < MAX_FAILING_SAMPLES:
+            # Zero-yields are valid break evidence regardless of extractor.
             failing.append(raw_text)
-        elif job_count > 0 and len(baseline) < MAX_BASELINE_SAMPLES:
+        elif job_count > 0 and extractor != "override" and len(baseline) < MAX_BASELINE_SAMPLES:
+            # I3 corpus provenance: override-produced positives are excluded —
+            # the artifact being regression-gated must not write its own
+            # ground truth. Pre-D2 samples have no extractor key → legacy.
             baseline.append(raw_text)
         if len(failing) >= MAX_FAILING_SAMPLES and len(baseline) >= MAX_BASELINE_SAMPLES:
             break
