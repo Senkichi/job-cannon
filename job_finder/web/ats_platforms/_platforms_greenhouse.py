@@ -23,7 +23,7 @@ from __future__ import annotations
 import json
 import logging
 
-from job_finder.web._field_alias import JOB_TITLE_FIELDS, JOB_URL_FIELDS, extract_field
+from job_finder.web._field_alias import resolve_title, resolve_url
 from job_finder.web.ats_platforms._registry import (
     PlatformScanner,
     _http_get_json,
@@ -165,13 +165,12 @@ def _posting_to_job(posting: dict, _slug: str) -> dict:
     # no tags, no entities, no dropped sections.
     description = html_to_plain_text(posting.get("content") or "")
 
-    # ── Title / URL via shared alias lists (Phase B field-rename tolerance) ────
-    # extract_field returns the first matching key from each alias list so a
-    # renamed Greenhouse key (e.g. "title" → "jobTitle") still resolves.
-    # The canonical key ("title", "absolute_url") is first in each list so
-    # currently-working postings are unaffected.
-    title = extract_field(posting, JOB_TITLE_FIELDS) or ""
-    source_url = extract_field(posting, JOB_URL_FIELDS) or ""
+    # ── Title / URL via override-aware resolvers (Phase C field-rename heal) ──
+    # resolve_* searches the canonical alias list first, then any healed
+    # extras from an adopted ats:greenhouse override recipe. With no override
+    # file present this is identical to the Phase B extract_field behaviour.
+    title = resolve_title(posting, "greenhouse") or ""
+    source_url = resolve_url(posting, "greenhouse") or ""
 
     return {
         "title": title,

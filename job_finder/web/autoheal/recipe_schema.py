@@ -11,7 +11,7 @@ bracket access — to avoid crashing installs that haven't added the config bloc
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 
 # ---------------------------------------------------------------------------
 # FieldRule (used inside HtmlRecipe.fields)
@@ -81,6 +81,15 @@ class AtsAliasRecipe:
 # ---------------------------------------------------------------------------
 # validate_recipe
 # ---------------------------------------------------------------------------
+
+
+def recipe_to_dict(recipe: HtmlRecipe | AtsAliasRecipe) -> dict:
+    """Serialize a frozen recipe back to the plain-dict form validate_recipe accepts.
+
+    Round-trip guarantee: ``validate_recipe(surface, recipe_to_dict(r)) == r``.
+    Used by the validator worker protocol and by write_override on adoption.
+    """
+    return asdict(recipe)
 
 
 def validate_recipe(surface: str, data: dict) -> HtmlRecipe | AtsAliasRecipe:
