@@ -1,277 +1,255 @@
-{# Inline full-detail row. Replaces _row_expanded.html via HTMX outerHTML swap when "View Full Detail" is clicked.
+{# ===========================================================================
+   jobs/_row_detail.html  —  DEEP-DIVE TIER (tier 2 of 2)
+   ===========================================================================
+   Replaces the triage row via outerHTML swap when "Open full detail" is clicked
+   (GET /jobs/<key>/detail_inline). This is an INLINE row, NOT a separate page —
+   we deliberately keep the repo's existing inline-detail model (the redesign
+   README floated a /jobs/<id> route; we did NOT introduce one, to avoid inventing
+   a route + view the backend doesn't have). ⚑ See PORT-MANIFEST.
 
-   v3.0 (Phase 34 Plan 3 Commit D): numeric 0-100 display swapped for a
-   classification-enum badge + horizontal-bar sub-score breakdown sourced
-   from job.classification + job.sub_scores_json + job.fit_analysis. #}
+   DESIGN DECISION #1 (deep-dive half): everything the triage tier omits lives
+   HERE and ONLY here — full JD, full AI analysis (incl. talking points + resume
+   priority skills), sub-score breakdown (repeat OK), pipeline timeline, notes,
+   and the full source list. Content is the SAME as the original detail row; it is
+   restyled and re-sectioned, nothing dropped.
+
+   PRESERVED contracts:
+     • Collapse back to triage -> hx-get jobs.expand, target closest tr, outerHTML.
+     • Status select           -> jobs/_status_cell.html (unchanged hx-post).
+     • Notes                   -> jobs/_notes_panel.html (unchanged save_notes).
+     • Timeline                -> `events` list passed by the detail_inline view.
+     • Sources + direct-link badge -> jobs/_direct_link_badge.html include kept.
+#}
+{% import "components/_score_macros.html" as sm %}
+{% set composite = sm.composite(job.sub_scores_json) | int %}
+{% set scored = job.sub_scores_json is not none and job.sub_scores_json != '' %}
+{% set sub_scores = job.sub_scores_json | from_json if job.sub_scores_json else {} %}
 {% set sources_list = job.sources | from_json if job.sources else [] %}
 {% set urls_list = job.source_urls | from_json if job.source_urls else [] %}
+{% set apply_url = urls_list[0] if urls_list else None %}
 
-{# Classification-enum badge — apply/consider/skip/reject #}
+{# Score band (same 3-band split as the chip). #}
+{% set band = 'success' if composite >= 24 else ('warning' if composite >= 17 else 'error') %}
+{% set band_text = {'success':'text-emerald-400','warning':'text-amber-400','error':'text-red-400'}[band] %}
+{% set band_bg   = {'success':'bg-emerald-400/15','warning':'bg-amber-400/15','error':'bg-red-400/15'}[band] %}
+{% set band_bd   = {'success':'border-emerald-400/40','warning':'border-amber-400/40','error':'border-red-400/40'}[band] %}
+{% set band_dot  = {'success':'bg-emerald-400','warning':'bg-amber-400','error':'bg-red-400'}[band] %}
+{% set band_label= {'success':'Strong fit','warning':'Moderate fit','error':'Weak fit'}[band] %}
+
+{# Classification pill — KEPT as a secondary signal (distinct from the score band). #}
 {% set cls = job.classification %}
-{% if cls == 'apply' %}
-  {% set badge_class = 'bg-green-900 text-green-200 border-green-700' %}
-  {% set badge_text = 'Apply' %}
-{% elif cls == 'consider' %}
-  {% set badge_class = 'bg-amber-900 text-amber-200 border-amber-700' %}
-  {% set badge_text = 'Consider' %}
-{% elif cls == 'skip' %}
-  {% set badge_class = 'bg-slate-800 text-slate-300 border-slate-600' %}
-  {% set badge_text = 'Skip' %}
-{% elif cls == 'reject' %}
-  {% set badge_class = 'bg-red-900 text-red-200 border-red-700' %}
-  {% set badge_text = 'Reject' %}
-{% else %}
-  {% set badge_class = 'bg-slate-900 text-slate-500 border-slate-700' %}
-  {% set badge_text = 'Unscored' %}
-{% endif %}
+{% set cls_map = {
+  'apply':    ('Apply',    'bg-emerald-900 text-emerald-200 border-emerald-700'),
+  'consider': ('Consider', 'bg-amber-900 text-amber-200 border-amber-700'),
+  'skip':     ('Skip',     'bg-slate-800 text-slate-300 border-slate-600'),
+  'reject':   ('Reject',   'bg-red-900 text-red-200 border-red-700')
+} %}
 
-{% set sub_scores = job.sub_scores_json | from_json if job.sub_scores_json else {} %}
 {% set sub_score_dims = [
-  ('title_fit', 'Title fit'),
-  ('location_fit', 'Location fit'),
-  ('comp_fit', 'Compensation'),
-  ('domain_match', 'Domain'),
-  ('seniority_match', 'Seniority'),
-  ('skills_match', 'Skills'),
+  ('title_fit','Title fit'), ('location_fit','Location fit'), ('comp_fit','Compensation'),
+  ('domain_match','Domain'), ('seniority_match','Seniority'), ('skills_match','Skills')
 ] %}
+{% set jd_key_safe = job.dedup_key | urlencode | replace('%', '') %}
 
-<tr class="border-b border-slate-700 bg-slate-800/40">
-  <td colspan="7" class="px-4 py-4">
-    <div class="max-w-4xl space-y-4">
+<tr class="border-b border-slate-700 bg-slate-850" data-row-expanded="detail">
+  <td colspan="7" class="px-4 pt-5 pb-6">
+    <div class="max-w-[1080px] space-y-5">
 
-      <!-- Header: title, company, score, dates + Collapse button (top) -->
-      <div class="flex items-start justify-between gap-4">
-        <div>
-          <h2 class="text-lg font-bold text-slate-100">{{ job.title }}</h2>
-          <p class="text-slate-400 mt-1 text-sm">{{ job.company }} &mdash; {{ job.location }}</p>
-          {% set _loc_entries = job.locations_structured | from_json %}
-          {% if _loc_entries %}
-          <div class="flex flex-wrap gap-1 mt-1.5" title="{{ job.locations_raw or '' }}">
-            {% for entry in _loc_entries %}
-              {% set _pill_parts = [] %}
-              {% set _city = entry.get('city') %}
-              {% set _region_code = entry.get('region_code') %}
-              {% set _country_code = entry.get('country_code') %}
-              {% set _wt = entry.get('workplace_type') %}
-              {% if _city and _region_code %}{% set _ = _pill_parts.append(_city ~ ', ' ~ _region_code) %}{% elif _city %}{% set _ = _pill_parts.append(_city) %}{% endif %}
-              {% if _country_code %}{% set _ = _pill_parts.append(_country_code) %}{% endif %}
-              {% if _wt and _wt != 'UNSPECIFIED' %}{% set _ = _pill_parts.append(_wt | title) %}{% endif %}
-              {% if _pill_parts %}
-                <span class="inline-flex items-center px-2 py-0.5 text-xs rounded bg-indigo-900/40 text-indigo-200 border border-indigo-700/50"
-                      title="{{ entry.get('raw') or '' }}">
-                  {{ _pill_parts | join(' · ') }}
-                </span>
-              {% endif %}
-            {% endfor %}
-          </div>
-          {% endif %}
-          {% if job.salary_min or job.salary_max %}
-          <p class="text-slate-300 mt-1 text-sm">
-            Salary:
-            {% if job.salary_min and job.salary_max %}
-              ${{ "{:,}".format(job.salary_min) }} – ${{ "{:,}".format(job.salary_max) }}
-            {% elif job.salary_max %}
-              up to ${{ "{:,}".format(job.salary_max) }}
+      {# Back to triage (was "Collapse Full Detail"). #}
+      <button type="button"
+              hx-get="{{ url_for('jobs.expand', dedup_key=job.dedup_key) }}"
+              hx-target="closest tr" hx-swap="outerHTML"
+              class="inline-flex items-center gap-1.5 text-[13px] text-slate-400 hover:text-slate-200 transition-colors">
+        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 19l-7-7 7-7"/></svg>
+        Back to triage
+      </button>
+
+      {# ---- Header: chip + band badge + title + meta · status + Apply ---- #}
+      <div class="flex flex-wrap items-start justify-between gap-4 border-b border-slate-700/60 pb-5">
+        <div class="min-w-0">
+          <div class="flex items-center gap-3 mb-2">
+            {% if scored %}
+            <div class="grid place-items-center w-11 h-11 rounded-md border {{ band_bg }} {{ band_bd }}">
+              <span class="text-xl font-bold leading-none tabular-nums {{ band_text }}">{{ composite }}</span>
+            </div>
+            <span class="inline-flex items-center gap-1.5 rounded-md border {{ band_bd }} {{ band_bg }} px-2.5 py-1 text-[13px] font-medium {{ band_text }}">
+              <span class="w-1.5 h-1.5 rounded-full {{ band_dot }}"></span>{{ band_label }} · {{ composite }}/30
+            </span>
             {% else %}
-              ${{ "{:,}".format(job.salary_min) }}+
+            <span class="inline-flex items-center rounded-md border border-slate-700 bg-slate-800 px-2.5 py-1 text-[13px] text-slate-500">Unscored</span>
+            {% endif %}
+            {% if cls and cls in cls_map %}
+            <span class="inline-block px-2 py-0.5 text-[11px] font-semibold rounded border {{ cls_map[cls][1] }}">{{ cls_map[cls][0] }}</span>
+            {% endif %}
+          </div>
+          <h2 class="text-2xl font-bold tracking-tight text-slate-100 truncate">{{ job.title }}</h2>
+          <p class="text-[13px] text-slate-400 mt-1">
+            {{ job.company }}
+            <span class="text-slate-600">·</span> {{ job.location }}
+            {% if job.salary_min or job.salary_max %}
+              <span class="text-slate-600">·</span>
+              <span class="tabular-nums">
+                {% if job.salary_min and job.salary_max %}${{ "{:,}".format(job.salary_min) }} – ${{ "{:,}".format(job.salary_max) }}
+                {% elif job.salary_max %}up to ${{ "{:,}".format(job.salary_max) }}
+                {% else %}${{ "{:,}".format(job.salary_min) }}+{% endif %}
+              </span>
             {% endif %}
           </p>
+        </div>
+        <div class="flex items-center gap-2 flex-none">
+          <div class="w-44">{% include "jobs/_status_cell.html" %}</div>
+          {% if apply_url %}
+          <a href="{{ apply_url }}" target="_blank" rel="noopener noreferrer"
+             class="inline-flex h-9 items-center gap-1.5 rounded-md bg-indigo-600 px-3.5 text-sm font-medium text-white hover:bg-indigo-500 transition-colors">
+            Apply
+            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 5h5v5M19 5l-7 7M12 5H7a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-5"/></svg>
+          </a>
           {% endif %}
-          <div class="flex flex-wrap gap-2 mt-2 text-xs text-slate-500">
-            <span>First seen: {{ (job.first_seen | local_date) if job.first_seen else "—" }}</span>
-            <span>&bull;</span>
-            <span>Last seen: {{ (job.last_seen | local_date) if job.last_seen else "—" }}</span>
-            {% if job.posted_date %}
-            <span>&bull;</span>
-            <span>Posted: {{ job.posted_date | local_date }}</span>
-            {% endif %}
-          </div>
-        </div>
-        <!-- Classification badge + Collapse button (top) -->
-        <div class="flex flex-col items-end gap-2 shrink-0">
-          <span class="inline-block px-3 py-1 text-sm font-semibold rounded border {{ badge_class }}">{{ badge_text }}</span>
-          <button type="button"
-                  hx-get="{{ url_for('jobs.expand', dedup_key=job.dedup_key) }}"
-                  hx-target="closest tr"
-                  hx-swap="outerHTML"
-                  class="px-3 py-1 bg-slate-700 hover:bg-slate-600 text-slate-300 text-xs rounded transition-colors">
-            Collapse Full Detail
-          </button>
         </div>
       </div>
 
-      <!-- Status dropdown -->
-      <div class="flex items-center gap-3">
-        <span class="text-xs text-slate-500">Status:</span>
-        {% include "jobs/_status_cell.html" %}
-      </div>
+      {# ---- Body: 2-col grid (read | rail) ---- #}
+      <div class="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_320px] gap-x-8 gap-y-6">
 
-      <!-- Sources badges -->
-      {% if sources_list %}
-      <div class="bg-slate-800/40 rounded-lg border border-slate-700 p-3">
-        <h3 class="text-xs font-semibold text-slate-400 mb-2">Sources</h3>
-        <div class="flex flex-wrap gap-2">
-          {% for i in range(sources_list | length) %}
-            {% set src_name = sources_list[i] %}
-            {% set src_url = urls_list[i] if i < urls_list | length else None %}
-            {% if src_url %}
-              <a href="{{ src_url }}" target="_blank" rel="noopener noreferrer"
-                 class="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-indigo-900/40 text-indigo-300 hover:text-indigo-200 border border-indigo-700/50 text-sm">
-                {{ src_name }} &rarr;
-              </a>
-            {% else %}
-              <span class="px-3 py-1.5 rounded-lg bg-slate-700 text-slate-400 text-sm">{{ src_name }}</span>
-            {% endif %}
-          {% endfor %}
-          {% include "jobs/_direct_link_badge.html" %}
-        </div>
-      </div>
-      {% endif %}
+        {# ===== LEFT: JD · AI analysis · breakdown · notes ===== #}
+        <div class="space-y-5 min-w-0">
 
-      <!-- Sub-score breakdown (v3.0 — 6 ordinal dimensions, 1-5 each) -->
-      {% if sub_scores %}
-      <div class="bg-slate-800/40 rounded-lg border border-slate-700 p-3">
-        <h3 class="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-2">
-          Fit Breakdown
-        </h3>
-        <div class="space-y-1.5">
-          {% for key, label in sub_score_dims %}
-            {% set v = sub_scores.get(key, 0) %}
-            {% if v >= 4 %}
-              {% set bar_class = 'bg-green-500' %}
-            {% elif v == 3 %}
-              {% set bar_class = 'bg-amber-500' %}
-            {% elif v == 2 %}
-              {% set bar_class = 'bg-orange-500' %}
-            {% else %}
-              {% set bar_class = 'bg-red-500' %}
-            {% endif %}
-            <div class="flex items-center gap-2">
-              <span class="w-28 text-xs text-slate-400">{{ label }}</span>
-              <div class="flex-1 bg-slate-900 h-2 rounded overflow-hidden">
-                <div class="h-2 rounded {{ bar_class }}" style="width: {{ (v * 20) }}%"></div>
-              </div>
-              <span class="w-6 text-right text-xs text-slate-300">{{ v }}</span>
+          {# Full Job Description — KEPT. Render the longer of jd_full / description. #}
+          {% set _jdf = job.jd_full or '' %}
+          {% set _desc = job.description or '' %}
+          {% set jd_display = _desc if (_desc | length) > (_jdf | length) else _jdf %}
+          {% if jd_display %}
+          <section>
+            <h3 class="text-[11px] font-semibold uppercase tracking-wider text-slate-500 mb-2">Job description</h3>
+            <div class="rounded-lg border border-slate-700 bg-slate-950 p-4 max-h-96 overflow-y-auto">
+              <div class="text-[13px] text-slate-300 leading-relaxed whitespace-pre-line">{{ jd_display | format_description }}</div>
             </div>
-          {% endfor %}
-        </div>
-      </div>
-      {% endif %}
+          </section>
+          {% endif %}
 
-      <!-- AI Fit Analysis (rationale — strengths/gaps/resume_priority_skills) -->
-      {% if job.fit_analysis %}
-        {% set analysis = job.fit_analysis | from_json %}
-        {% if analysis.strengths or analysis.gaps or analysis.resume_priority_skills or analysis.talking_points %}
-        <div class="bg-slate-800/40 rounded-lg border border-slate-700 p-3 space-y-2 text-sm">
-          <h3 class="text-xs font-semibold text-slate-400 uppercase tracking-wide">AI Fit Analysis</h3>
-          {% if analysis.strengths %}
-          <div>
-            <span class="text-xs font-semibold text-green-400">Strengths</span>
-            <ul class="list-disc list-inside text-slate-300 mt-1 text-xs space-y-0.5">
-              {% for s in analysis.strengths %}<li>{{ s }}</li>{% endfor %}
-            </ul>
-          </div>
+          {# AI fit analysis — FULL: strengths · gaps · talking points · resume skills.
+             DESIGN DECISION: talking points + resume skills live HERE (moved out of
+             triage). Resume skills render as indigo (accent) chips. #}
+          {% if job.fit_analysis %}
+            {% set analysis = job.fit_analysis | from_json %}
+            {% if analysis.strengths or analysis.gaps or analysis.talking_points or analysis.resume_priority_skills %}
+            <section class="space-y-3">
+              <h3 class="text-[11px] font-semibold uppercase tracking-wider text-slate-500">AI fit analysis</h3>
+              {% if analysis.strengths %}
+              <div>
+                <h4 class="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-emerald-400 mb-1.5"><span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>Strengths</h4>
+                <ul class="space-y-1">{% for s in analysis.strengths %}<li class="flex gap-2 text-[13px] text-slate-300 leading-snug"><span class="text-emerald-400/70 mt-px">+</span>{{ s }}</li>{% endfor %}</ul>
+              </div>
+              {% endif %}
+              {% if analysis.gaps %}
+              <div>
+                <h4 class="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-amber-400 mb-1.5"><span class="w-1.5 h-1.5 rounded-full bg-amber-400"></span>Gaps</h4>
+                <ul class="space-y-1">{% for g in analysis.gaps %}<li class="flex gap-2 text-[13px] text-slate-300 leading-snug"><span class="text-amber-400/70 mt-px">&minus;</span>{{ g }}</li>{% endfor %}</ul>
+              </div>
+              {% endif %}
+              {% if analysis.talking_points %}
+              <div>
+                <h4 class="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-sky-400 mb-1.5"><span class="w-1.5 h-1.5 rounded-full bg-sky-400"></span>Talking points</h4>
+                <ul class="space-y-1">{% for t in analysis.talking_points %}<li class="flex gap-2 text-[13px] text-slate-300 leading-snug"><span class="text-sky-400/70 mt-px">&bull;</span>{{ t }}</li>{% endfor %}</ul>
+              </div>
+              {% endif %}
+              {% if analysis.resume_priority_skills %}
+              <div>
+                <h4 class="text-[11px] font-semibold uppercase tracking-wider text-slate-500 mb-1.5">Resume priority skills</h4>
+                <div class="flex flex-wrap gap-1.5">
+                  {% for skill in analysis.resume_priority_skills %}
+                    <span class="px-2 py-0.5 rounded text-[13px] bg-indigo-500/15 text-indigo-300 border border-indigo-500/40">{{ skill }}</span>
+                  {% endfor %}
+                </div>
+              </div>
+              {% endif %}
+            </section>
+            {% endif %}
           {% endif %}
-          {% if analysis.gaps %}
-          <div>
-            <span class="text-xs font-semibold text-amber-400">Gaps</span>
-            <ul class="list-disc list-inside text-slate-300 mt-1 text-xs space-y-0.5">
-              {% for g in analysis.gaps %}<li>{{ g }}</li>{% endfor %}
-            </ul>
-          </div>
-          {% endif %}
-          {% if analysis.talking_points %}
-          <div>
-            <span class="text-xs font-semibold text-sky-400">Talking Points</span>
-            <ul class="list-disc list-inside text-slate-300 mt-1 text-xs space-y-0.5">
-              {% for t in analysis.talking_points %}<li>{{ t }}</li>{% endfor %}
-            </ul>
-          </div>
-          {% endif %}
-          {% if analysis.resume_priority_skills %}
-          <div>
-            <span class="text-xs font-semibold text-blue-400">Resume Priority Skills</span>
-            <div class="flex flex-wrap gap-1 mt-1">
-              {% for skill in analysis.resume_priority_skills %}
-                <span class="px-2 py-0.5 rounded bg-blue-900/50 text-blue-300 border border-blue-700/50 text-xs">{{ skill }}</span>
+
+          {# Fit breakdown — repeat of the triage component, in a card. #}
+          {% if sub_scores %}
+          <section>
+            <h3 class="text-[11px] font-semibold uppercase tracking-wider text-slate-500 mb-2">Fit breakdown</h3>
+            <div class="rounded-lg border border-slate-700 bg-slate-800/40 p-4 space-y-2">
+              {% for key, label in sub_score_dims %}
+                {% set v = sub_scores.get(key, 0) | int %}
+                {% set fill = 'bg-emerald-500' if v >= 4 else ('bg-amber-500' if v == 3 else 'bg-red-500') %}
+                <div class="grid grid-cols-[110px_1fr_16px] items-center gap-3">
+                  <span class="text-xs text-slate-400">{{ label }}</span>
+                  <span class="h-1.5 rounded-full bg-slate-950 overflow-hidden"><span class="block h-full rounded-full {{ fill }}" style="width: {{ (v / 5 * 100) }}%"></span></span>
+                  <span class="text-xs text-slate-300 text-right tabular-nums">{{ v }}</span>
+                </div>
               {% endfor %}
             </div>
-          </div>
+          </section>
           {% endif %}
+
+          {# Notes — KEPT (shared partial, unchanged contract). #}
+          <section>
+            <h3 class="text-[11px] font-semibold uppercase tracking-wider text-slate-500 mb-2">Notes</h3>
+            {% include "jobs/_notes_panel.html" %}
+          </section>
         </div>
-        {% endif %}
-      {% endif %}
 
-      <!-- Description (hidden when full JD is available — jd_full is a superset) -->
-      {% if job.description and not job.jd_full %}
-      <div class="bg-slate-800/40 rounded-lg border border-slate-700 p-3">
-        <h3 class="text-xs font-semibold text-slate-400 mb-2">Description</h3>
-        <div class="text-sm text-slate-300 leading-relaxed">{{ job.description | format_description }}</div>
-      </div>
-      {% endif %}
+        {# ===== RIGHT RAIL: timeline · sources · dates ===== #}
+        <aside class="space-y-5 min-w-0">
 
-      <!-- Full Job Description card (collapsible, when jd_full is present) -->
-      {# Render the fullest JD available: jd_full is capped at write time and the
-         raw `description` column is sometimes longer, so show whichever is longer
-         (jd_full is NOT always a superset). #}
-      {% set _jdf = job.jd_full or '' %}
-      {% set _desc = job.description or '' %}
-      {% set jd_display = _desc if (_desc | length) > (_jdf | length) else _jdf %}
-      {% if job.jd_full %}
-      <div class="bg-slate-800/40 rounded-lg border border-slate-700 p-3">
-        <details>
-          <summary class="text-xs font-semibold text-slate-400 cursor-pointer hover:text-slate-300 select-none">
-            Full Job Description
-          </summary>
-          <div class="mt-2 max-h-96 overflow-y-auto">
-            <div class="text-sm text-slate-300 leading-relaxed">{{ jd_display | format_description }}</div>
-          </div>
-        </details>
-      </div>
-      {% endif %}
+          {# Pipeline timeline — KEPT. Dot colour by whether it's a status change. #}
+          <section>
+            <h3 class="text-[11px] font-semibold uppercase tracking-wider text-slate-500 mb-2.5">Pipeline timeline</h3>
+            {% if events %}
+            <ol class="relative border-l border-slate-700 ml-1.5 space-y-3">
+              {% for event in events %}
+              <li class="ml-4">
+                <div class="absolute -left-1.5 mt-1 h-3 w-3 rounded-full border-2 border-slate-850 {{ 'bg-amber-400' if event.from_status else 'bg-indigo-500' }}"></div>
+                <div class="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[13px]">
+                  <span class="text-slate-200 font-medium">{{ event.to_status }}</span>
+                  {% if event.from_status %}<span class="text-slate-500 text-xs">from {{ event.from_status }}</span>{% endif %}
+                  {% if event.source and event.source != 'manual' %}<span class="text-slate-600 text-xs italic">via {{ event.source }}</span>{% endif %}
+                </div>
+                <span class="text-[11px] font-mono text-slate-500">{{ event.timestamp[:16] | replace("T", " ") }}</span>
+              </li>
+              {% endfor %}
+            </ol>
+            {% else %}
+            <p class="text-[13px] text-slate-500">No pipeline events yet.</p>
+            {% endif %}
+          </section>
 
-      <!-- Pipeline timeline -->
-      <div class="bg-slate-800/40 rounded-lg border border-slate-700 p-3">
-        <h3 class="text-xs font-semibold text-slate-400 mb-2">Pipeline Timeline</h3>
-        {% if events %}
-          <ol class="relative border-l border-slate-700 ml-3 space-y-3">
-            {% for event in events %}
-            <li class="ml-4">
-              <div class="absolute -left-1.5 mt-1.5 h-3 w-3 rounded-full bg-indigo-500 border-2 border-slate-900"></div>
-              <div class="flex items-center gap-2 text-xs">
-                <span class="text-slate-400">{{ event.timestamp[:16] | replace("T", " ") }}</span>
-                <span class="text-slate-600">&bull;</span>
-                {% if event.from_status %}
-                  <span class="text-slate-500">{{ event.from_status }}</span>
-                  <span class="text-slate-600">&rarr;</span>
+          {# Sources — FULL list (moved out of triage). KEEP direct-link badge include. #}
+          {% if sources_list %}
+          <section>
+            <h3 class="text-[11px] font-semibold uppercase tracking-wider text-slate-500 mb-2.5">
+              Sources{% if sources_list | length > 1 %} <span class="text-slate-600">· {{ sources_list | length }}</span>{% endif %}
+            </h3>
+            <div class="flex flex-wrap gap-1.5">
+              {% for i in range(sources_list | length) %}
+                {% set src_name = sources_list[i] %}
+                {% set src_url = urls_list[i] if i < urls_list | length else None %}
+                {% if src_url %}
+                  <a href="{{ src_url }}" target="_blank" rel="noopener noreferrer"
+                     class="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[13px] bg-indigo-500/15 text-indigo-300 hover:text-indigo-200 border border-indigo-500/40">{{ src_name }} &rarr;</a>
+                {% else %}
+                  <span class="px-2.5 py-1 rounded-md text-[13px] bg-slate-800 text-slate-400 border border-slate-700">{{ src_name }}</span>
                 {% endif %}
-                <span class="text-slate-200 font-medium">{{ event.to_status }}</span>
-                {% if event.source != 'manual' %}
-                  <span class="text-slate-600 italic">via {{ event.source }}</span>
-                {% endif %}
-              </div>
-            </li>
-            {% endfor %}
-          </ol>
-        {% else %}
-          <p class="text-xs text-slate-500">No pipeline events yet.</p>
-        {% endif %}
+              {% endfor %}
+              {% include "jobs/_direct_link_badge.html" %}
+            </div>
+          </section>
+          {% endif %}
+
+          {# Reference dates. #}
+          <section>
+            <h3 class="text-[11px] font-semibold uppercase tracking-wider text-slate-500 mb-2.5">Dates</h3>
+            <dl class="space-y-1.5">
+              <div class="flex items-baseline gap-3"><dt class="w-20 flex-none text-[11px] uppercase tracking-wider text-slate-500">Posted</dt><dd class="text-[11px] font-mono text-slate-400">{{ (job.posted_date | local_date) if job.posted_date else "—" }}</dd></div>
+              <div class="flex items-baseline gap-3"><dt class="w-20 flex-none text-[11px] uppercase tracking-wider text-slate-500">First seen</dt><dd class="text-[11px] font-mono text-slate-400">{{ (job.first_seen | local_date) if job.first_seen else "—" }}</dd></div>
+              <div class="flex items-baseline gap-3"><dt class="w-20 flex-none text-[11px] uppercase tracking-wider text-slate-500">Last seen</dt><dd class="text-[11px] font-mono {{ 'text-amber-400' if (job.is_stale or job.expiry_status == 'expired') else 'text-slate-400' }}">{{ (job.last_seen | local_date) if job.last_seen else "—" }}</dd></div>
+            </dl>
+          </section>
+        </aside>
       </div>
-
-      <!-- Notes panel -->
-      {% include "jobs/_notes_panel.html" %}
-
-      <!-- Action bar: Collapse Full Detail button (bottom) -->
-      <div class="flex items-center gap-3">
-        <button type="button"
-                hx-get="{{ url_for('jobs.expand', dedup_key=job.dedup_key) }}"
-                hx-target="closest tr"
-                hx-swap="outerHTML"
-                class="px-3 py-1 bg-slate-700 hover:bg-slate-600 text-slate-300 text-xs rounded transition-colors">
-          Collapse Full Detail
-        </button>
-      </div>
-
     </div>
   </td>
 </tr>

@@ -65,6 +65,9 @@ class TestFilterBar:
         page.wait_for_function("typeof htmx !== 'undefined'", timeout=10000)
         page.wait_for_load_state("networkidle")
 
+        # Redesign: status pills live inside the Status dropdown popover — open it first.
+        page.locator("#status-dd > button").click()
+
         # Click the visible span label (the hidden checkbox drives the filter via JS)
         reviewing_span = page.locator("span.status-pill-label").filter(has_text="Reviewing")
         reviewing_span.click()
@@ -83,6 +86,9 @@ class TestFilterBar:
         page.goto(f"{live_server}/jobs")
         page.wait_for_function("typeof htmx !== 'undefined'", timeout=10000)
         page.wait_for_load_state("networkidle")
+
+        # Redesign: freshness toggles live inside the Filters popover — open it first.
+        page.locator("#filters-dd > button").click()
 
         biz3_btn = page.locator("#filter-biz-3")
         expect(biz3_btn).to_be_visible()
@@ -106,6 +112,9 @@ class TestFilterBar:
         page.goto(f"{live_server}/jobs")
         page.wait_for_function("typeof htmx !== 'undefined'", timeout=10000)
 
+        # Redesign: freshness toggles live inside the Filters popover — open it first.
+        page.locator("#filters-dd > button").click()
+
         biz3_btn = page.locator("#filter-biz-3")
         biz3_btn.click()
         page.wait_for_load_state("networkidle")
@@ -125,6 +134,9 @@ class TestFilterBar:
         """Selecting 'posted within' while freshness is active clears freshness."""
         page.goto(f"{live_server}/jobs")
         page.wait_for_function("typeof htmx !== 'undefined'", timeout=10000)
+
+        # Redesign: freshness toggles live inside the Filters popover — open it first.
+        page.locator("#filters-dd > button").click()
 
         biz3_btn = page.locator("#filter-biz-3")
         biz3_btn.click()
@@ -161,7 +173,9 @@ class TestFilterBar:
         )
         assert "OldCo" not in default_content, "Rejected job should not appear in default view"
 
-        # Enable show_hidden and wait for the HTMX /jobs/table response
+        # Enable show_hidden and wait for the HTMX /jobs/table response.
+        # Redesign: show_hidden lives inside the Filters popover — open it first.
+        page.locator("#filters-dd > button").click()
         show_hidden_cb = page.locator("input[name='show_hidden']")
         with page.expect_response(lambda r: "/jobs/table" in r.url):
             show_hidden_cb.click()
@@ -212,7 +226,10 @@ class TestDOMIntegrity:
         page.goto(f"{live_server}/jobs")
 
         expect(page.locator("#filter-form")).to_be_visible()
+        # Tier-1 controls are always visible.
         expect(page.locator("#filter-posted-within")).to_be_visible()
+        # Redesign: advanced controls live inside the Filters popover — open it.
+        page.locator("#filters-dd > button").click()
         expect(page.locator("#filter-biz-1")).to_be_visible()
         expect(page.locator("#filter-biz-3")).to_be_visible()
         expect(page.locator("input[name='show_hidden']")).to_be_visible()

@@ -255,8 +255,10 @@ class TestJobBoardRoutes:
         )
         assert response.status_code == 200
         data = response.data.decode()
-        # Accordion should show description and links
-        assert "ML models" in data or "Acme Corp" in data
+        # Triage accordion row renders. Redesign: title/company live on the compact
+        # row and are not repeated here — assert the expanded row + a triage control.
+        assert 'colspan="7"' in data
+        assert "Collapse" in data
 
     def test_jobs_expand_returns_404_for_unknown_key(self, jobs_client):
         """GET /jobs/<unknown>/expand returns 404."""
@@ -477,14 +479,14 @@ class TestJobBoardRoutes:
         assert response.status_code == 404
 
     def test_jobs_detail_inline_contains_collapse_full_detail_button(self, jobs_client):
-        """GET /jobs/<key>/detail-inline returns partial with Collapse Full Detail HTMX button."""
+        """GET /jobs/<key>/detail-inline returns partial with the Back-to-triage button wired to /expand."""
         response = jobs_client.get(
             "/jobs/acme%7Cdata-scientist%7Cremote/detail-inline", headers={"HX-Request": "true"}
         )
         assert response.status_code == 200
         data = response.data.decode()
-        # Must contain the Collapse Full Detail button wired to /expand route
-        assert "Collapse Full Detail" in data
+        # Must contain the back-to-triage button wired to /expand route
+        assert "Back to triage" in data
         assert "detail-inline" not in data.replace(
             "/detail-inline", "ROUTE"
         )  # button points to /expand not /detail-inline
@@ -501,7 +503,7 @@ class TestJobBoardRoutes:
         assert response.status_code == 200
         data = response.data.decode()
         # Must contain pipeline timeline section
-        assert "Pipeline Timeline" in data
+        assert "Pipeline timeline" in data
 
     def test_jobs_expand_row_has_toggle_data_attributes(self, jobs_client):
         """GET /jobs/table renders compact rows with data-expand-url and data-collapse-url for toggle logic."""
@@ -566,12 +568,14 @@ class TestJobBoardRoutes:
         assert 'onclick="event.stopPropagation()"' not in data
 
     def test_jobs_status_cell_uses_high_contrast_background(self, jobs_client):
-        """GET /jobs/table renders status dropdowns with bg-slate-700 (not bg-slate-800) for contrast."""
+        """GET /jobs/table renders status dropdowns on the inset field surface
+        (redesign: bg-slate-950 + border-slate-600 + indigo focus ring)."""
         response = jobs_client.get("/jobs/table", headers={"HX-Request": "true"})
         assert response.status_code == 200
         data = response.data.decode()
-        # Status dropdown must use visible bg-slate-700 (not near-invisible bg-slate-800)
-        assert "bg-slate-700" in data
+        # Status dropdown uses the inset field colour with a visible border.
+        assert "bg-slate-950" in data
+        assert "border-slate-600" in data
 
 
 # ---------------------------------------------------------------------------
@@ -1143,14 +1147,19 @@ def multi_source_client(app_with_multi_source_job):
 
 class TestSourceCountBadge:
     def test_multi_source_job_shows_source_count_badge_in_accordion(self, multi_source_client):
-        """GET /jobs/<key>/expand shows '2 sources' badge for merged multi-source jobs."""
+        """GET /jobs/<key>/detail-inline shows the source count for merged jobs.
+
+        Redesign: the full source list moved from the triage row to the deep-dive
+        detail tier, where multi-source jobs render a 'Sources · N' count.
+        """
         response = multi_source_client.get(
-            "/jobs/acme%7Cdata-scientist%7Cremote/expand", headers={"HX-Request": "true"}
+            "/jobs/acme%7Cdata-scientist%7Cremote/detail-inline", headers={"HX-Request": "true"}
         )
         assert response.status_code == 200
         data = response.data.decode()
-        # Multi-source badge should appear in expanded view
-        assert "2 sources" in data
+        # Multi-source count appears beside the Sources heading.
+        assert "Sources" in data
+        assert "· 2" in data
 
     def test_single_source_job_does_not_show_source_count_badge(self, multi_source_client):
         """GET /jobs/<key>/expand does NOT show source count badge for single-source jobs."""
@@ -1164,9 +1173,9 @@ class TestSourceCountBadge:
         assert "sources" not in data or "greenhouse" in data  # sources list present but no badge
 
     def test_multi_source_job_shows_all_source_links(self, multi_source_client):
-        """GET /jobs/<key>/expand shows all source URLs as clickable links for merged jobs."""
+        """GET /jobs/<key>/detail-inline shows all source URLs as links (redesign: sources live in detail)."""
         response = multi_source_client.get(
-            "/jobs/acme%7Cdata-scientist%7Cremote/expand", headers={"HX-Request": "true"}
+            "/jobs/acme%7Cdata-scientist%7Cremote/detail-inline", headers={"HX-Request": "true"}
         )
         assert response.status_code == 200
         data = response.data.decode()
@@ -1175,14 +1184,18 @@ class TestSourceCountBadge:
         assert "glassdoor" in data
 
     def test_multi_source_job_shows_enrichment_indicator(self, multi_source_client):
-        """GET /jobs/<key>/expand shows subtle enrichment indicator for multi-source jobs."""
+        """GET /jobs/<key>/detail-inline surfaces a merge indicator for multi-source jobs.
+
+        Redesign: the old sparkle glyph is replaced by the 'Sources · N' count that
+        only appears when a job merged more than one source.
+        """
         response = multi_source_client.get(
-            "/jobs/acme%7Cdata-scientist%7Cremote/expand", headers={"HX-Request": "true"}
+            "/jobs/acme%7Cdata-scientist%7Cremote/detail-inline", headers={"HX-Request": "true"}
         )
         assert response.status_code == 200
         data = response.data.decode()
-        # Enrichment sparkle indicator should appear for multi-source jobs
-        assert "&#10024;" in data or "sparkle" in data.lower() or "sources" in data
+        # Multi-source merge indicator (the count beside Sources).
+        assert "· 2" in data
 
 
 # ---------------------------------------------------------------------------
@@ -1873,14 +1886,17 @@ class TestDataQuality:
         assert "<li" in data or "<p" in data or "<h4" in data
 
     def test_expand_jd_full_renders_formatted(self, entity_client):
-        """Expanded row jd_full uses format_description, not whitespace-pre-wrap."""
+        """jd_full uses format_description, not whitespace-pre-wrap.
+
+        Redesign: the full JD moved from the triage row to the deep-dive detail tier.
+        """
         response = entity_client.get(
-            "/jobs/test%7Centity-job%7Cremote/expand", headers={"HX-Request": "true"}
+            "/jobs/test%7Centity-job%7Cremote/detail-inline", headers={"HX-Request": "true"}
         )
         assert response.status_code == 200
         data = response.data.decode()
-        # jd_full section should exist
-        assert "Job Description (full)" in data
+        # jd_full section should exist (redesign heading: "Job description")
+        assert "Job description" in data
         # Should NOT have double-encoded &amp;#39; — that would show as literal &#39; in browser
         # (format_description decodes entities before re-escaping)
         assert "&amp;#39;" not in data
@@ -1894,15 +1910,15 @@ class TestDataQuality:
         )
         assert response.status_code == 200
         data = response.data.decode()
-        assert "Full Job Description" in data
+        assert "Job description" in data
         # No double-encoded entities (e.g., &amp;#39; would display as literal &#39; in browser)
         assert "&amp;#39;" not in data
         assert "&amp;amp;" not in data
 
     def test_expand_shows_full_jd_content(self, entity_client):
-        """Expanded row jd_full shows the actual content, not truncated or empty."""
+        """jd_full shows the actual content, not truncated or empty (redesign: in detail tier)."""
         response = entity_client.get(
-            "/jobs/test%7Centity-job%7Cremote/expand", headers={"HX-Request": "true"}
+            "/jobs/test%7Centity-job%7Cremote/detail-inline", headers={"HX-Request": "true"}
         )
         assert response.status_code == 200
         data = response.data.decode()
@@ -1916,11 +1932,11 @@ class TestDataQuality:
         extracted cleanly. The tag strings themselves must not appear in the rendered output.
         """
         response = html_tag_client.get(
-            "/jobs/test%7Chtml-tag-job%7Cremote/expand", headers={"HX-Request": "true"}
+            "/jobs/test%7Chtml-tag-job%7Cremote/detail-inline", headers={"HX-Request": "true"}
         )
         assert response.status_code == 200
         data = response.data.decode()
-        # Text content is preserved
+        # Text content is preserved (redesign: JD/description render in the detail tier)
         assert "Job overview" in data
         assert "Build systems" in data
         # Entity-encoded tag artifacts must NOT appear in the rendered HTML
@@ -1935,14 +1951,14 @@ class TestDataQuality:
         must be suppressed in the expanded row so users see only the full JD.
         """
         response = entity_client.get(
-            "/jobs/test%7Centity-job%7Cremote/expand", headers={"HX-Request": "true"}
+            "/jobs/test%7Centity-job%7Cremote/detail-inline", headers={"HX-Request": "true"}
         )
         assert response.status_code == 200
         data = response.data.decode()
-        # Description container class must not appear (jd_full is a superset)
+        # Old description container class must not appear
         assert "max-w-4xl" not in data
-        # Full JD section must be present
-        assert "Job Description (full)" in data
+        # Single JD section present (redesign heading: "Job description")
+        assert "Job description" in data
 
     def test_detail_hides_description_when_jd_full_exists(self, entity_client):
         """GAP 2 (detail-inline): Description card absent when jd_full is present.
@@ -1955,13 +1971,11 @@ class TestDataQuality:
         )
         assert response.status_code == 200
         data = response.data.decode()
-        # Full JD section must be present
-        assert "Full Job Description" in data
-        # The Description card h3 must not appear as a standalone section
-        # (the word "Description" only appears inside "Full Job Description")
-        # Count occurrences: "Full Job Description" contains "Description", but
-        # a standalone "Description" h3 header must not exist
-        assert "<h3" not in data or "Full Job Description" in data
+        # JD section present (redesign heading: "Job description")
+        assert "Job description" in data
+        # Description is hidden when jd_full exists: the redesign renders only the
+        # single (longer) jd_display, so the short description text is absent.
+        assert "Work at AT" not in data
 
     def test_expand_shows_description_when_no_jd_full(self, html_tag_client):
         """GAP 2 (description-only): Description renders when jd_full is absent.
@@ -1970,13 +1984,13 @@ class TestDataQuality:
         must NOT appear since there is no jd_full to show.
         """
         response = html_tag_client.get(
-            "/jobs/test%7Chtml-tag-job%7Cremote/expand", headers={"HX-Request": "true"}
+            "/jobs/test%7Chtml-tag-job%7Cremote/detail-inline", headers={"HX-Request": "true"}
         )
         assert response.status_code == 200
         data = response.data.decode()
-        # Description text content is rendered
+        # Description text content is rendered (redesign: in the detail tier's JD card)
         assert "Job overview" in data
-        # Full JD section must NOT appear (no jd_full)
+        # Old full-JD summary label must NOT appear (no jd_full)
         assert "Job Description (full)" not in data
 
 
@@ -2062,25 +2076,29 @@ class TestButtonDisableAndSpinner:
         html = response.data.decode()
 
         # Count hx-disable-elt occurrences — expect at least 4
-        # (Collapse, View Full Detail, Re-score, Archive)
+        # (Open full detail, Re-score, Archive, Collapse)
         import re
 
         disable_count = len(re.findall(r'hx-disable-elt="this"', html))
         assert disable_count >= 4, f"Expected >= 4 hx-disable-elt, found {disable_count}"
 
     def test_expanded_row_buttons_have_spinners(self, client_with_scored_job):
-        """All action buttons in expanded row have htmx-indicator spinners."""
+        """Triage action buttons signal in-flight state via hx-disable-elt.
+
+        Redesign: the per-button inline spinners on the quick actions were replaced
+        by hx-disable-elt (the overflow menu is a native <details>, no new JS); the
+        long-running 'Score with JD' action keeps its spinner in the unscored branch.
+        """
         response = client_with_scored_job.get(
             "/jobs/acme%7Cdata-scientist%7Cremote/expand", headers={"HX-Request": "true"}
         )
         assert response.status_code == 200
         html = response.data.decode()
 
-        # Count spinner indicators — expect at least 4
         import re
 
-        spinner_count = len(re.findall(r"htmx-indicator", html))
-        assert spinner_count >= 4, f"Expected >= 4 htmx-indicator, found {spinner_count}"
+        disable_count = len(re.findall(r'hx-disable-elt="this"', html))
+        assert disable_count >= 4, f"Expected >= 4 hx-disable-elt, found {disable_count}"
 
     def test_collapse_button_has_disable(self, client_with_scored_job):
         """Collapse button specifically has hx-disable-elt."""
@@ -2097,16 +2115,16 @@ class TestButtonDisableAndSpinner:
         assert 'hx-disable-elt="this"' in button_section, "Collapse button missing hx-disable-elt"
 
     def test_view_full_detail_has_disable(self, client_with_scored_job):
-        """View Full Detail button has hx-disable-elt."""
+        """Open full detail button has hx-disable-elt."""
         response = client_with_scored_job.get(
             "/jobs/acme%7Cdata-scientist%7Cremote/expand", headers={"HX-Request": "true"}
         )
         html = response.data.decode()
-        detail_idx = html.find("View Full Detail")
-        assert detail_idx > 0, "View Full Detail button not found"
+        detail_idx = html.find("Open full detail")
+        assert detail_idx > 0, "Open full detail button not found"
         button_start = html.rfind("<button", 0, detail_idx)
         button_section = html[button_start : detail_idx + 50]
-        assert 'hx-disable-elt="this"' in button_section, "View Full Detail missing hx-disable-elt"
+        assert 'hx-disable-elt="this"' in button_section, "Open full detail missing hx-disable-elt"
 
 
 class TestSmoothScroll:
@@ -2361,14 +2379,16 @@ class TestUXPolish:
     # --- UX-03: jd_full collapsible display ---
 
     def test_expand_with_jd_full_shows_details(self, jd_full_client):
-        """Expanded row shows <details> section when job has jd_full."""
+        """The full JD renders in the deep-dive detail tier when a job has jd_full.
+
+        Redesign: the JD body moved out of the triage row into detail-inline.
+        """
         response = jd_full_client.get(
-            "/jobs/test%7Cjd-full-job%7Cremote/expand", headers={"HX-Request": "true"}
+            "/jobs/test%7Cjd-full-job%7Cremote/detail-inline", headers={"HX-Request": "true"}
         )
         assert response.status_code == 200
         data = response.data.decode()
-        assert "<details" in data
-        assert "Job Description (full)" in data
+        assert "Job description" in data
         assert "full job description for testing" in data
 
     def test_expand_without_jd_full_no_details(self, jobs_client):
@@ -2381,14 +2401,14 @@ class TestUXPolish:
         assert "Job Description (full)" not in data
 
     def test_detail_inline_with_jd_full_shows_details(self, jd_full_client):
-        """Detail-inline view shows <details> section when job has jd_full."""
+        """Detail-inline view shows the JD card when a job has jd_full."""
         response = jd_full_client.get(
             "/jobs/test%7Cjd-full-job%7Cremote/detail-inline", headers={"HX-Request": "true"}
         )
         assert response.status_code == 200
         data = response.data.decode()
-        assert "<details" in data
-        assert "Full Job Description" in data
+        assert "Job description" in data
+        assert "full job description for testing" in data
 
     # --- UX-01: Spinner loading indicators ---
 
@@ -2578,12 +2598,15 @@ class TestSaveJD:
         )
         assert response.status_code == 404
 
-    def test_save_jd_response_contains_jd_saved_toast(self, jobs_client):
+    def test_save_jd_response_rerenders_triage_row(self, jobs_client):
+        """save-jd re-renders the triage row. Redesign dropped the inline 'JD saved'
+        toast; a saved-but-unscored job re-renders to the not-scored triage state."""
         response = jobs_client.post(
             "/jobs/acme%7Cdata-scientist%7Cremote/save-jd",
             data={"jd_text": "Full JD for toast test."},
         )
-        assert b"JD saved" in response.data
+        assert response.status_code == 200
+        assert b"Not scored yet" in response.data
 
     def test_jd_edit_form_returns_200(self, jd_full_client):
         response = jd_full_client.get("/jobs/test%7Cjd-full-job%7Cremote/jd-edit-form")
@@ -2609,13 +2632,14 @@ class TestSaveJD:
         assert 'type="button"' in data
         assert 'hx-include="closest form"' in data
 
-    def test_edit_button_has_prevent_default(self, jd_full_client):
-        """Edit button inside summary must preventDefault to avoid details toggle."""
+    def test_unscored_triage_shows_jd_scoring_form(self, jd_full_client):
+        """Redesign: inline JD editing moved out of the triage row (the old edit-in-
+        <summary> button is gone). An unscored job's triage exposes the JD scoring form."""
         response = jd_full_client.get(
             "/jobs/test%7Cjd-full-job%7Cremote/expand", headers={"HX-Request": "true"}
         )
         data = response.data.decode()
-        assert "preventDefault" in data
+        assert "Score with JD" in data
 
 
 # ---------------------------------------------------------------------------
@@ -3077,12 +3101,12 @@ class TestCompositeScoreCell:
         assert ">30<" in cell, f"composite '30' not rendered in cell: {cell[:300]}"
 
     def test_apply_row_uses_green_color(self, scored_client):
-        """Apply classification renders with text-green-400."""
+        """Strong-fit chip (composite >= 24) renders emerald (redesign 3-band map)."""
         response = scored_client.get("/jobs")
         html = response.data.decode()
         idx = html.find('id="score-ax%7Cmax-apply%7Cremote"')
         cell = html[idx : idx + 800]
-        assert "text-green-400" in cell
+        assert "text-emerald-400" in cell
 
     def test_consider_row_uses_amber_color(self, scored_client):
         response = scored_client.get("/jobs")

@@ -1,352 +1,272 @@
-{# Accordion expansion row. Inserted below the compact row via HTMX afterend swap. #}
-{% set sources_list = job.sources | from_json if job.sources else [] %}
+{# ===========================================================================
+   jobs/_row_expanded.html  —  TRIAGE TIER (tier 1 of 2)
+   ===========================================================================
+   Inserted into the placeholder <tr> when a compact row is clicked
+   (GET /jobs/<key>/expand → outerHTML swap of nextElementSibling).
+
+   DESIGN DECISION #1 — "two expansion tiers, distinct (no content overlap)":
+     The OLD accordion crammed EVERYTHING in here (full JD, full AI analysis incl.
+     talking points + resume skills, all sources, every action). The redesign
+     splits triage from deep-dive:
+       • THIS tier answers ONE question — "is this worth my time?" — and shows
+         only: low-fit nudge · fit breakdown · tight strengths/gaps (≤4 each) ·
+         a decision rail (status + apply + overflow) · reference dates.
+       • The DEEP DIVE (jobs/_row_detail.html, reached via "View Full Detail")
+         owns the full JD, full AI analysis (+ talking points + resume skills),
+         pipeline timeline, notes, and all sources.
+     Talking points, resume skills, JD body, timeline, notes, source list were
+     all MOVED OUT of this file ON PURPOSE — they are NOT deleted, they live one
+     tier down. Do not re-add them here.
+
+   PRESERVED behaviors / contracts (keep exact):
+     • "View Full Detail"  -> hx-get jobs.detail_inline, target closest tr, outerHTML.
+     • "Re-score"          -> hx-post jobs.rescore,       target closest tr, outerHTML
+                              (its response carries the OOB score-cell swap that
+                              drives the client re-sort — unchanged).
+     • "Archive"           -> hx-post jobs.update_status hx-vals pipeline_status=archived,
+                              target #status-cell-<key>, hx-on::after-request="archiveRow(this)".
+     • "Collapse"          -> hx-get jobs.collapse, target closest tr, outerHTML.
+     • Unscored job        -> the JD paste/save/score form is KEPT (a job can only
+                              be triaged once scored) — see the {% else %} branch.
+#}
+
+{% import "components/_score_macros.html" as sm %}
+{% set composite = sm.composite(job.sub_scores_json) | int %}
+{% set scored = job.sub_scores_json is not none and job.sub_scores_json != '' %}
+{% set sub_scores = job.sub_scores_json | from_json if job.sub_scores_json else {} %}
+{% set analysis = job.fit_analysis | from_json if job.fit_analysis else {} %}
+
+{# Band — same 3-band split as the score chip (⚑ see _score_cell.html FLAG). #}
+{% set band = 'success' if composite >= 24 else ('warning' if composite >= 17 else 'error') %}
+
+{# Apply target. ⚑ GUESS — the schema has no single `apply_url`; we use the FIRST
+   entry of job.source_urls (the primary listing). PORTER: confirm this is the
+   right "apply" destination, or substitute your real field. #}
 {% set urls_list = job.source_urls | from_json if job.source_urls else [] %}
+{% set apply_url = urls_list[0] if urls_list else None %}
+
 {% set first_seen_date = (job.first_seen | local_date) if job.first_seen else "—" %}
-{% set last_seen_date = (job.last_seen | local_date) if job.last_seen else "—" %}
-{% set posted_date = (job.posted_date | local_date) if job.posted_date else "—" %}
+{% set last_seen_date  = (job.last_seen  | local_date) if job.last_seen  else "—" %}
+{% set posted_date     = (job.posted_date| local_date) if job.posted_date else "—" %}
+{% set jd_key_safe = job.dedup_key | urlencode | replace('%', '') %}
 
-<tr class="border-b border-slate-700 bg-slate-800/40">
-  <td colspan="7" class="px-4 py-3">
-    <div class="flex gap-4">
-    {# Left column: main job content #}
-    <div class="flex-1 min-w-0 grid grid-cols-1 gap-3">
+{# DESIGN DECISION: the expanded panel sits on slate-850 (one plane lighter than
+   the table's slate-800) so the open row reads as a distinct surface. #}
+<tr class="border-b border-slate-700 bg-slate-850" data-row-expanded="triage">
+  <td colspan="7" class="px-4 pt-5 pb-5">
 
-      <!-- Header row: dates + stale badge + expiry badge + archetype badge -->
-      <div class="flex items-center text-xs text-slate-500">
-        <span>
-          Posted: <span class="text-slate-400">{{ posted_date }}</span>
-          &nbsp;&bull;&nbsp;
-          First seen: <span class="text-slate-400">{{ first_seen_date }}</span>
-          &nbsp;&bull;&nbsp;
-          Last seen: <span class="text-slate-400">{{ last_seen_date }}</span>
-          {% if job.is_stale %}
-          &nbsp;&bull;&nbsp;
-          <span class="text-amber-500 border border-amber-500/50 rounded px-1">Stale</span>
-          {% endif %}
-          {% if job.expiry_status == 'expired' %}
-          &nbsp;&bull;&nbsp;
-          <span class="text-red-400 border border-red-500/50 rounded px-1">Expired</span>
-          {% endif %}
-        </span>
-      </div>
+    {# Error banner (from paste_jd / rescore) — KEPT. #}
+    {% if error %}
+    <div class="bg-red-900/50 border border-red-700/50 rounded-md px-3 py-2 text-xs text-red-300 mb-4">{{ error }}</div>
+    {% endif %}
 
-      <!-- Error banner (from paste_jd / rescore routes) -->
-      {% if error %}
-      <div class="bg-red-900/50 border border-red-700/50 rounded px-3 py-2 text-xs text-red-300">
-        {{ error }}
-      </div>
-      {% endif %}
+    {# Low-fit nudge — DESIGN DECISION: now driven by the SCORE BAND (weak = ≤16),
+       not job.classification, so the triage signal matches the chip the user just
+       saw. Only shown for scored + weak rows. #}
+    {% if scored and band == 'error' %}
+    <div class="flex items-start gap-2 rounded-md border border-red-400/40 bg-red-400/10 px-3 py-2 mb-5">
+      <span class="mt-1.5 w-1.5 h-1.5 rounded-full bg-red-400 flex-none"></span>
+      <p class="text-[13px] text-red-400">Low fit ({{ composite }}/30). Likely a skip — scan the gaps below before spending time here.</p>
+    </div>
+    {% endif %}
 
-      <!-- Low-priority warning banner (v3.0: classification in skip/reject) -->
-      {% if job.classification in ('skip', 'reject') %}
-      <div class="bg-amber-900/30 border border-amber-700/50 rounded px-3 py-2 text-xs text-amber-300">
-        Low fit ({{ job.classification }}). This job may not be a strong match for your profile.
-      </div>
-      {% endif %}
+    <div class="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_300px] gap-x-10 gap-y-6">
 
-      <!-- Description (hidden when full JD is available — jd_full is a superset) -->
-      {% if job.description and not job.jd_full %}
-      <div class="text-xs text-slate-300 leading-relaxed max-w-4xl">
-        {{ job.description | format_description }}
-      </div>
-      {% endif %}
+      {# ===================== LEFT — "the read" ===================== #}
+      <div class="space-y-5 min-w-0">
+      {% if scored %}
+        {# Fit breakdown — 6 sub-scores as thin tracks. DESIGN DECISION: 3 fill
+           colours (≥4 emerald / =3 amber / ≤2 red); the old extra orange-for-2
+           tier was dropped to match the chip's 3-band language. #}
+        <section>
+          <h4 class="text-[11px] font-semibold uppercase tracking-wider text-slate-500 mb-2.5">Fit breakdown</h4>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-2">
+            {% for key, label in [
+              ('title_fit','Title fit'), ('location_fit','Location'), ('comp_fit','Compensation'),
+              ('domain_match','Domain'), ('seniority_match','Seniority'), ('skills_match','Skills')
+            ] %}
+              {% set v = sub_scores.get(key, 0) | int %}
+              {% set fill = 'bg-emerald-500' if v >= 4 else ('bg-amber-500' if v == 3 else 'bg-red-500') %}
+              <div class="grid grid-cols-[84px_1fr_16px] items-center gap-2.5">
+                <span class="text-xs text-slate-400">{{ label }}</span>
+                <span class="h-1.5 rounded-full bg-slate-950 overflow-hidden">
+                  <span class="block h-full rounded-full {{ fill }}" style="width: {{ (v / 5 * 100) }}%"></span>
+                </span>
+                <span class="text-xs text-slate-300 text-right tabular-nums">{{ v }}</span>
+              </div>
+            {% endfor %}
+          </div>
+        </section>
 
-      <!-- JD Section: three-state (no JD / saved not scored / saved and scored) -->
-      {% set jd_key_safe = job.dedup_key | urlencode | replace('%', '') %}
-      {# Display the fullest JD available. jd_full is capped at write time and
-         the raw `description` column is sometimes longer (jd_full is NOT always
-         a superset), so render whichever is longer. The scorer keeps its own
-         independent prompt cap, so this only affects what the reader sees. #}
-      {% set _jdf = job.jd_full or '' %}
-      {% set _desc = job.description or '' %}
-      {% set jd_display = _desc if (_desc | length) > (_jdf | length) else _jdf %}
-      <div id="jd-section-{{ jd_key_safe }}">
-
-        {% if jd_saved %}
-        <div id="jd-toast-{{ jd_key_safe }}"
-             class="bg-emerald-900/50 border border-emerald-700/50 rounded px-3 py-1.5 text-xs text-emerald-300 mt-2">
-          JD saved
-          <script>
-            setTimeout(function() {
-              var el = document.getElementById('jd-toast-{{ jd_key_safe }}');
-              if (el) el.remove();
-            }, 3000);
-          </script>
-        </div>
+        {# Strengths / Gaps — DESIGN DECISION: capped at 4 each (triage glance).
+           Talking points + resume skills intentionally NOT here (deep-dive tier). #}
+        {% if analysis.strengths or analysis.gaps %}
+        <section class="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-4">
+          <div>
+            <h4 class="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-emerald-400 mb-2">
+              <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>Strengths
+            </h4>
+            <ul class="space-y-1">
+              {% for s in (analysis.strengths or [])[:4] %}
+              <li class="flex gap-2 text-[13px] text-slate-300 leading-snug"><span class="text-emerald-400/70 mt-px">+</span>{{ s }}</li>
+              {% endfor %}
+            </ul>
+          </div>
+          <div>
+            <h4 class="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-amber-400 mb-2">
+              <span class="w-1.5 h-1.5 rounded-full bg-amber-400"></span>Gaps
+            </h4>
+            <ul class="space-y-1">
+              {% for g in (analysis.gaps or [])[:4] %}
+              <li class="flex gap-2 text-[13px] text-slate-300 leading-snug"><span class="text-amber-400/70 mt-px">&minus;</span>{{ g }}</li>
+              {% endfor %}
+            </ul>
+          </div>
+        </section>
         {% endif %}
 
-        {% if job.jd_full %}
-          {# --- JD Display mode (saved, possibly scored) --- #}
-          <details class="border-t border-slate-700 pt-2">
-            <summary class="text-xs text-slate-400 cursor-pointer hover:text-slate-300 select-none flex items-center gap-2">
-              Job Description (full)
-              {% if job.classification is none %}
-              <span class="text-xs text-amber-400 border border-amber-500/50 rounded px-1">Saved — not scored</span>
-              {% endif %}
-              <button type="button"
-                      hx-get="{{ url_for('jobs.jd_edit_form', dedup_key=job.dedup_key) }}"
-                      hx-target="#jd-section-{{ jd_key_safe }}"
-                      hx-swap="outerHTML"
-                      hx-on:click="event.stopPropagation(); event.preventDefault()"
-                      class="px-2 py-0.5 bg-slate-700 hover:bg-slate-600 text-slate-300 text-xs rounded ml-auto">
-                Edit
-              </button>
-              {% if job.classification is none %}
-              <button type="button"
-                      hx-post="{{ url_for('jobs.rescore', dedup_key=job.dedup_key) }}"
-                      hx-target="closest tr"
-                      hx-swap="outerHTML"
-                      hx-disable-elt="this"
-                      hx-on:click="event.stopPropagation(); event.preventDefault()"
-                      class="px-2 py-0.5 bg-violet-600 hover:bg-violet-500 text-white text-xs rounded">
-                Score now
-                <span class="htmx-indicator ml-1 inline-flex items-center gap-1">
-                  <span class="inline-block w-3 h-3 border-2 border-slate-400 border-t-transparent rounded-full animate-spin"></span>
-                </span>
-              </button>
-              {% endif %}
-            </summary>
-            <div class="mt-2 max-h-96 overflow-y-auto">
-              <div class="text-xs text-slate-300 leading-relaxed">{{ jd_display | format_description }}</div>
-            </div>
-          </details>
-
-        {% else %}
-          {# --- No JD: show paste form with two buttons, each driving its own route --- #}
-          <form class="border-t border-slate-700 pt-2">
-            <p class="text-xs text-slate-500 mb-1">Paste the full job description:</p>
+      {% else %}
+        {# ---- UNSCORED branch — KEPT from the original accordion ----
+           A row can't be triaged until it's scored, so the JD paste/save/score
+           affordance lives here (NOT deleted). Routes + targets preserved:
+             save_jd / paste_jd -> target "closest tr", outerHTML. #}
+        <section>
+          <h4 class="text-[11px] font-semibold uppercase tracking-wider text-slate-500 mb-2">Not scored yet</h4>
+          <p class="text-[13px] text-slate-400 mb-2">Paste the job description to score this listing, then expand again to triage it.</p>
+          <form>
             <textarea name="jd_text" rows="4" placeholder="Paste the full job description here..."
-                      class="w-full bg-slate-900 border border-slate-600 rounded px-3 py-2 text-xs text-slate-100 focus:border-violet-500 focus:outline-none resize-y"></textarea>
-            <div class="flex gap-2 mt-1">
+                      class="w-full bg-slate-950 border border-slate-600 rounded-md px-3 py-2 text-[13px] text-slate-100 focus:border-indigo-500 focus:outline-none resize-y"></textarea>
+            <div class="flex gap-2 mt-2">
               <button type="button"
                       hx-post="{{ url_for('jobs.save_jd', dedup_key=job.dedup_key) }}"
-                      hx-target="closest tr"
-                      hx-swap="outerHTML"
-                      hx-include="closest form"
-                      hx-disable-elt="this"
-                      class="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white text-xs rounded transition-colors disabled:opacity-50">
-                Save JD
-                <span class="htmx-indicator ml-1 inline-flex items-center gap-1">
-                  <span class="inline-block w-3 h-3 border-2 border-slate-400 border-t-transparent rounded-full animate-spin"></span>
-                </span>
-              </button>
+                      hx-target="closest tr" hx-swap="outerHTML" hx-include="closest form" hx-disable-elt="this"
+                      class="px-3 h-8 inline-flex items-center bg-slate-750 border border-slate-600 hover:bg-slate-700 text-slate-200 text-[13px] rounded-md transition-colors disabled:opacity-50">Save JD</button>
               <button type="button"
                       hx-post="{{ url_for('jobs.paste_jd', dedup_key=job.dedup_key) }}"
-                      hx-target="closest tr"
-                      hx-swap="outerHTML"
-                      hx-include="closest form"
-                      hx-disable-elt="this"
-                      class="px-3 py-1 bg-violet-600 hover:bg-violet-500 text-white text-xs rounded transition-colors disabled:opacity-50">
+                      hx-target="closest tr" hx-swap="outerHTML" hx-include="closest form" hx-disable-elt="this"
+                      class="px-3 h-8 inline-flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-[13px] font-medium rounded-md transition-colors disabled:opacity-50">
                 Score with JD
-                <span class="htmx-indicator ml-1 inline-flex items-center gap-1">
-                  <span class="inline-block w-3 h-3 border-2 border-slate-400 border-t-transparent rounded-full animate-spin"></span>
-                </span>
+                <span class="htmx-indicator inline-block w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
               </button>
             </div>
           </form>
-        {% endif %}
-
-      </div>{# end jd-section #}
-
-      <!-- Sub-score breakdown + AI Fit Analysis (v3.0 Plan 3 Commit D) -->
-      {% set sub_scores = job.sub_scores_json | from_json if job.sub_scores_json else {} %}
-      {% if sub_scores %}
-      <div class="border-t border-slate-700 pt-2 space-y-1.5">
-        <div class="text-slate-400 font-semibold text-xs uppercase tracking-wide mb-1">Fit Breakdown</div>
-        {% for key, label in [
-          ('title_fit', 'Title fit'),
-          ('location_fit', 'Location fit'),
-          ('comp_fit', 'Compensation'),
-          ('domain_match', 'Domain'),
-          ('seniority_match', 'Seniority'),
-          ('skills_match', 'Skills'),
-        ] %}
-          {% set v = sub_scores.get(key, 0) %}
-          {% if v >= 4 %}
-            {% set bar_class = 'bg-green-500' %}
-          {% elif v == 3 %}
-            {% set bar_class = 'bg-amber-500' %}
-          {% elif v == 2 %}
-            {% set bar_class = 'bg-orange-500' %}
-          {% else %}
-            {% set bar_class = 'bg-red-500' %}
-          {% endif %}
-          <div class="flex items-center gap-2 text-xs">
-            <span class="w-24 text-slate-400">{{ label }}</span>
-            <div class="flex-1 bg-slate-900 h-2 rounded overflow-hidden">
-              <div class="h-2 rounded {{ bar_class }}" style="width: {{ (v * 20) }}%"></div>
-            </div>
-            <span class="w-6 text-right text-slate-300">{{ v }}</span>
-          </div>
-        {% endfor %}
-      </div>
+        </section>
       {% endif %}
+      </div>
 
-      {% if job.fit_analysis %}
-        {% set analysis = job.fit_analysis | from_json %}
-        {% if analysis.strengths or analysis.gaps or analysis.resume_priority_skills or analysis.talking_points %}
-        <div class="space-y-2 text-xs border-t border-slate-700 pt-2">
-          <div class="text-slate-400 font-semibold text-xs uppercase tracking-wide mb-1">
-            AI Fit Analysis
-          </div>
-          {% if analysis.strengths %}
-          <div>
-            <span class="text-green-400 font-semibold">Strengths</span>
-            <ul class="list-disc list-inside text-slate-300 mt-1">
-              {% for s in analysis.strengths %}<li>{{ s }}</li>{% endfor %}
-            </ul>
-          </div>
+      {# ===================== RIGHT — "the decision rail" ===================== #}
+      <aside class="lg:border-l lg:border-slate-700/60 lg:pl-8 flex flex-col">
+        <span class="block text-[11px] font-semibold uppercase tracking-wider text-slate-500 mb-2">Status &amp; actions</span>
+
+        {# Actions row: status (fills) + Apply + overflow. Single line, never wraps. #}
+        <div class="flex items-center gap-2">
+          <div class="flex-1 min-w-0">{% include "jobs/_status_cell.html" %}</div>
+
+          {# Apply — opens the listing in a new tab. ⚑ apply_url = first source URL (GUESS). #}
+          {% if apply_url %}
+          <a href="{{ apply_url }}" target="_blank" rel="noopener noreferrer"
+             class="inline-flex h-9 flex-none items-center gap-1.5 rounded-md bg-indigo-600 px-3.5 text-sm font-medium text-white hover:bg-indigo-500 transition-colors">
+            Apply
+            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 5h5v5M19 5l-7 7M12 5H7a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-5"/></svg>
+          </a>
+          {% else %}
+          <span class="inline-flex h-9 flex-none items-center rounded-md bg-slate-800 px-3.5 text-sm font-medium text-slate-600 cursor-not-allowed" title="No listing URL on file">Apply</span>
           {% endif %}
-          {% if analysis.gaps %}
-          <div>
-            <span class="text-amber-400 font-semibold">Gaps</span>
-            <ul class="list-disc list-inside text-slate-300 mt-1">
-              {% for g in analysis.gaps %}<li>{{ g }}</li>{% endfor %}
-            </ul>
-          </div>
-          {% endif %}
-          {% if analysis.talking_points %}
-          <div>
-            <span class="text-sky-400 font-semibold">Talking Points</span>
-            <ul class="list-disc list-inside text-slate-300 mt-1">
-              {% for t in analysis.talking_points %}<li>{{ t }}</li>{% endfor %}
-            </ul>
-          </div>
-          {% endif %}
-          {% if analysis.resume_priority_skills %}
-          <div>
-            <span class="text-blue-400 font-semibold">Resume Priority Skills</span>
-            <div class="flex flex-wrap gap-1 mt-1">
-              {% for skill in analysis.resume_priority_skills %}
-                <span class="px-2 py-0.5 rounded bg-blue-900/50 text-blue-300 border border-blue-700/50">{{ skill }}</span>
-              {% endfor %}
+
+          {# Overflow menu — DESIGN DECISION: Re-score / Archive / Research company
+             collapsed behind a ⋯ button to declutter the rail. Native <details>
+             (no extra JS); opens upward. Each item keeps its original HTMX contract. #}
+          <details class="jc-menu relative flex-none">
+            <summary class="list-none inline-flex items-center justify-center w-9 h-9 rounded-md border border-slate-600 bg-slate-750 text-slate-300 hover:bg-slate-700 hover:text-slate-100 transition-colors cursor-pointer"
+                     aria-label="More actions">
+              <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h.01M12 12h.01M19 12h.01"/></svg>
+            </summary>
+            <div class="absolute right-0 bottom-full mb-1.5 w-48 rounded-lg border border-slate-700 bg-slate-800 shadow-[0_12px_32px_-8px_rgba(0,0,0,0.55)] py-1 z-30">
+              {# Re-score — KEEP target/swap: response carries the OOB score-cell swap. #}
+              {% if job.jd_full %}
+              <button type="button"
+                      hx-post="{{ url_for('jobs.rescore', dedup_key=job.dedup_key) }}"
+                      hx-target="closest tr" hx-swap="outerHTML" hx-disable-elt="this"
+                      class="flex w-full items-center gap-2.5 px-3 py-2 text-[13px] text-slate-300 hover:bg-slate-750 hover:text-slate-100 transition-colors">
+                <svg class="w-4 h-4 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 4v5h.582M20 20v-5h-.581M4.582 9A8 8 0 0118.418 7M19.418 15A8 8 0 015.582 17"/></svg>
+                Re-score
+              </button>
+              {% endif %}
+              {# Archive — KEEP exact: status OOB target + archiveRow() fade-out. #}
+              <button type="button"
+                      aria-label="Archive this job"
+                      hx-post="{{ url_for('jobs.update_status', dedup_key=job.dedup_key) }}"
+                      hx-vals='{"pipeline_status": "archived"}'
+                      hx-target="#status-cell-{{ jd_key_safe }}" hx-swap="innerHTML"
+                      hx-confirm="Archive this job?" hx-disable-elt="this"
+                      hx-on::after-request="archiveRow(this)"
+                      class="flex w-full items-center gap-2.5 px-3 py-2 text-[13px] text-slate-300 hover:bg-slate-750 hover:text-slate-100 transition-colors">
+                <svg class="w-4 h-4 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 8h14M5 8a2 2 0 01-2-2V5a1 1 0 011-1h16a1 1 0 011 1v1a2 2 0 01-2 2M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8M10 12h4"/></svg>
+                Archive
+              </button>
+              {# Research company — KEEP: only when company_id present. #}
+              {% if job.company_id %}
+              <button type="button"
+                      hx-post="{{ url_for('companies.research', company_id=job.company_id) }}"
+                      hx-target="this" hx-swap="outerHTML" hx-disable-elt="this"
+                      class="flex w-full items-center gap-2.5 px-3 py-2 text-[13px] text-slate-300 hover:bg-slate-750 hover:text-slate-100 transition-colors">
+                <svg class="w-4 h-4 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 21l-4.35-4.35M11 17a6 6 0 100-12 6 6 0 000 12z"/></svg>
+                Research company
+              </button>
+              {% endif %}
             </div>
-          </div>
-          {% endif %}
+          </details>
         </div>
-        {% endif %}
-      {% elif job.classification is none %}
-      <!-- Unscored job: explain AI scoring status -->
-      <div class="text-xs text-slate-500 border-t border-slate-700 pt-2">
-        <span class="text-violet-400 font-semibold">No AI score yet.</span>
-        Use "Score All Jobs" on the Dashboard to run v3.0 classification scoring,
-        or paste the job description below to score this job directly.
-      </div>
-      {% endif %}
 
-      <!-- Status dropdown -->
-      <div class="flex items-center gap-3 text-xs">
-        <span class="text-slate-500">Status:</span>
-        {% include "jobs/_status_cell.html" %}
-      </div>
-
-      <!-- Sources with links + source count badge for merged jobs -->
-      {% if sources_list %}
-      <div class="flex flex-wrap gap-2 text-xs items-center">
-        {% if sources_list | length > 1 %}
-        <span class="px-2 py-0.5 rounded-full bg-slate-600 text-slate-300 text-xs font-medium">
-          {{ sources_list | length }} sources
-        </span>
-        <span class="text-slate-500" title="Combined from multiple sources">&#10024;</span>
-        {% endif %}
-        {% for i in range(sources_list | length) %}
-          {% set src_name = sources_list[i] %}
-          {% set src_url = urls_list[i] if i < urls_list | length else None %}
-          {% if src_url %}
-            <a href="{{ src_url }}" target="_blank" rel="noopener noreferrer"
-               class="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-indigo-900/50 text-indigo-300 hover:text-indigo-200 border border-indigo-700/50">
-              {{ src_name }} &rarr;
-            </a>
-          {% else %}
-            <span class="px-2 py-0.5 rounded bg-slate-700 text-slate-400">{{ src_name }}</span>
-          {% endif %}
-        {% endfor %}
-        {% include "jobs/_direct_link_badge.html" %}
-      </div>
-      {% endif %}
-
-      <!-- Action buttons -->
-      <div class="flex items-center gap-3 text-xs">
+        {# Open full detail — its own full-width row. Reaches the deep-dive tier. #}
         <button type="button"
                 hx-get="{{ url_for('jobs.detail_inline', dedup_key=job.dedup_key) }}"
-                hx-target="closest tr"
-                hx-swap="outerHTML"
-                hx-disable-elt="this"
-                class="px-3 py-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded transition-colors disabled:opacity-50">
-          View Full Detail
-          <span class="htmx-indicator ml-1 inline-flex items-center gap-1">
-            <span class="inline-block w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
-          </span>
+                hx-target="closest tr" hx-swap="outerHTML" hx-disable-elt="this"
+                class="mt-2 inline-flex h-9 w-full items-center justify-between gap-1.5 rounded-md border border-slate-600 bg-slate-750 px-3.5 text-sm font-medium text-slate-200 hover:bg-slate-700 hover:text-slate-100 transition-colors disabled:opacity-50">
+          Open full detail
+          <svg class="w-3.5 h-3.5 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg>
         </button>
-        {% if job.jd_full %}
-        <button type="button"
-                hx-post="{{ url_for('jobs.rescore', dedup_key=job.dedup_key) }}"
-                hx-target="closest tr"
-                hx-swap="outerHTML"
-                hx-disable-elt="this"
-                class="px-3 py-1 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded transition-colors disabled:opacity-50">
-          Re-score
-          <span class="htmx-indicator ml-1 inline-flex items-center gap-1">
-            <span class="inline-block w-3 h-3 border-2 border-slate-400 border-t-transparent rounded-full animate-spin"></span>
-            Scoring...
-          </span>
-        </button>
-        {% endif %}
-        <button type="button"
-                aria-label="Archive this job permanently"
-                hx-post="{{ url_for('jobs.update_status', dedup_key=job.dedup_key) }}"
-                hx-vals='{"pipeline_status": "archived"}'
-                hx-target="#status-cell-{{ jd_key_safe }}"
-                hx-swap="innerHTML"
-                hx-confirm="Archive this job?"
-                hx-disable-elt="this"
-                hx-on::after-request="archiveRow(this)"
-                class="px-3 py-1 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded transition-colors disabled:opacity-50">
-          Archive
-          <span class="htmx-indicator ml-1 inline-flex items-center gap-1">
-            <span class="inline-block w-3 h-3 border-2 border-slate-400 border-t-transparent rounded-full animate-spin"></span>
-          </span>
-        </button>
-        {% if job.company_id %}
-        <button type="button"
-                hx-post="{{ url_for('companies.research', company_id=job.company_id) }}"
-                hx-target="this"
-                hx-swap="outerHTML"
-                hx-disable-elt="this"
-                hx-on:click="event.stopPropagation()"
-                class="px-3 py-1 bg-teal-700 hover:bg-teal-600 text-white rounded transition-colors disabled:opacity-50">
-          Research Company
-          <span class="htmx-indicator ml-1 inline-flex items-center gap-1">
-            <span class="inline-block w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
-          </span>
-        </button>
-        {% endif %}
-        <span class="text-slate-600">Add Note (coming soon)</span>
-      </div>
 
-      <!-- Bottom collapse button (reachable without scrolling up) -->
-      <div class="flex justify-end border-t border-slate-700 pt-2">
-        {# Smooth-scroll-back behavior is delivered via the HX-Trigger-After-
-           Settle ('job-collapsed') header from the collapse route + a global
-           listener in jobs/index.html. That handles both this button click
-           AND clicking the compact row again (collapse path #2), uniformly.
-           No inline JS needed here. #}
-        <button type="button"
-                hx-get="{{ url_for('jobs.collapse', dedup_key=job.dedup_key) }}"
-                hx-target="closest tr"
-                hx-swap="outerHTML"
-                hx-disable-elt="this"
-                class="px-3 py-1 bg-slate-700 hover:bg-slate-600 text-slate-300 text-xs rounded transition-colors disabled:opacity-50">
-          Collapse
-          <span class="htmx-indicator ml-1 inline-flex items-center gap-1">
-            <span class="inline-block w-3 h-3 border-2 border-slate-400 border-t-transparent rounded-full animate-spin"></span>
-          </span>
-        </button>
-      </div>
+        {# Reference dates — centered in the rail's leftover space. DESIGN DECISION:
+           freshness signal driven by job.is_stale / job.expiry_status (server-
+           computed) — last-seen turns amber + a "may be expired" line.
+           ⚑ The design mock showed an exact "· Nd ago" day count; the schema has
+           no precomputed delta, so we surface the boolean signal instead. PORTER:
+           pass a `days_since_last_seen` if you want the literal count back. #}
+        <dl class="my-auto space-y-1.5 pt-5">
+          <div class="flex items-baseline gap-3">
+            <dt class="w-20 flex-none text-[11px] uppercase tracking-wider text-slate-500">Posted</dt>
+            <dd class="text-[11px] font-mono text-slate-400">{{ posted_date }}</dd>
+          </div>
+          <div class="flex items-baseline gap-3">
+            <dt class="w-20 flex-none text-[11px] uppercase tracking-wider text-slate-500">First seen</dt>
+            <dd class="text-[11px] font-mono text-slate-400">{{ first_seen_date }}</dd>
+          </div>
+          <div class="flex items-baseline gap-3">
+            <dt class="w-20 flex-none text-[11px] uppercase tracking-wider text-slate-500">Last seen</dt>
+            <dd class="text-[11px] font-mono {{ 'text-amber-400' if (job.is_stale or job.expiry_status == 'expired') else 'text-slate-400' }}">
+              {{ last_seen_date }}
+            </dd>
+          </div>
+          {% if job.expiry_status == 'expired' %}
+            <p class="text-[11px] text-amber-400/90 pt-0.5">Marked expired — this listing may be gone.</p>
+          {% elif job.is_stale %}
+            <p class="text-[11px] text-amber-400/90 pt-0.5">Not seen recently — may be expired.</p>
+          {% endif %}
+        </dl>
 
-    </div>{# end left column grid #}
+        {# Bottom collapse — KEPT (reachable without scrolling up). Fires the
+           HX-Trigger-After-Settle 'job-collapsed' → smooth scroll-back. #}
+        <div class="flex justify-end border-t border-slate-700/60 pt-3 mt-3">
+          <button type="button"
+                  hx-get="{{ url_for('jobs.collapse', dedup_key=job.dedup_key) }}"
+                  hx-target="closest tr" hx-swap="outerHTML" hx-disable-elt="this"
+                  class="px-3 h-8 inline-flex items-center gap-1.5 bg-slate-750 border border-slate-600 hover:bg-slate-700 text-slate-300 text-[13px] rounded-md transition-colors disabled:opacity-50">
+            Collapse
+          </button>
+        </div>
+      </aside>
 
-    </div>{# end flex outer #}
-
+    </div>
   </td>
 </tr>
