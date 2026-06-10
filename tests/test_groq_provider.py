@@ -1,12 +1,17 @@
-"""Unit tests for Groq provider adapter (Phase 153)."""
+"""Unit tests for Groq provider adapter (Phase 153 + Issue 292)."""
 
 import json
+import sqlite3
 from unittest.mock import Mock, patch
 
 import pytest
 
-from job_finder.web.model_provider import ModelResult
-from job_finder.web.providers.groq_provider import GroqProvider
+from job_finder.web.model_provider import ModelResult, _maybe_record_cost
+from job_finder.web.providers.groq_provider import (
+    _GROQ_PRICING,
+    GroqProvider,
+    _groq_cost,
+)
 
 
 def test_groq_provider_init_with_key():
@@ -58,7 +63,10 @@ def test_groq_provider_call_returns_model_result():
             # ModelResult contract
             assert isinstance(result, ModelResult)
             assert result.provider == "groq"
-            assert result.cost_usd == 0.0
+            # cost_usd must be > 0 for a known model with real token counts
+            expected_cost = _groq_cost("llama-3.1-8b-instant", 200, 80)
+            assert abs(result.cost_usd - expected_cost) < 1e-9
+            assert result.cost_usd > 0.0
             assert result.input_tokens == 200
             assert result.output_tokens == 80
             assert result.schema_valid is True
@@ -134,4 +142,95 @@ def test_groq_provider_call_missing_usage_defaults_to_zero():
 
     assert result.input_tokens == 0
     assert result.output_tokens == 0
+    # Zero tokens → zero cost (no rounding issues)
     assert result.cost_usd == 0.0
+
+
+# ---------------------------------------------------------------------------
+# Issue 292 — pricing table + cost computation
+# ---------------------------------------------------------------------------
+
+
+def test_groq_cost_known_model_8b():
+    """llama-3.1-8b-instant: 1M in + 1M out = $0.05 + $0.08 = $0.13."""
+    cost = _groq_cost("llama-3.1-8b-instant", 1_000_000, 1_000_000)
+    assert abs(cost - 0.13) < 1e-9
+
+
+def test_groq_cost_known_model_70b():
+    """llama-3.3-70b-versatile: 1M in + 1M out = $0.59 + $0.79 = $1.38."""
+    cost = _groq_cost("llama-3.3-70b-versatile", 1_000_000, 1_000_000)
+    assert abs(cost - 1.38) < 1e-9
+
+
+def test_groq_cost_unknown_model_uses_most_expensive_fallback():
+    """Unknown model falls back to the most expensive entry in _GROQ_PRICING."""
+    most_expensive = max(_GROQ_PRICING.values(), key=lambda p: p["input"] + p["output"])
+    cost_unknown = _groq_cost("unknown-model-xyz", 1_000_000, 1_000_000)
+    expected = most_expensive["input"] + most_expensive["output"]
+    assert abs(cost_unknown - expected) < 1e-9
+
+
+def test_groq_cost_partial_tokens():
+    """500k in + 100k out for llama-3.1-8b-instant."""
+    # 500k / 1M * 0.05 + 100k / 1M * 0.08 = 0.025 + 0.008 = 0.033
+    cost = _groq_cost("llama-3.1-8b-instant", 500_000, 100_000)
+    assert abs(cost - 0.033) < 1e-9
+
+
+def test_groq_result_flows_through_maybe_record_cost(tmp_path):
+    """A Groq ModelResult with real cost_usd lands in scoring_costs with cost_usd > 0."""
+    from job_finder.web.db_migrate import run_migrations
+
+    db_path = str(tmp_path / "groq_cost_test.db")
+    run_migrations(db_path)
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+
+    result = ModelResult(
+        data={"score": 4},
+        cost_usd=_groq_cost("llama-3.3-70b-versatile", 500_000, 200_000),
+        input_tokens=500_000,
+        output_tokens=200_000,
+        model="llama-3.3-70b-versatile",
+        provider="groq",
+        schema_valid=True,
+    )
+
+    _maybe_record_cost(result, conn, job_id="test-job-1", purpose="score_job")
+
+    rows = conn.execute("SELECT cost_usd, provider FROM scoring_costs").fetchall()
+    conn.close()
+
+    assert len(rows) == 1
+    assert rows[0]["provider"] == "groq"
+    assert rows[0]["cost_usd"] > 0.0
+    # 500k / 1M * 0.59 + 200k / 1M * 0.79 = 0.295 + 0.158 = 0.453
+    assert abs(rows[0]["cost_usd"] - 0.453) < 1e-6
+
+
+def test_groq_cost_included_in_cost_gate_sum(tmp_path):
+    """cost_gate counts groq spend toward the daily budget (groq not in FREE_PROVIDERS)."""
+    from datetime import UTC, datetime
+
+    from job_finder.web.claude_client import cost_gate
+    from job_finder.web.db_migrate import run_migrations
+
+    db_path = str(tmp_path / "groq_gate_test.db")
+    run_migrations(db_path)
+    conn = sqlite3.connect(db_path)
+
+    ts = datetime.now(UTC).strftime("%Y-%m-%dT12:00:00Z")
+    # Insert a groq row with $5.00 spend — above a $1.00 cap
+    conn.execute(
+        "INSERT INTO scoring_costs "
+        "(job_id, purpose, model, input_tokens, output_tokens, cost_usd, timestamp, provider) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        ("j1", "score_job", "llama-3.3-70b-versatile", 1000, 1000, 5.00, ts, "groq"),
+    )
+    conn.commit()
+
+    config = {"scoring": {"daily_budget_usd": 1.00}}
+    # $5.00 groq spend > $1.00 cap → gate must block
+    assert cost_gate(conn, config, model_tier="score") is False
+    conn.close()

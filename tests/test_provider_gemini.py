@@ -1,4 +1,4 @@
-"""Unit tests for job_finder.web.providers.gemini_provider."""
+"""Unit tests for job_finder.web.providers.gemini_provider (+ Issue 292)."""
 
 from __future__ import annotations
 
@@ -8,7 +8,11 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from job_finder.web.model_provider import BaseProvider, ModelResult
-from job_finder.web.providers.gemini_provider import GeminiProvider
+from job_finder.web.providers.gemini_provider import (
+    _GEMINI_PRICING,
+    GeminiProvider,
+    _gemini_cost,
+)
 
 
 def _make_mock_client() -> MagicMock:
@@ -87,7 +91,10 @@ def test_call_freeform_returns_model_result_shape():
     assert isinstance(result, ModelResult)
     assert result.provider == "gemini"
     assert result.model == "gemini-2.5-flash"
-    assert result.cost_usd == 0.0
+    # Gemini is in FREE_PROVIDERS — _maybe_record_cost forces 0.0 at record time.
+    # The adapter computes a notional cost so the ModelResult is truthful.
+    expected_cost = _gemini_cost("gemini-2.5-flash", 10, 5)
+    assert abs(result.cost_usd - expected_cost) < 1e-9
     assert result.schema_valid is True
     assert result.data == {"text": "some text"}
 
@@ -102,6 +109,8 @@ def test_call_freeform_token_counts():
     )
     assert result.input_tokens == 42
     assert result.output_tokens == 17
+    # Notional cost computed from token counts
+    assert result.cost_usd == _gemini_cost("gemini-2.5-flash", 42, 17)
 
 
 def test_call_handles_none_usage_metadata():
@@ -266,3 +275,47 @@ def test_build_contents_multiple_messages():
     contents = _make_provider()._build_contents(messages)
     assert len(contents) == 3
     assert [c.role for c in contents] == ["user", "model", "user"]
+
+
+# ---------------------------------------------------------------------------
+# Issue 292 — pricing table + notional cost computation
+# ---------------------------------------------------------------------------
+
+
+def test_gemini_cost_flash_model():
+    """gemini-2.5-flash: 1M in + 1M out = $0.30 + $2.50 = $2.80."""
+    cost = _gemini_cost("gemini-2.5-flash", 1_000_000, 1_000_000)
+    assert abs(cost - 2.80) < 1e-9
+
+
+def test_gemini_cost_pro_model():
+    """gemini-2.5-pro: 1M in + 1M out = $1.25 + $10.00 = $11.25."""
+    cost = _gemini_cost("gemini-2.5-pro", 1_000_000, 1_000_000)
+    assert abs(cost - 11.25) < 1e-9
+
+
+def test_gemini_cost_unknown_model_uses_most_expensive_fallback():
+    """Unknown model falls back to the most expensive entry in _GEMINI_PRICING."""
+    most_expensive = max(_GEMINI_PRICING.values(), key=lambda p: p["input"] + p["output"])
+    cost_unknown = _gemini_cost("gemini-3.0-ultra", 1_000_000, 1_000_000)
+    expected = most_expensive["input"] + most_expensive["output"]
+    assert abs(cost_unknown - expected) < 1e-9
+
+
+def test_gemini_cost_zero_tokens():
+    """Zero tokens → $0.00."""
+    assert _gemini_cost("gemini-2.5-flash", 0, 0) == 0.0
+
+
+def test_gemini_cost_usd_in_model_result_is_notional():
+    """Gemini adapter cost_usd is notional (FREE_PROVIDERS forces 0 at record time)."""
+    client = _make_mock_client()
+    client.models.generate_content.return_value = _make_response(
+        prompt_token_count=500_000, candidates_token_count=100_000
+    )
+    result = _make_provider(client).call(
+        "gemini-2.5-flash", "sys", [{"role": "user", "content": "hi"}]
+    )
+    # Notional cost: 500k/1M * 0.30 + 100k/1M * 2.50 = 0.15 + 0.25 = 0.40
+    assert abs(result.cost_usd - 0.40) < 1e-9
+    # The ModelResult carries the notional amount; FREE_PROVIDERS forces 0 when recorded
