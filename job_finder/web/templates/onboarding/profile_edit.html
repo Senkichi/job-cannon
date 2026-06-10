@@ -4,10 +4,13 @@
 <!-- WIZARD_STEP_PROFILE_EDIT_MARKER -->
 <h1 class="text-2xl font-bold text-slate-100 mb-4">Your search profile</h1>
 <p class="text-slate-300 mb-6">What kind of role are you looking for? We use these for scoring.</p>
+{% if error %}
+<div class="mb-4 rounded border border-red-500 bg-red-900/30 px-4 py-2 text-red-300">{{ error }}</div>
+{% endif %}
 <form method="post" action="{{ url_for('onboarding.profile_edit') }}" class="space-y-4">
   <div>
-    <label class="block text-sm text-slate-200 mb-1">Target titles (one per line)</label>
-    <textarea name="target_titles" rows="3" class="w-full bg-slate-900 border border-slate-700 rounded px-3 py-2 text-slate-100">{{ target_titles | default('') }}</textarea>
+    <label class="block text-sm text-slate-200 mb-1">Target titles (one per line) <span class="text-red-400">*</span></label>
+    <textarea name="target_titles" rows="3" required class="w-full bg-slate-900 border border-slate-700 rounded px-3 py-2 text-slate-100">{{ target_titles | default('') }}</textarea>
   </div>
   <div>
     <label class="block text-sm text-slate-200 mb-1">Target locations (one per line)</label>

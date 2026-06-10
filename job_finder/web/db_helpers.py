@@ -113,6 +113,28 @@ def get_config_snapshot(app) -> dict:
     return copy.deepcopy(app.config.get("JF_CONFIG", {}))
 
 
+def refresh_jf_config(app, config: dict) -> None:
+    """Update the live in-memory config after a config.yaml write.
+
+    Single point of enforcement for the JF_CONFIG + DB_PATH refresh that must
+    happen whenever config.yaml is written to disk — both the Settings save
+    route and the onboarding wizard Done step call this so neither can drift.
+
+    Thread-safety: APScheduler and batch background threads MUST snapshot
+    JF_CONFIG at job-start time (read once into a local variable before any
+    await/sleep) rather than reading individual keys across multiple statements.
+    This replacement is atomic at the Python dict level but readers may observe
+    the old dict between the two assignments below.
+
+    Args:
+        app: Flask application instance (concrete object, not a proxy).
+        config: The fully-merged config dict that was just written to disk.
+    """
+    app.config["JF_CONFIG"] = config
+    if "db" in config:
+        app.config["DB_PATH"] = config["db"].get("path", app.config.get("DB_PATH"))
+
+
 # ---------------------------------------------------------------------------
 # Shared HTMX polling helper for batch_score_sessions rows.
 #

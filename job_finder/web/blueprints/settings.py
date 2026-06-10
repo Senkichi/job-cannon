@@ -29,7 +29,7 @@ from job_finder.config import (
     load_config,
 )
 from job_finder.web import user_data_dirs
-from job_finder.web.db_helpers import get_db
+from job_finder.web.db_helpers import get_db, refresh_jf_config
 from job_finder.web.onboarding.inbox_check import run_inbox_check
 
 logger = logging.getLogger(__name__)
@@ -245,17 +245,8 @@ def save():
 
         _write_config(config, _CONFIG_PATH)
 
-        # Update running app config so changes take effect without restart.
-        # Thread-safety: APScheduler and batch background threads MUST snapshot
-        # JF_CONFIG at job-start time (i.e. read once into a local variable before
-        # any await/sleep) rather than reading individual keys across multiple
-        # statements. This replacement is atomic at the Python dict level but
-        # readers may observe the old dict between the two assignments below.
-        current_app.config["JF_CONFIG"] = config
-        if "db" in config:
-            current_app.config["DB_PATH"] = config["db"].get(
-                "path", current_app.config.get("DB_PATH")
-            )
+        # Refresh the live in-memory config so changes take effect without restart.
+        refresh_jf_config(current_app._get_current_object(), config)
 
         flash("Settings saved successfully.", "success")
     except Exception as exc:
