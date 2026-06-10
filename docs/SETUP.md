@@ -4,7 +4,7 @@ Walks you from a fresh clone to a running app on Windows, macOS, or Linux. The f
 
 ## Prerequisites
 
-- **Python 3.13+** — `python --version` to check
+- **Python 3.12+** — `python --version` to check
 - **[uv](https://docs.astral.sh/uv/getting-started/installation/)** for dependency management
 - *(Recommended)* **[Ollama](https://ollama.com)** for free local AI scoring — install, then `ollama pull qwen2.5:14b` (~9 GB)
 

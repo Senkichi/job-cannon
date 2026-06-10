@@ -35,6 +35,7 @@ classifiers = [
     "License :: OSI Approved :: GNU Affero General Public License v3",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Topic :: Office/Business",
     "Topic :: Internet :: WWW/HTTP :: Dynamic Content",
@@ -316,7 +317,7 @@ exclude = ["tests/", "scripts/", "build/", "dist/", "backups/"]
 include = ["job_finder"]
 exclude = ["**/tests", "**/scripts", ".venv", "build", "dist"]
 typeCheckingMode = "basic"
-pythonVersion = "3.13"
+pythonVersion = "3.12"
 # Tighten to "strict" over time. "basic" matches mypy's posture for
 # the S5 baseline — high-signal errors only, no nag on every untyped
 # parameter.
