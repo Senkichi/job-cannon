@@ -175,6 +175,42 @@ def run_health_check(app) -> None:
         except Exception as e:
             issues.append(f"Health check DB error: {e}")
 
+        # 5. Autoheal: retry heals for still-degraded sources (run_heal gates
+        #    flag/backoff/attempt-cap itself) + attempt-counter hygiene. The
+        #    sweep never contributes to `issues` — it must not fail the heartbeat.
+        try:
+            from job_finder.web.autoheal.heal_pipeline import run_heal
+            from job_finder.web.db_helpers import get_config_snapshot
+            from job_finder.web.db_helpers import standalone_connection as _sc
+
+            config = get_config_snapshot(app)
+            reset_days = float(config.get("autoheal", {}).get("heal_attempt_reset_days", 30))
+            with _sc(db_path) as conn:
+                # Hygiene backstop (plan invariant I1): a source healthy for
+                # 30+ days since its last heal gets its attempt budget back
+                # even while an override is active.
+                conn.execute(
+                    "UPDATE source_health SET heal_attempts = 0 "
+                    "WHERE status = 'healthy' AND heal_attempts > 0 "
+                    "AND last_heal_at IS NOT NULL "
+                    "AND last_heal_at < datetime('now', ?)",
+                    (f"-{reset_days} days",),
+                )
+                conn.commit()
+                degraded = [
+                    r[0]
+                    for r in conn.execute(
+                        "SELECT source FROM source_health WHERE status = 'degraded'"
+                    ).fetchall()
+                ]
+                for source in degraded:
+                    try:
+                        run_heal(conn, config, source)
+                    except Exception:
+                        logger.exception("health-check heal retry failed for %s", source)
+        except Exception:
+            logger.exception("health-check autoheal sweep failed")
+
         status = "degraded" if issues else "success"
         if issues:
             logger.warning("HEALTH_DEGRADED: %s", "; ".join(issues))
