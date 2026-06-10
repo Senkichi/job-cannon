@@ -2002,9 +2002,13 @@ class TestRunEnrichmentBackfillSelect:
             ("terminal-serpapi", None, None, "serpapi", "2026-01-04"),
             ("terminal-mid", None, None, "mid", "2026-01-05"),
             ("terminal-exhausted", None, None, "exhausted", "2026-01-06"),
+            # Legacy/unknown terminal tiers -- must NOT be selected (issue #255)
+            ("terminal-low", "full JD", None, "low", "2026-01-07"),
+            ("terminal-high", "full JD", None, "high", "2026-01-08"),
+            ("terminal-ag-ex", None, None, "agentic_exhausted", "2026-01-09"),
             # Actually missing fields -- MUST be selected
             ("needs-jd-new-1", None, 90_000, None, "2026-04-23"),
-            ("needs-sal-new-2", "full JD", None, "low", "2026-04-22"),
+            ("needs-sal-new-2", "full JD", None, "free", "2026-04-22"),
             ("needs-both-3", None, None, "ddg", "2026-04-21"),
         ]
         conn.executemany(
@@ -2032,7 +2036,7 @@ class TestRunEnrichmentBackfillSelect:
         assert "enriched-old-3" not in passed_keys
 
     def test_skips_terminal_tiers(self, backfill_db_path):
-        """Rows with tier in (exhausted, serpapi, mid) must NOT be selected."""
+        """Rows with known terminal tiers must NOT be selected (issue #255)."""
         from job_finder.web.data_enricher import run_enrichment_backfill
 
         with patch("job_finder.web.data_enricher.enrich_job") as mock_enrich:
@@ -2043,6 +2047,10 @@ class TestRunEnrichmentBackfillSelect:
         assert "terminal-serpapi" not in passed_keys
         assert "terminal-mid" not in passed_keys
         assert "terminal-exhausted" not in passed_keys
+        # Legacy migration tiers and agentic_exhausted are now also terminal (#255)
+        assert "terminal-low" not in passed_keys
+        assert "terminal-high" not in passed_keys
+        assert "terminal-ag-ex" not in passed_keys
 
     def test_selects_only_rows_that_need_fields(self, backfill_db_path):
         """Only rows missing jd_full or salary_min should be passed to enrich_job."""
