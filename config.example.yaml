@@ -323,6 +323,19 @@ direct_link:
   # the Apply target; default false keeps loose links on the provenance badge
   # only, until the strict/loose link-quality experiment concludes.
   loose_apply_default: false
+  # Scheduled resolver (daily 5:45 AM): batches unresolved jobs by company,
+  # fetches each verified ATS board once, and matches every candidate job
+  # against it in memory. Strict matches also merge the posting's
+  # authoritative fields (salary metadata, posted date, locations).
+  resolver:
+    enabled: true
+    # Skip a job after this many board-match attempts...
+    max_attempts: 3
+    # ...until its last check is older than this, then re-check (picks up
+    # newly discovered / re-keyed company boards without manual resets).
+    recheck_days: 30
+    # Board fetches per run; the backlog drains across nightly runs.
+    max_companies_per_run: 50
 
 # --- Scheduler cadence (Phase 42 wizard writes this; Settings allows custom edits) ---
 scheduler:

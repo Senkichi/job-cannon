@@ -66,6 +66,8 @@ COLUMN_CATEGORIES: dict[str, str] = {
     "unresolved_reasons": "system",  # NEW in Phase 47 m078 — JSON reason codes
     "direct_url": "system",  # NEW m085 — company-posting link captured by enrichment
     "direct_url_confidence": "system",  # NEW m085 — strict/loose match tag
+    "direct_url_checked_at": "system",  # NEW m092 — last resolver board-match attempt
+    "direct_url_attempts": "system",  # NEW m092 — cumulative resolver attempts
     # ── scoring-owned ─────────────────────────────────────────────────────
     "score": "scoring",
     "score_breakdown": "scoring",
