@@ -52,7 +52,7 @@ from job_finder.config import (
 from job_finder.web import user_data_dirs
 from job_finder.web.db_helpers import get_db, refresh_jf_config
 from job_finder.web.onboarding import imap_test, resume_parser, state, system_check
-from job_finder.web.providers.detection import detect_available_providers
+from job_finder.web.providers.detection import detect_available_providers, get_detection_extras
 from job_finder.web.scheduler import get_scheduler
 
 logger = logging.getLogger(__name__)
@@ -64,8 +64,12 @@ onboarding_bp = Blueprint("onboarding", __name__, url_prefix="/onboarding")
 # blueprint-level, and modifying app-level would break other blueprints' uploads.
 _MAX_RESUME_BYTES: Final[int] = 10 * 1024 * 1024
 
-# $0 CLIs that need no credentials at the provider_credentials step (D-04)
-_NO_CREDS_PROVIDERS: Final[frozenset[str]] = frozenset({"claude_code_cli", "gemini_cli", "ollama"})
+# $0 CLIs that need no credentials at the provider_credentials step (D-04).
+# "none" represents the "skip — configure later in Settings" path (Issue #288).
+# "local_bundled" requires only a model_path in Settings, no API key.
+_NO_CREDS_PROVIDERS: Final[frozenset[str]] = frozenset(
+    {"claude_code_cli", "gemini_cli", "ollama", "local_bundled", "none"}
+)
 
 # Canonical ordered list of wizard screens (key, label) — the single source of
 # truth for the step indicator (D-21). The "Step N of M" number and denominator
@@ -164,12 +168,28 @@ def welcome():
 
 @onboarding_bp.route("/provider_select", methods=["GET", "POST"], strict_slashes=False)
 def provider_select():
-    """Step 2: render detected providers + Re-detect button (D-01, D-02)."""
+    """Step 2: render detected providers + Re-detect button (D-01, D-02).
+
+    Issue #288 additions:
+    - "Skip — configure later" path writes provider.name="none" and skips
+      provider_credentials entirely, advancing to resume_upload.  The done
+      step omits providers.primary from config when name="none" so
+      tier_has_configured_provider returns False and the dashboard warning
+      fires on first login.
+    - detection_extras passed to template for Ollama-no-model guidance.
+    """
     if request.method == "POST":
         if request.form.get("redetect"):
-            # D-02: refresh detection cache
+            # D-02: refresh detection cache (also recomputes DetectionExtras)
             detect_available_providers(refresh=True)
             return redirect(url_for("onboarding.provider_select"))
+
+        if request.form.get("skip_provider"):
+            # Issue #288: explicit "configure later" escape hatch.
+            state.write_wizard_data(_db(), {"provider": {"name": "none"}})
+            # Skip provider_credentials entirely — no credentials needed
+            return redirect(url_for("onboarding.resume_upload"))
+
         provider_name = request.form.get("provider_name", "").strip()
         if not provider_name:
             flash("Please choose a provider to continue.", "error")
@@ -178,9 +198,11 @@ def provider_select():
         return redirect(url_for("onboarding.provider_credentials"))
 
     providers = detect_available_providers()
+    extras = get_detection_extras()
     return render_template(
         "onboarding/provider_select.html",
         providers=providers,
+        ollama_no_model=extras.ollama_no_model,
         **_step("provider_select"),
     )
 
@@ -517,10 +539,17 @@ def done():
             except (OSError, yaml.YAMLError):
                 existing_cfg = {}
 
+        # Issue #288: when the user chose the "skip — configure later" path,
+        # provider.name is "none".  Omit providers.primary entirely so
+        # tier_has_configured_provider returns False and the dashboard warning
+        # fires — rather than pointing the cascade at "none" which would crash.
+        _provider_name = provider_block.get("name", "anthropic")
+        _providers_slice: dict = {}
+        if _provider_name and _provider_name != "none":
+            _providers_slice["primary"] = _provider_name
+
         config_slice: dict = {
-            "providers": {
-                "primary": provider_block.get("name", "anthropic"),
-            },
+            "providers": _providers_slice,
             "sources": {
                 "imap": {
                     "enabled": imap_enabled,
