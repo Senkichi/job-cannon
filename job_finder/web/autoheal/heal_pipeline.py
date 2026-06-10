@@ -17,7 +17,8 @@ import sqlite3
 from datetime import datetime, timedelta
 
 from job_finder.json_utils import utc_now_iso
-from job_finder.web.autoheal import codegen, validator
+from job_finder.web.autoheal import codegen, override_loader, validator
+from job_finder.web.autoheal.recipe_schema import recipe_to_dict
 from job_finder.web.model_provider import ProviderCascadeExhaustedError
 
 logger = logging.getLogger(__name__)
@@ -64,6 +65,7 @@ def run_heal(conn: sqlite3.Connection, config: dict, source: str) -> str | None:
         return "no_provider"
 
     if candidate is None:
+        _record_failure(conn, source)
         _audit(conn, source, surface, "rejected:generation_failed")
         return "rejected:generation_failed"
 
@@ -80,28 +82,62 @@ def run_heal(conn: sqlite3.Connection, config: dict, source: str) -> str | None:
     )
     if not verdict.ok:
         reason = verdict.reason or "rejected"
+        _record_failure(conn, source)
         _audit(conn, source, surface, f"rejected:{reason}")
         return f"rejected:{reason}"
 
     _audit(conn, source, surface, "validated")
 
-    # --- ADOPT (C5) ---
-    return _adopt_stage(conn, config, source, surface, candidate, verdict)
+    # --- ADOPT (C5) — write the override, hot-swap, reset health ---
+    return _adopt_stage(conn, source, surface, candidate)
 
 
 # ---------------------------------------------------------------------------
-# Stage stub (filled by C5)
+# ADOPT
 # ---------------------------------------------------------------------------
 
 
-def _adopt_stage(conn, config, source, surface, candidate, verdict):
-    """ADOPT stage — C5 writes the override + hot-swaps on a passing verdict. Stub."""
-    return "validated"
+def _adopt_stage(conn: sqlite3.Connection, source: str, surface: str, candidate) -> str:
+    """Write the validated recipe as an override, hot-swap the cache, reset health.
+
+    Override files are keyed by the loader's file layout: email uses the
+    label verbatim; ATS strips the ``ats:`` prefix (the loader re-adds it
+    when scanning the ats/ directory).
+    """
+    file_key = source.split(":", 1)[1] if surface == "ats" else source
+    try:
+        override_loader.write_override(surface, file_key, recipe_to_dict(candidate))
+        override_loader.reload()
+    except Exception as exc:
+        logger.exception("autoheal: adopting override for %s failed", source)
+        _record_failure(conn, source)
+        _audit(conn, source, surface, "rejected:write_failed", str(exc))
+        return "rejected:write_failed"
+
+    _audit(conn, source, surface, "adopted")
+    conn.execute(
+        "UPDATE source_health SET status = 'healthy', consecutive_breaks = 0, "
+        "heal_attempts = 0, last_heal_at = ? WHERE source = ?",
+        (utc_now_iso(), source),
+    )
+    conn.commit()
+    logger.info("autoheal: adopted %s override for source '%s'", surface, source)
+    return "adopted"
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def _record_failure(conn: sqlite3.Connection, source: str) -> None:
+    """Count a consumed heal attempt and start the backoff window."""
+    conn.execute(
+        "UPDATE source_health SET heal_attempts = heal_attempts + 1, last_heal_at = ? "
+        "WHERE source = ?",
+        (utc_now_iso(), source),
+    )
+    conn.commit()
 
 
 def _backoff_elapsed(last_heal_at: str | None, backoff_hours: float) -> bool:
