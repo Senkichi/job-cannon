@@ -91,6 +91,17 @@ _INV1_UNREAD_ALLOWLIST: frozenset[str] = frozenset(
         # profile.job_archetypes.*.weight_overrides — planned scoring override;
         # no consumer exists yet.  Documented for future use.
         "weight_overrides",
+        # --- Parser auto-heal Phase C keys (C1: dormant infrastructure) ---
+        # These keys are introduced in config.example.yaml by Phase C / C1 so
+        # users can see the full autoheal: block when they copy the template.
+        # Readers (defensive config.get('autoheal', {}).get(...)) land in
+        # heal_pipeline.py (C3), validator.py (C4), and pipeline_runner.py (C5).
+        # Remove from this allowlist when those consumers are merged.
+        "heal_enabled",
+        "heal_provider",
+        "heal_max_attempts",
+        "heal_backoff_hours",
+        "validate_timeout_s",
     }
 )
 

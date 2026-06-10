@@ -11,6 +11,7 @@ from datetime import UTC, datetime
 
 from imapclient import IMAPClient
 
+import job_finder.web.autoheal.override_loader as _override_loader
 from job_finder.models import Job
 from job_finder.parsers import extract_with_fallback
 from job_finder.sources.gmail_source import (
@@ -19,6 +20,7 @@ from job_finder.sources.gmail_source import (
     _archive_parse_failure,
     _should_archive_failure,
 )
+from job_finder.web.autoheal.recipe_extractor import RecipeExtractor
 
 logger = logging.getLogger(__name__)
 
@@ -115,7 +117,20 @@ class ImapSource:
 
                     # Parse the email body
                     try:
-                        jobs = extract_with_fallback(parser_fn, body, email_date)
+                        # Phase C: email override pre-check (dormant when no override files present).
+                        # With no override, falls through to extract_with_fallback unchanged.
+                        _label = SENDER_LABEL.get(sender_lower, sender_lower)
+                        _recipe = _override_loader.html_recipe(_label)
+                        if _recipe is not None:
+                            _recipe_jobs = RecipeExtractor(_recipe, job_source="email_recipe")(
+                                body
+                            )
+                        else:
+                            _recipe_jobs = []
+                        if _recipe_jobs:
+                            jobs = _recipe_jobs
+                        else:
+                            jobs = extract_with_fallback(parser_fn, body, email_date)
                         all_jobs.extend(jobs)
                         self.extraction_records.append(
                             {
