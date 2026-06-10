@@ -1,0 +1,383 @@
+# Job Cannon Configuration
+# Copy this file to config.yaml and customize for your job search.
+
+# --- Your job search profile ---
+profile:
+  # Job titles you're targeting (matched against listing titles)
+  target_titles:
+    - Data Scientist
+    - Senior Data Scientist
+  # Preferred work locations (use "Remote" for remote jobs)
+  target_locations:
+    - Remote
+  # Minimum acceptable salary in USD (jobs below 85% of this are auto-excluded)
+  min_salary: 100000
+  # Industries you're interested in (used by AI scoring)
+  industries:
+    - Tech
+    - SaaS
+  # Exclusion rules — jobs matching these are skipped before AI scoring (zero cost)
+  exclusions:
+    # Title substrings to exclude (case-insensitive)
+    title_keywords:
+      - intern
+      - junior
+    # Specific company names to exclude
+    companies: []
+  # Your key skills (used by AI for fit scoring)
+  skills:
+    - Python
+    - SQL
+  # Job archetype classification — keyword-based categorization for scoring context.
+  # Each archetype matches keywords against title+description (case-insensitive).
+  # weight_overrides can adjust scoring emphasis per archetype (empty = no override).
+  job_archetypes:
+    platform_engineering:
+      keywords: ["platform", "infrastructure", "kubernetes", "devops"]
+      weight_overrides: {}
+    ml_engineering:
+      keywords: ["machine learning", "ml", "model serving", "feature store"]
+      weight_overrides: {}
+    analytics_lead:
+      keywords: ["analytics", "experimentation", "stakeholder", "roadmap"]
+      weight_overrides: {}
+
+# --- Job sources ---
+sources:
+  imap:
+    # IMAP email source (stranger-friendly default - uses app password, no OAuth)
+    enabled: true
+    host: imap.gmail.com
+    port: 993
+    email: ""
+    app_password: ""
+    folder: INBOX
+  gmail:
+    # Gmail API source (OAuth power-user path - requires python -m job_finder.gmail_auth)
+    enabled: false
+    # How many days back to search for job alert emails
+    lookback_days: 7
+    # Sender addresses for job alert emails (defaults work for standard alerts)
+    senders:
+      linkedin_alerts: jobalerts-noreply@linkedin.com
+      linkedin_jobs: jobs-noreply@linkedin.com
+      glassdoor: noreply@glassdoor.com
+      indeed: alert@indeed.com
+      ziprecruiter: no-reply@ziprecruiter.com
+  serpapi:
+    # Optional: SerpAPI for Google Jobs search (requires paid API key)
+    enabled: false
+    # Get your key at: https://serpapi.com/manage-api-key
+    api_key: ""
+    # Max pages to fetch per query (10 results/page, each page = 1 API credit)
+    max_pages: 5
+    # Optional: max SerpAPI calls per calendar day for the enrichment pipeline
+    # (the paid enrichment tier that fills jd_full when all free tiers fail).
+    # Persisted in scoring_costs so the cap survives Flask restarts.
+    # 0 or absent = uncapped (original behavior). Recommended: 50-200 depending
+    # on your plan limits. The enrichment backfill logs today's call count and
+    # cap on every run so you can tune this value without guesswork.
+    daily_call_cap: 0
+    queries:
+      - query: Data Scientist
+        location: San Francisco Bay Area
+  thordata:
+    # Optional: Thordata Google Jobs SERP API (cheaper alternative to SerpAPI)
+    enabled: false
+    # Get your key at: https://www.thordata.com/
+    api_key: ""
+    # Only ingest jobs posted within this many days
+    max_age_days: 3
+    queries:
+      - query: Data Scientist
+        location: San Francisco Bay Area
+  dataforseo:
+    # Optional: DataForSEO Google Jobs SERP API — full index, ~$0.87/month at default settings
+    # Task-queue API (async: submits tasks, polls for completion, no live endpoint).
+    enabled: false
+    # Credentials: base64(login:password) — copy from https://app.dataforseo.com/api-access
+    api_key: ""
+    # Results per query (10-200). Each 10 = 1 billing unit ($0.0006 normal / $0.0012 high).
+    # depth=200: full index access, ~$0.10/run max with 8 queries, billed per result returned.
+    depth: 200
+    # Only ingest jobs posted within this many days (uses posting timestamp, not time_ago string)
+    max_age_days: 7
+    # Task priority: 1=normal (~5 min, $0.0006/10 results), 2=high (~1 min, $0.0012/10 results)
+    priority: 1
+    # Seconds between poll retries after the 45s initial wait. 0=disable sleeping (tests only).
+    poll_interval_seconds: 30
+    # Give up waiting after this many seconds. Partial results returned; remainder abandoned.
+    poll_timeout_seconds: 360
+    queries:
+      - query: Data Scientist
+        location: San Francisco Bay Area
+
+  portal_search:
+    # Niche job portal discovery. Three tiers:
+    #   1a. Always-on free APIs (RemoteOK, Remotive, Himalayas) — zero cost, no keys.
+    #   1b. Stage-2 free portals (Jobicy, YC Work at a Startup, USAJobs, Adzuna,
+    #       Jooble) — keyless or free-with-registration. Configured below.
+    #   2.  Site: SERP queries via DataForSEO for remaining portals — cheap, batched.
+    # SerpAPI/Thordata are NOT used for portal_search (too expensive for site: queries).
+    # If DataForSEO is not enabled, only Tier 1 portals are searched.
+    enabled: false
+    keywords:
+      - Staff Engineer
+      - ML Platform
+      - Data Infrastructure
+    # Max DataForSEO site: queries per run (caps SERP spend)
+    max_serp_queries: 30
+
+    # --- Stage-2 free portals ---
+    # Enable each independently. The keyless portals (jobicy, yc_workatastartup)
+    # are the lowest-friction onboarding path. The keyed-but-free portals
+    # (usajobs / adzuna / jooble) require a one-time signup at the linked
+    # registration page in exchange for a generous free tier.
+
+    jobicy:
+      # Remote-only job board. No key required.
+      # https://jobicy.com/jobs-rss-feed
+      enabled: false
+    yc_workatastartup:
+      # Y Combinator's "Work at a Startup". No key required.
+      # Implemented by parsing the Inertia.js page state from
+      # https://www.workatastartup.com/jobs — breaks if YC migrates off Inertia.
+      enabled: false
+    usajobs:
+      # US federal government jobs. Free with email registration.
+      # Get your key: https://developer.usajobs.gov/apirequest/
+      enabled: false
+      # The email address used as the User-Agent header (per USAJobs spec).
+      user_agent_email: ""
+      # The Authorization-Key header value.
+      authorization_key: ""
+    adzuna:
+      # Global jobs aggregator. Free dev tier (~250 calls/day per country).
+      # Get your key: https://developer.adzuna.com/signup
+      enabled: false
+      app_id: ""
+      app_key: ""
+      # ISO country code: us, gb, au, ca, de, fr, in, sg, etc.
+      country: us
+    jooble:
+      # Global jobs aggregator. Free with email registration.
+      # Get your key: https://jooble.org/api/about
+      enabled: false
+      api_key: ""
+
+  google_cse:
+    # Stage 3 — Google Programmable Search Engine (free 100 queries/day quota).
+    # Drop-in replacement for the DataForSEO site: query path. Activates only
+    # when both api_key and cse_id are set AND dataforseo is not enabled
+    # (DataForSEO is preferred when both are configured — it has no daily cap).
+    #
+    # Setup:
+    #   1. Create a Programmable Search Engine at
+    #      https://programmablesearchengine.google.com/ — "Search the entire web"
+    #   2. Copy the Search engine ID (the cse_id below)
+    #   3. Enable the Custom Search API in https://console.cloud.google.com/
+    #      and create an API key (the api_key below)
+    #
+    # Quota: 100 queries/day free, $5 per 1000 thereafter. Job Cannon enforces
+    # a 95/day defense-in-depth gate. Per PLAN.md load-bearing decision #8, the
+    # scheduler runs CSE-backed portal search once per day, not 3x/day.
+    enabled: false
+    api_key: ""
+    cse_id: ""
+
+# --- AI scoring configuration ---
+scoring:
+  # How much each factor contributes to the overall score (must sum to 1.0)
+  weights:
+    title_match: 0.3
+    seniority_alignment: 0.2
+    location_fit: 0.15
+    salary_range: 0.15
+    industry_relevance: 0.1
+    company_signals: 0.05
+    recency: 0.05
+  # Jobs scoring below this threshold are auto-dismissed
+  min_score_threshold: 40
+  # jd_full character threshold for low_signal classification (Phase 2d sub-fix).
+  # When enrichment_tier='exhausted' AND length(jd_full) < this value, the job
+  # is classified 'low_signal' instead of being rolled into apply/consider/skip
+  # via rubric outputs (which are unreliable when the model has no real JD to read).
+  low_signal_jd_chars: 1500
+  # Daily API spending cap in USD. Applies only to non-free BYO-key
+  # providers in the cascade — Ollama, the two Claude/Gemini CLIs, Groq,
+  # Cerebras, and the Anthropic CLI fallback ($0 via Claude.ai subscription)
+  # are all in claude_client.FREE_PROVIDERS and never count. In practice
+  # this gate trips only on OpenRouter (the cascade-audit judge). M-2 (2026-05-20).
+  daily_budget_usd: 10.0
+  # Candidate score threshold gating LLM scoring — jobs with a candidate_score
+  # below this (computed during initial ingestion) are skipped for full AI scoring.
+  candidate_score_threshold: 55
+  # Phase 4 rubric variant. 'baseline' uses the production v3 prompt; any
+  # other name resolves to job_finder.web.scoring_prompts.variants.<name>.
+  # The eval-harness CLI overrides this at runtime via --variant.
+  prompt_variant: baseline
+  # Per-workload model selection lives under `providers.overrides.<provider>.<workload>`
+  # below. The legacy `scoring.models.{low,mid}` block was removed in 2026-05-21
+  # — Phase 40 moved that selection to the providers.overrides path and the
+  # legacy keys were never read after the move.
+
+# --- Multi-provider model routing (Phase 40 flat schema) ---
+# Every call_model() invocation is cascaded: the primary provider is tried
+# first, then each entry in fallback_chain in order. Models for each
+# workload (quick / score / triage) come from _PROVIDER_DEFAULTS in
+# job_finder/web/model_provider.py unless overridden below.
+#
+# Registered providers (must match _PROVIDER_DEFAULTS keys):
+#   ollama | anthropic | gemini | local_bundled |
+#   gemini_cli | claude_code_cli | openrouter
+#
+#
+providers:
+  primary: ollama              # Provider tried first for every call
+  fallback_chain:              # Tried in order if primary fails / schema-invalidates / hits a daily limit
+    - gemini                   # BYO API key (free tier)
+    - claude_code_cli          # $0 via your Claude.ai subscription (no API key needed)
+    - anthropic                # Paid SDK — final emergency only, costs real money
+  overrides: {}                # Optional: per-provider per-workload model override, e.g. {ollama: {score: "llama3.1:70b"}}
+  daily_limits: {}             # Optional: {provider_name: max_requests_per_day}
+  throttle_delays: {}          # Optional: {provider_name: seconds_between_calls}
+
+# --- Cascade recipes (uncomment ONE to replace the providers: block above) ---
+#
+# Recipe 1 — Ollama-primary cascade (production default per CLAUDE.md).
+# Local qwen2.5:14b handles every call at $0; falls through free hosted
+# providers before touching paid Anthropic. Requires Ollama installed
+# (auto-detected at startup — falls through gracefully if not found).
+#
+# providers:
+#   primary: ollama
+#   fallback_chain: [gemini, claude_code_cli, anthropic]
+#   overrides:
+#     ollama:    {score: qwen2.5:14b}
+#     anthropic: {score: claude-sonnet-4-6}
+#
+# Recipe 2 — Anthropic-only (paid, simplest). No fallback chain.
+#
+# providers:
+#   primary: anthropic
+#   fallback_chain: []
+#
+# Recipe 3 — Gemini-primary free cascade. Best when Ollama isn't installed
+# and you want to stay on free tiers. Anthropic is the paid safety net.
+#
+# providers:
+#   primary: gemini
+#   fallback_chain: [claude_code_cli, anthropic]
+
+# --- Database ---
+db:
+  # SQLite database file path (created automatically on first run)
+  path: jobs.db
+
+# --- Careers page crawler ---
+careers_crawl:
+  enabled: true
+  # Re-crawl companies after this many days
+  freshness_days: 1
+  # Parallel browser instances for careers page crawling
+  max_workers: 4
+  # Max "Load more" button clicks per company (prevents runaway loops)
+  max_load_more_clicks: 5
+  # Max pagination pages to follow per company
+  max_pagination_pages: 5
+  # Enable Playwright interaction (load-more, pagination, search forms)
+  interactive_enabled: true
+
+# --- ATS (Applicant Tracking System) scanning ---
+ats:
+  scan_enabled: true
+  # Days of the week to run ATS scans (comma-separated, lowercase)
+  scan_days: mon,fri
+  # Hour of day to run scans (24-hour format)
+  scan_hour: 8
+  # High-score-history gate: only scan companies whose past jobs include at
+  # least one with a v3 sub_score sum >= this threshold. Companies with NO
+  # scored jobs yet are exempt (bootstrap pass). Score-based, not
+  # classification-based — sub_scores are 6 axes x 1-5 each (sum range 6-30):
+  #   >=18 lenient (skips only the bottom ~15%)
+  #   >=20 default (skips ~22% of unproductive cohort)
+  #   >=22 strict (top 56% of confirmed-hit companies retained)
+  high_score_history_threshold: 20
+  # ATS company identity (URL evidence → live verify → hit)
+  # See `.planning/ATS-RECONCILIATION-PLAN.md`. Ingestion stores URL-derived hints as
+  # ``pending``; reconciliation promotes to ``hit`` only after API verification.
+  identity_reconcile:
+    enabled: true
+    # When true, run ranking + probes but do not UPDATE companies (shadow metrics).
+    shadow: false
+    max_unique_urls_per_company: 500
+    max_companies_per_promote_run: 500
+
+# --- Scheduler cadence (Phase 42 wizard writes this; Settings allows custom edits) ---
+scheduler:
+  cadence_preset: standard  # one of: light (1x/day 08:00), standard (3x/day 0/8/16), heavy (6x/day every 4h)
+
+# --- Agentic backfill (nightly 4:15 AM Ollama + DDG + Playwright recovery) ---
+agentic:
+  # Max jobs processed per run. Each job is ~30-60s (search + render + LLM
+  # validation), so this is effectively a runtime budget that keeps the
+  # 4:15 AM run clear of careers_crawl at 5:00 AM. Raise to drain a large
+  # backlog faster (at the cost of a longer run); default 50.
+  batch_limit: 50
+
+# --- Development server ---
+server:
+  # Host to bind Flask to (use 0.0.0.0 to accept connections from other machines)
+  host: "127.0.0.1"
+  # Port number
+  port: 5000
+  # Debug mode (set to false in production-like environments)
+  debug: true
+
+# --- Unified staleness orchestrator (nightly 2:00 AM) ---
+# Consolidates expiry_check / liveness_check into one run that does:
+#   B) batch ATS reconciliation (one API call per company with an ATS slug)
+#   A) time-based stale marking + passive-stage archive
+#   C) parallel HTTP cascade for remaining unchecked jobs
+# See job_finder.web.expiry_checker.run_staleness_check for details.
+staleness:
+  # Master toggle. Also honored by the deprecated expiry.enabled key for
+  # backward compatibility during the migration window.
+  enabled: true
+  # Phase B: call Lever/Greenhouse/Ashby/Workday/SmartRecruiters list endpoints
+  # once per company instead of once per tracked job. Posting-ID set-diff
+  # marks jobs missing from the live board as expired.
+  batch_ats_enabled: true
+  # Phase C: re-check threshold — jobs whose expiry_checked_at is older than
+  # this are queued for the cascade. Legacy key expiry.recheck_days is read
+  # as a fallback.
+  cascade_recheck_days: 3
+  # Phase C: ThreadPoolExecutor size. Each worker runs HTTP + regex only;
+  # DB writes happen on the orchestrator thread.
+  cascade_parallel_workers: 10
+  # Phase C: per-request HTTP timeout (seconds).
+  cascade_request_timeout_seconds: 8
+
+# --- Filtering ---
+filters:
+  # Additional companies to auto-exclude (merged with built-in denylist)
+  # Add staffing agencies or spam companies you keep seeing
+  company_denylist: []
+
+# --- Parser auto-heal (Phase C, default off) ---
+# Declarative-recipe heal: when a source goes DEGRADED, the heal pipeline
+# generates a JSON recipe and writes it to <userdata>/heal_overrides/<surface>/.
+# With heal_enabled: false (the default), no recipes are generated and email
+# dispatch is byte-for-byte identical to the pre-Phase-C behaviour.
+# All reads are defensive: config.get('autoheal', {}).get(key, default).
+autoheal:
+  # Master toggle. Set to true to enable recipe generation and adoption.
+  heal_enabled: false
+  # LLM workload tier for recipe generation calls (quick / score / triage).
+  heal_provider: quick
+  # Maximum heal attempts per source before giving up (status stays DEGRADED).
+  heal_max_attempts: 3
+  # Hours to wait between heal attempts for the same source.
+  heal_backoff_hours: 24
+  # Wall-clock timeout (seconds) for the subprocess corpus-replay validator.
+  validate_timeout_s: 30

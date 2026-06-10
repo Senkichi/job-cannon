@@ -24,7 +24,7 @@ class ConfigError(ValueError):
 # --- Server defaults ---
 DEFAULT_SERVER_HOST = "127.0.0.1"
 DEFAULT_SERVER_PORT = 5000
-DEFAULT_SERVER_DEBUG = True
+DEFAULT_SERVER_DEBUG = False
 
 # --- Scoring defaults ---
 DEFAULT_CANDIDATE_SCORE_THRESHOLD = 42
@@ -183,16 +183,16 @@ def validate_required_sections(config: dict) -> None:
         config: Config dict loaded from config.yaml.
 
     Raises:
-        ValueError: If any required section is missing, naming the missing section(s).
+        ConfigError: If any required section is missing, naming the missing section(s).
         ConfigError: If profile.target_titles is empty without an explicit override
             (see validate_target_titles).
     """
     required = ["profile", "sources", "scoring", "db"]
     missing = [s for s in required if s not in config]
     if missing:
-        raise ValueError(
+        raise ConfigError(
             f"Config is missing required section(s): {', '.join(missing)}\n"
-            f"See config.example.yaml for the expected structure."
+            f"Run `job-cannon --print-example-config` to see the full expected structure."
         )
 
     # Reject old providers.scoring schema (Phase 40 migration)
@@ -297,7 +297,7 @@ def load_config(
         raise ConfigNotFoundError(
             f"Config file not found: {path}\n\n"
             f"To get started:\n"
-            f"  1. Copy the example:  cp config.example.yaml config.yaml\n"
+            f"  1. Print the example:  job-cannon --print-example-config > config.yaml\n"
             f"  2. Edit config.yaml and fill in:\n"
             f"     - profile.target_titles (job titles you're looking for)\n"
             f"     - profile.target_locations (where you want to work)\n"
@@ -313,7 +313,7 @@ def load_config(
             except yaml.YAMLError as exc:
                 raise ValueError(
                     f"Config file contains invalid YAML: {path}\n{exc}\n"
-                    f"See config.example.yaml for the expected structure."
+                    f"Run `job-cannon --print-example-config` to see the expected structure."
                 ) from exc
     except UnicodeDecodeError as exc:
         raise ValueError(
@@ -324,7 +324,7 @@ def load_config(
     if cfg is None:
         raise ValueError(
             f"Config file is empty or contains only comments: {path}\n"
-            f"See config.example.yaml for the expected structure."
+            f"Run `job-cannon --print-example-config` to see the expected structure."
         )
 
     # An absent file already returned {} above. If we reached here with a
