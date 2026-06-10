@@ -6,6 +6,12 @@ operator has explicitly opted out via `GSD_BACKUP_CONFIRMED=1`. The fail-closed
 default protects single-user setups where the rollback path is "restore the
 DB from a backup".
 
+Note: As of the v5 safety improvements, Job Cannon automatically takes a
+timestamped sqlite3 backup to ``<user_data_root>/backups/`` before any
+migration run on a non-empty database — so the m041 gate primarily serves as a
+belt-and-suspenders check for operators who disabled automatic backups or who
+are running the migration manually outside the normal startup path.
+
 Re-exported from `job_finder.web.db_migrate` for back-compat with tests at
 `tests/test_migration.py:1182-1240`. New code should import directly from
 `job_finder.web.migrations._gate`.
@@ -58,14 +64,17 @@ def _check_backup_recent(
     backups = sorted(glob.glob(pattern), reverse=True)
     if not backups:
         raise MigrationBlockedError(
-            "Migration 41 blocked: no backup_userdata_*.tar.gz found in cwd. "
-            "Run `bash backup_userdata.sh` first, or set GSD_BACKUP_CONFIRMED=1 "
-            "to override (only if you have an alternate backup)."
+            "Migration 41 blocked: no backup_userdata_*.tar.gz found in the user-data directory.\n"
+            "Job Cannon normally takes an automatic backup before any destructive migration, "
+            "but this gate requires a legacy tarball backup as an additional safeguard.\n"
+            "Set GSD_BACKUP_CONFIRMED=1 to proceed if you have confirmed a recent backup exists "
+            "(e.g. the automatic jobs_before_migrate_*.db in <user-data>/backups/)."
         )
     age_h = (time.time() - os.path.getmtime(backups[0])) / 3600.0
     if age_h > 24.0:
         raise MigrationBlockedError(
             f"Migration 41 blocked: most recent backup ({backups[0]}) is "
-            f"{age_h:.1f}h old (>24h). Run `bash backup_userdata.sh`, or set "
-            f"GSD_BACKUP_CONFIRMED=1 to override."
+            f"{age_h:.1f}h old (>24h).\n"
+            f"Set GSD_BACKUP_CONFIRMED=1 to proceed if you have a recent automatic backup "
+            f"in <user-data>/backups/ (jobs_before_migrate_*.db)."
         )
