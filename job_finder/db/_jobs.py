@@ -12,6 +12,7 @@ Re-exported via `job_finder.db.__init__` so existing
 from __future__ import annotations
 
 import json
+import logging
 import re
 import sqlite3
 from dataclasses import dataclass, field
@@ -25,6 +26,8 @@ from job_finder.web.location_canonical import to_json as _locations_to_json
 from ._jd_full import _is_jd_junk as _jd_is_junk
 from ._jd_full import set_jd_full as _set_jd_full
 from ._persistence import update_pipeline_status
+
+_logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from job_finder.parsed_job import ParsedJob, UnresolvedParsedJob
@@ -601,6 +604,62 @@ def upsert_job(
             dedup_key=parsed.dedup_key,
             unresolved_reasons=list(parsed.unresolved_reasons),
         )
+
+
+def set_source_id_if_free(
+    conn: sqlite3.Connection,
+    dedup_key: str,
+    company_id: int | None,
+    source_id: str | None,
+) -> bool:
+    """Write ``source_id`` when the row has none and the I-11 pair is free.
+
+    Sanctioned single-writer for ``jobs.source_id`` outside ingestion — the
+    upsert UPDATE branch deliberately never touches source_id, so a
+    strict-matched primary posting (primary_source_merge) routes its
+    platform-stable posting id through here.
+
+    Returns False without writing when source_id/company_id is missing, the
+    row is absent or already carries a source_id, or another row holds
+    (company_id, source_id) under the I-11 partial unique index — that twin
+    means the ATS scanner already ingested the same posting under a drifted
+    title; it is logged as a retroactive-dedup candidate, never raised.
+    """
+    if not source_id or company_id is None or not dedup_key:
+        return False
+    source_id = str(source_id)
+
+    row = conn.execute(
+        "SELECT source_id FROM jobs WHERE dedup_key = ?", (dedup_key,)
+    ).fetchone()
+    if row is None or row[0]:
+        return False
+
+    holder = conn.execute(
+        "SELECT dedup_key FROM jobs WHERE company_id = ? AND source_id = ? AND dedup_key != ?",
+        (company_id, source_id, dedup_key),
+    ).fetchone()
+    if holder is not None:
+        _logger.warning(
+            "source_id %s (company_id=%s) already held by %s — same posting "
+            "under a drifted title; skipping (retroactive-dedup candidate)",
+            source_id,
+            company_id,
+            holder[0],
+        )
+        return False
+
+    try:
+        conn.execute(
+            "UPDATE jobs SET source_id = ? WHERE dedup_key = ?",
+            (source_id, dedup_key),
+        )
+        conn.commit()
+    except sqlite3.IntegrityError as exc:
+        conn.rollback()
+        _logger.warning("source_id write rejected for %s: %s", dedup_key, exc)
+        return False
+    return True
 
 
 def get_job(conn: sqlite3.Connection, dedup_key: str) -> dict | None:
