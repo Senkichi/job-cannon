@@ -7,10 +7,17 @@ improvements for new email formats, and ATS-coverage additions.
 
 ## Setup
 
-See [docs/SETUP.md](docs/SETUP.md) for the full setup walkthrough
-(Gmail OAuth, config templates, troubleshooting).
+Automated bootstrappers handle tool detection (Python 3.13+, Git, uv),
+dependency install, optional Ollama + Claude Code CLI setup, and app
+launch — recommended for first-time setup:
 
-The short version:
+- **macOS:** `bash install.sh` (flags: `--minimal`, `--no-launch`, `--yes`)
+- **Windows:** `.\install.ps1` (flags: `-Minimal`, `-NoLaunch`, `-Yes`)
+
+> Note: `install.sh` targets macOS. Linux users follow
+> [docs/SETUP.md](docs/SETUP.md) for manual steps.
+
+For a manual setup or if you prefer to run commands yourself:
 
 ```powershell
 git clone https://github.com/Senkichi/job-cannon.git
@@ -19,6 +26,9 @@ uv sync --extra dev --extra eval
 uv run --active playwright install chromium   # for the e2e test tier
 git config core.hooksPath .githooks            # opt into pre-commit
 ```
+
+See [docs/SETUP.md](docs/SETUP.md) for the full walkthrough including
+Gmail OAuth, config templates, and troubleshooting.
 
 ## Development workflow
 
@@ -82,10 +92,14 @@ type — `chore(repo): ...` is correct.)
 
 ## Branching
 
-This repo pushes directly to `main`. The pre-push hook runs the test
-suite and a 800-LOC growth gate; both must pass before push. There is
-no feature-branch convention; if a change is large enough to warrant a
-branch, open an issue first to discuss the approach.
+`main` is branch-protected. All contributions go through a pull request:
+
+1. Fork the repo (or create a feature branch if you have write access).
+2. Work on a branch named after the change (e.g. `fix/parser-linkedin` or `feat/ats-lever`).
+3. Open a PR against `main`. The CI aggregate gate (`tests-passed`) must pass — it runs ruff lint, ruff format check, and the test suite.
+4. Squash-merge or regular merge; the commit that lands on `main` must still follow the conventional-commit format.
+
+If a change is large or architecturally significant, open an issue first to discuss the approach before writing code.
 
 ## What not to add
 

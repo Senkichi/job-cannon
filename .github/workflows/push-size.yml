@@ -1,10 +1,9 @@
 # Reports push size on every push to main.
 #
-# Solo-dev adaptation of empericus's pr-size.yml. Since this repo pushes
-# directly to main (no PRs), the local pre-push hook is the primary
-# gate — but this workflow gives a server-side record of push sizes in
-# the Actions log and fails the run for genuinely huge pushes so they
-# show up in commit-status notifications.
+# Companion to the PR-based CI gate. The local pre-push hook is the primary
+# size gate for contributors, but this workflow gives a server-side record of
+# push sizes in the Actions log and fails the run for genuinely huge pushes
+# so they show up in commit-status notifications.
 
 name: Push Size Check
 

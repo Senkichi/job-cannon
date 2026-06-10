@@ -17,8 +17,8 @@
 #   --no-launch  Stop after install steps; do not run `uv run job-cannon`.
 #   -h / --help  Print this header.
 #
-# UAT 2026-05-21 F5. Linux is out of scope for this round; Linux users
-# follow docs/SETUP.md.
+# Tested on macOS (Homebrew path). Linux is not covered by this script;
+# Linux users follow docs/SETUP.md for manual setup steps.
 
 set -u  # error on undefined vars; intentionally NOT -e so we can surface
         # next-manual-command guidance on failures rather than exit silently.
