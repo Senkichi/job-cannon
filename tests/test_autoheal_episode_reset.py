@@ -177,9 +177,7 @@ def test_sweep_failure_does_not_break_heartbeat(tmp_path, monkeypatch):
     _seed_attempts(conn, "linkedin", 0, status="degraded")
     app = _make_app(db, {"autoheal": {"heal_enabled": True}})
 
-    with patch(
-        "job_finder.web.autoheal.heal_pipeline.run_heal", side_effect=RuntimeError("boom")
-    ):
+    with patch("job_finder.web.autoheal.heal_pipeline.run_heal", side_effect=RuntimeError("boom")):
         _run_health_check_quiet(app, tmp_path, monkeypatch)  # must not raise
 
     rows = conn.execute(
