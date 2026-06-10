@@ -31,6 +31,8 @@ pipx install job-cannon
 
 ### Linux (Ubuntu 23.04+)
 
+Requires **Python 3.13+**. If your distro ships an older Python, install 3.13 first (e.g. via [deadsnakes](https://launchpad.net/~deadsnakes/+archive/ubuntu/ppa)) and use `pipx install --python python3.13 job-cannon`.
+
 ```bash
 apt install pipx
 pipx install job-cannon
@@ -44,7 +46,7 @@ After installation, run:
 job-cannon
 ```
 
-This starts the Flask app on http://localhost:5000. With no `config.yaml` present, the app redirects to a 7-step onboarding wizard that guides you through provider setup, Gmail configuration, and profile creation.
+This starts the Flask app on http://localhost:5000. With no `config.yaml` present, the app redirects to an 8-step onboarding wizard that guides you through provider setup, Gmail configuration, and profile creation.
 
 ---
 

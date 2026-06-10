@@ -30,9 +30,8 @@ narrow:
 
 An attacker with read access to your home directory (or your user-data
 directory specifically) can still read whatever lives in
-`<user_data_dir>/config.yaml`. Since v5.1 (2026-05-21) the primary
-storage for IMAP app passwords and provider API keys is the **OS
-keyring** (Windows Credential Manager, macOS Keychain, Linux Secret
+`<user_data_dir>/config.yaml`. Since v5.0.0 the primary storage for IMAP app passwords and provider
+API keys is the **OS keyring** (Windows Credential Manager, macOS Keychain, Linux Secret
 Service via D-Bus). Secrets read by the app go through
 `job_finder.secrets.get_secret()`, which checks:
 

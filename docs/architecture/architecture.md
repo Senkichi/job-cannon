@@ -78,10 +78,10 @@ Job Finder follows a classic 3-tier architecture:
 4. **Cascade Scoring (single tier):**
    - For NEW jobs that have `jd_full` populated (skip if score already present unless force-rescore)
    - Call `score_job(conn, job_row, config, profile)` (single entry point, dispatches via `model_provider.call_model(tier="scoring", ...)`)
-   - The cascade resolves in order: Ollama qwen2.5:14b → Groq → Cerebras → Gemini → Anthropic. First provider that returns valid schema-conformant output wins
+   - The cascade resolves in order: Ollama qwen2.5:14b → Gemini → Claude Code CLI → Anthropic. First provider that returns valid schema-conformant output wins
    - Returns: six-axis ordinal sub-scores + Python-derived classification (`apply | consider | skip | reject`) + structured fit analysis
    - Skipped if `jd_full` is missing (jobs without full JD route to enrichment first)
-   - Cost: $0 in the typical case (free-provider hop). Anthropic fallback path costs ~$0.05–$0.15 per job and is gated by `scoring.monthly_budget_usd`
+   - Cost: $0 in the typical case (free-provider hop). Anthropic SDK fallback path costs ~$0.05–$0.15 per job and is gated by `scoring.daily_budget_usd`
    - Cost recorded to `scoring_costs` table with provider attribution (`scoring_costs.provider`, `scoring_costs.model`)
 
 5. **Summary returned to scheduler:**

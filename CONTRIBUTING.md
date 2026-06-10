@@ -114,6 +114,8 @@ A few specific anti-patterns are documented in
 
 ## Reporting issues
 
-See [SECURITY.md](SECURITY.md) for vulnerability reports
-(security@example.com, no public issue). For non-security bugs and
-feature requests, open a GitHub issue using the templates.
+See [SECURITY.md](SECURITY.md) for vulnerability reports. Use the
+[GitHub Security Advisories](https://github.com/Senkichi/job-cannon/security/advisories/new)
+private-disclosure flow — do not open a public issue for security bugs.
+For non-security bugs and feature requests, open a GitHub issue using
+the templates.

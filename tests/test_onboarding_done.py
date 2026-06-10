@@ -362,7 +362,7 @@ def test_done_post_blocked_when_onboarding_already_complete(configured_app):
         "providers": {"primary": "ollama"},
         "sources": {"imap": {"enabled": True, "email": "real@user.com"}},
         "profile": {"target_titles": ["Staff Engineer"], "skills": ["python"]},
-        "scoring": {"monthly_budget_usd": 50},
+        "scoring": {"daily_budget_usd": 50},
         "db": {"path": "jobs.db"},
         "filters": {"company_denylist": ["BadCo"]},
         "output": {"max_results": 100},
@@ -420,7 +420,7 @@ def test_done_post_preserves_existing_sections_when_load_config_raises(configure
             "target_titles": [],  # this trips validate_target_titles → ConfigError
             "skills": ["python", "flask"],
         },
-        "scoring": {"monthly_budget_usd": 50, "fallback_chain": ["ollama"]},
+        "scoring": {"daily_budget_usd": 50, "fallback_chain": ["ollama"]},
         "db": {"path": "jobs.db"},
         "filters": {"company_denylist": ["BadCo"], "company_allowlist": ["GoodCo"]},
         "output": {"max_results": 100, "min_score_threshold": 7},
@@ -454,7 +454,7 @@ def test_done_post_preserves_existing_sections_when_load_config_raises(configure
 
     # All preserved sections must still be in the merged write
     merged = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
-    assert merged["scoring"]["monthly_budget_usd"] == 50, "scoring section wiped"
+    assert merged["scoring"]["daily_budget_usd"] == 50, "scoring section wiped"
     assert merged["scoring"]["fallback_chain"] == ["ollama"], "scoring.fallback_chain wiped"
     assert merged["db"]["path"] == "jobs.db", "db section wiped"
     assert merged["filters"]["company_denylist"] == ["BadCo"], "filters section wiped"

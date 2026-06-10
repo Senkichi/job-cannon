@@ -18,7 +18,7 @@ This document describes the coding conventions used across `job_finder/` for eng
 
 **Variables:**
 - snake_case for all local and module-level variables
-- Descriptive names: `dedup_key`, `source_urls`, `monthly_budget_usd`, `input_tokens`, `output_tokens`
+- Descriptive names: `dedup_key`, `source_urls`, `daily_budget_usd`, `input_tokens`, `output_tokens`
 - Avoid single-letter except in very tight loops (`i` in for loops acceptable)
 - Type-hint hints embedded in name when appropriate: `cost_usd`, `timestamp`, `conn` (sqlite3.Connection)
 
@@ -226,8 +226,8 @@ def compute_cost(model: str, input_tokens: int, output_tokens: int) -> float:
 
 **Configuration:**
 - Functions take `config: dict` as parameter, not reading global state
-- Config keys namespaced: `config["scoring"]["monthly_budget_usd"]`
-- Fallback defaults provided: `config.get("scoring", {}).get("monthly_budget_usd", DEFAULT_MONTHLY_BUDGET_USD)`
+- Config keys namespaced: `config["scoring"]["daily_budget_usd"]`
+- Fallback defaults provided: `config.get("scoring", {}).get("daily_budget_usd", DEFAULT_DAILY_BUDGET_USD)`
 
 ## Special Patterns
 
