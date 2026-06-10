@@ -1,9 +1,19 @@
-"""Gemini provider adapter — google-generativeai SDK with response_json_schema.
+"""Gemini provider adapter -- google-genai SDK (v1+).
 
-Phase 25 deliverable — part of the multi-provider routing system.
+Ports the provider from the legacy google-generativeai SDK
+(google.generativeai) to the shipped google-genai>=1.0.0 SDK
+(google.genai).  The old SDK is not installed in this project; its
+import google.generativeai raised ModuleNotFoundError at construction
+time, silently killing the provider in the cascade.
 
-NOTE: This implementation requires google-generativeai >= 0.8.5.
-The API may differ from earlier versions; ensure compatibility.
+API used:
+- genai.Client(api_key=...)  -- pure-local construction, no network call.
+- client.models.generate_content(model, contents, config)
+- types.GenerateContentConfig(system_instruction, max_output_tokens,
+  response_mime_type, response_json_schema)
+- response.usage_metadata.prompt_token_count /
+  response.usage_metadata.candidates_token_count
+- errors.APIError -- base class for all SDK-level API errors.
 """
 
 from __future__ import annotations
@@ -15,8 +25,9 @@ import time
 from typing import Any
 
 try:
-    import google.generativeai as genai
-    from google.generativeai import types
+    from google import genai
+    from google.genai import errors as genai_errors
+    from google.genai import types as genai_types
 
     _GENAI_AVAILABLE = True
 except ImportError:
@@ -29,46 +40,48 @@ logger = logging.getLogger(__name__)
 
 
 class GeminiProvider(BaseProvider):
-    """Provider adapter for Google Gemini via google-generativeai SDK.
+    """Provider adapter for Google Gemini via the google-genai SDK (v1+).
 
-    Uses response_json_schema for structured output with
-    response_mime_type="application/json". Automatically retries once
-    on transient errors with a configurable sleep duration
-    (default 15.0s for the 5 RPM free tier).
+    Uses response_json_schema inside GenerateContentConfig for structured
+    output.  Automatically retries once on transient errors (HTTP 429 /
+    rate-limit / timeout) with a configurable sleep duration (default 15 s
+    for the free-tier 5 RPM limit).
 
     Args:
         config: Application config dict. Reads providers.gemini.*.
-        client: Optional pre-built genai.GenerativeModel for testing.
-                When provided, skips API key configuration.
+        client: Optional pre-built genai.Client for testing.
+                When provided, skips API key resolution entirely.
+
+    Raises:
+        ImportError: When google-genai is not installed.
+        ValueError: When no Gemini API key can be resolved.
     """
 
     def __init__(self, config: dict, *, client: Any | None = None) -> None:
         if not _GENAI_AVAILABLE:
             raise ImportError(
-                "google-generativeai is required for Gemini provider. "
-                "Install with: pip install google-generativeai~=0.8.5"
+                "google-genai is required for GeminiProvider. "
+                "Install with: pip install google-genai>=1.0.0"
             )
         provider_cfg = config.get("providers", {}).get("gemini", {})
         self._retry_sleep: float = provider_cfg.get("retry_sleep_seconds", 15.0)
 
         if client is not None:
-            self._client = client
+            self._client: Any = client
         else:
-            # Honor the custom api_key_env override first (lets users point at
-            # a non-default env var name); fall back to the canonical
-            # precedence stack (GEMINI_API_KEY env, keyring, config.yaml).
+            # Honor the custom api_key_env override first; fall back to the
+            # canonical precedence stack (env var -> keyring -> config.yaml).
             api_key_env = provider_cfg.get("api_key_env", "GEMINI_API_KEY")
             api_key = os.environ.get(api_key_env) or get_secret(
                 "providers.api_keys.gemini", config=config
             )
             if not api_key:
                 raise ValueError(
-                    f"Gemini API key not set — expected env var {api_key_env!r}, "
+                    f"Gemini API key not set -- expected env var {api_key_env!r}, "
                     "keyring entry providers.api_keys.gemini, or config.yaml."
                 )
-            genai.configure(api_key=api_key)
-            # Defer model instantiation to call() so we can use the specified model
-            self._api_key = api_key
+            # Client construction is pure-local; no network call at this point.
+            self._client = genai.Client(api_key=api_key)
 
     def call(
         self,
@@ -82,57 +95,61 @@ class GeminiProvider(BaseProvider):
         """Make a Gemini model call and return a ModelResult.
 
         Args:
-            model: Gemini model identifier, e.g. "gemini-2.0-flash".
-            system: System prompt string (passed as system_instruction).
+            model: Gemini model identifier, e.g. "gemini-2.5-flash".
+            system: System prompt (passed as system_instruction).
             messages: List of message dicts [{role, content}].
-            output_schema: JSON schema dict for structured output. When provided,
-                sets response_mime_type="application/json" and passes the schema
-                via response_json_schema. When None, raw text is returned.
+            output_schema: JSON schema dict for structured output. When
+                provided, sets response_mime_type="application/json" and
+                passes the schema via response_json_schema.  When None,
+                raw text is returned wrapped as {"text": ...}.
             max_tokens: Maximum output tokens. Defaults to 1024.
-            timeout: Unused (google-generativeai SDK handles timeouts internally).
+            timeout: Unused -- the SDK handles timeouts internally.
 
         Returns:
-            ModelResult with provider="gemini", cost_usd=0.0 (free tier),
-            schema_valid=True if output_schema was provided.
+            ModelResult with provider="gemini", cost_usd=0.0 (Gemini is in
+            FREE_PROVIDERS), and schema_valid=True.
 
         Raises:
-            Exception: On any API error (rate limits, validation, etc).
+            ValueError: If the response body is not valid JSON when
+                output_schema is provided.
+            google.genai.errors.APIError: On non-transient API errors.
         """
-        client = genai.GenerativeModel(model)
         contents = self._build_contents(messages)
 
-        gen_config_kwargs: dict[str, Any] = {
+        config_kwargs: dict[str, Any] = {
+            "system_instruction": system,
             "max_output_tokens": max_tokens,
         }
-
-        # Set response format for structured output
         if output_schema is not None:
-            gen_config_kwargs["response_mime_type"] = "application/json"
-            gen_config_kwargs["response_json_schema"] = output_schema
+            config_kwargs["response_mime_type"] = "application/json"
+            config_kwargs["response_json_schema"] = output_schema
 
-        # Add system instruction
-        generation_config = types.GenerationConfig(**gen_config_kwargs)
+        gen_config = genai_types.GenerateContentConfig(**config_kwargs)
 
         response = None
-        last_exception = None
+        last_exception: Exception | None = None
 
-        for attempt in range(2):  # Retry once on transient errors
+        for attempt in range(2):  # one retry on transient errors
             try:
-                response = client.generate_content(
-                    contents,
-                    generation_config=generation_config,
-                    system_instruction=system,
-                    stream=False,
+                response = self._client.models.generate_content(
+                    model=model,
+                    contents=contents,
+                    config=gen_config,
                 )
                 break
             except Exception as exc:
                 last_exception = exc
-                # Retry on transient errors (rate limits, timeouts)
-                # Check for common transient error indicators
                 error_str = str(exc).lower()
-                if attempt == 0 and (
-                    "429" in error_str or "rate" in error_str or "timeout" in error_str
-                ):
+                is_rate_limit = (
+                    isinstance(exc, genai_errors.APIError) and getattr(exc, "code", 0) == 429
+                )
+                is_transient = (
+                    is_rate_limit
+                    or "429" in error_str
+                    or "rate" in error_str
+                    or "timeout" in error_str
+                )
+                if attempt == 0 and is_transient:
                     logger.warning(
                         "Gemini transient error on attempt 1, retrying in %.1fs: %s",
                         self._retry_sleep,
@@ -140,35 +157,46 @@ class GeminiProvider(BaseProvider):
                     )
                     time.sleep(self._retry_sleep)
                     continue
-                # Non-transient error, raise immediately
                 raise
 
         if response is None:
             raise last_exception or Exception("Gemini API returned no response")
 
-        # Parse response
         if output_schema is not None:
             try:
                 data = json.loads(response.text)
-            except json.JSONDecodeError as e:
-                logger.error("Gemini returned invalid JSON: %s", response.text[:200])
-                raise ValueError(f"Invalid JSON from Gemini: {e}") from e
+            except json.JSONDecodeError as exc:
+                logger.error("Gemini returned invalid JSON: %s", (response.text or "")[:200])
+                raise ValueError(f"Invalid JSON from Gemini: {exc}") from exc
         else:
             data = {"text": response.text}
+
+        usage = response.usage_metadata
+        input_tokens = (usage.prompt_token_count or 0) if usage else 0
+        output_tokens = (usage.candidates_token_count or 0) if usage else 0
 
         return ModelResult(
             data=data,
             cost_usd=0.0,
-            input_tokens=response.usage_metadata.prompt_token_count or 0,
-            output_tokens=response.usage_metadata.candidates_token_count or 0,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
             model=model,
             provider="gemini",
             schema_valid=True,
         )
 
-    def _build_contents(self, messages: list[dict]) -> list[dict]:
-        """Translate Anthropic-style messages to Gemini contents format."""
+    def _build_contents(self, messages: list[dict]) -> list[genai_types.Content]:
+        """Translate adapter-style messages to genai.types.Content objects.
+
+        The new SDK requires role to be "user" or "model" (not
+        "assistant").  Map "assistant" -> "model" for callers that pass
+        OpenAI-style role names.
+        """
+        role_map = {"assistant": "model"}
         return [
-            {"role": msg.get("role", "user"), "parts": [{"text": msg["content"]}]}
+            genai_types.Content(
+                role=role_map.get(msg.get("role", "user"), msg.get("role", "user")),
+                parts=[genai_types.Part.from_text(text=msg["content"])],
+            )
             for msg in messages
         ]
