@@ -132,9 +132,7 @@ def _pytest_gate(source: str, *, timeout_s: float) -> str | None:
     if not tests_dir.is_dir():
         return None
     files = sorted(
-        p
-        for p in tests_dir.glob(f"test_*{token}*.py")
-        if not p.name.startswith("test_autoheal")
+        p for p in tests_dir.glob(f"test_*{token}*.py") if not p.name.startswith("test_autoheal")
     )
     if not files:
         return None

@@ -47,7 +47,9 @@ def run_heal(conn: sqlite3.Connection, config: dict, source: str) -> str | None:
     attempts = int(row[1] or 0)
     max_attempts = int(autoheal_cfg.get("heal_max_attempts", 3))
     if attempts >= max_attempts:
-        logger.info("autoheal: %s exhausted heal attempts (%d); staying degraded", source, attempts)
+        logger.info(
+            "autoheal: %s exhausted heal attempts (%d); staying degraded", source, attempts
+        )
         return None
 
     backoff_hours = float(autoheal_cfg.get("heal_backoff_hours", 24))

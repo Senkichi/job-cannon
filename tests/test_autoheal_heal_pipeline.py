@@ -167,9 +167,7 @@ def test_no_provider_audited(tmp_path):
 
     assert result == "no_provider"
     assert "no_provider" in _audit_outcomes(conn, "linkedin")
-    status = conn.execute(
-        "SELECT status FROM source_health WHERE source='linkedin'"
-    ).fetchone()[0]
+    status = conn.execute("SELECT status FROM source_health WHERE source='linkedin'").fetchone()[0]
     assert status == "degraded"
 
 
@@ -500,8 +498,6 @@ def test_fire_gating_heal_error_never_breaks_ingestion(tmp_path):
     from job_finder.web import pipeline_runner
 
     db, _conn_unused = _db(tmp_path)
-    with patch(
-        "job_finder.web.autoheal.heal_pipeline.run_heal", side_effect=RuntimeError("boom")
-    ):
+    with patch("job_finder.web.autoheal.heal_pipeline.run_heal", side_effect=RuntimeError("boom")):
         # Must not raise
         pipeline_runner._run_heal_pass(db, {"autoheal": {"heal_enabled": True}}, ["linkedin"])

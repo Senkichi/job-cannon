@@ -62,7 +62,12 @@ def lever_url_override(tmp_path, monkeypatch):
     loader.write_override(
         "ats",
         "lever",
-        {"source": "ats:lever", "title_fields": [], "url_fields": ["renamedUrl"], "array_keys": []},
+        {
+            "source": "ats:lever",
+            "title_fields": [],
+            "url_fields": ["renamedUrl"],
+            "array_keys": [],
+        },
     )
     loader.reload()
     monkeypatch.setattr(override_loader, "_LOADER", loader)
