@@ -625,17 +625,17 @@ class TestParseFailureArchival:
     """Tests for _should_archive_failure and _archive_parse_failure helpers."""
 
     def test_archive_on_zero_jobs(self, tmp_path, monkeypatch):
-        """Parse failure with long non-meta body writes a file to data/parse_failures/."""
+        """Parse failure with long non-meta body writes a file to gmail_parse_failures/ under user-data root."""
         from job_finder.sources.gmail_source import _archive_parse_failure, _should_archive_failure
 
         sender = "alert@indeed.com"
         assert _should_archive_failure(_LONG_NONMETA_HTML_BODY, [], sender) is True
 
-        # Write to a temp directory to avoid polluting the real data/ dir
-        monkeypatch.chdir(tmp_path)
+        # Write to a temp user-data directory via env override
+        monkeypatch.setenv("JOB_CANNON_USER_DATA_DIR", str(tmp_path))
         _archive_parse_failure(sender, _LONG_NONMETA_HTML_BODY)
-        failure_dir = tmp_path / "data" / "parse_failures"
-        assert failure_dir.exists(), "data/parse_failures/ should be created"
+        failure_dir = tmp_path / "gmail_parse_failures"
+        assert failure_dir.exists(), "gmail_parse_failures/ should be created under user-data root"
         files = list(failure_dir.iterdir())
         assert len(files) == 1, f"Expected 1 archived file, got {len(files)}"
 
@@ -670,11 +670,11 @@ class TestParseFailureArchival:
         assert result is False, "Should not archive when jobs were found"
 
     def test_archive_creates_directory(self, tmp_path, monkeypatch):
-        """data/parse_failures/ is created if it doesn't exist."""
+        """gmail_parse_failures/ is created under user-data root if it doesn't exist."""
         from job_finder.sources.gmail_source import _archive_parse_failure
 
-        monkeypatch.chdir(tmp_path)
-        failure_dir = tmp_path / "data" / "parse_failures"
+        monkeypatch.setenv("JOB_CANNON_USER_DATA_DIR", str(tmp_path))
+        failure_dir = tmp_path / "gmail_parse_failures"
         assert not failure_dir.exists(), "Directory should not exist before archival"
         _archive_parse_failure("alert@indeed.com", _LONG_NONMETA_HTML_BODY)
         assert failure_dir.exists(), "Directory should exist after archival"
@@ -683,9 +683,9 @@ class TestParseFailureArchival:
         """Archived file is named {domain}_{timestamp}.html."""
         from job_finder.sources.gmail_source import _archive_parse_failure
 
-        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("JOB_CANNON_USER_DATA_DIR", str(tmp_path))
         _archive_parse_failure("alert@indeed.com", _LONG_NONMETA_HTML_BODY)
-        failure_dir = tmp_path / "data" / "parse_failures"
+        failure_dir = tmp_path / "gmail_parse_failures"
         files = list(failure_dir.iterdir())
         assert len(files) == 1
         filename = files[0].name
@@ -698,9 +698,9 @@ class TestParseFailureArchival:
         """Archived file contains the original HTML body."""
         from job_finder.sources.gmail_source import _archive_parse_failure
 
-        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("JOB_CANNON_USER_DATA_DIR", str(tmp_path))
         _archive_parse_failure("alert@indeed.com", _LONG_NONMETA_HTML_BODY)
-        failure_dir = tmp_path / "data" / "parse_failures"
+        failure_dir = tmp_path / "gmail_parse_failures"
         files = list(failure_dir.iterdir())
         content = files[0].read_text(encoding="utf-8")
         assert "job alert email" in content, "Archived file should contain original HTML"
@@ -709,12 +709,9 @@ class TestParseFailureArchival:
         """_archive_parse_failure logs a warning but never raises on write errors."""
         from job_finder.sources.gmail_source import _archive_parse_failure
 
-        # Pass an invalid path by making the directory a file instead
-        monkeypatch.chdir(tmp_path)
-        # Create a FILE at the parse_failures path so makedirs will fail
-        data_dir = tmp_path / "data"
-        data_dir.mkdir()
-        parse_failures_file = data_dir / "parse_failures"
+        # Create a FILE at the gmail_parse_failures path so makedirs will fail
+        monkeypatch.setenv("JOB_CANNON_USER_DATA_DIR", str(tmp_path))
+        parse_failures_file = tmp_path / "gmail_parse_failures"
         parse_failures_file.write_text("not a directory")
 
         # Should not raise even though we can't create the directory
@@ -1715,7 +1712,7 @@ class TestParseFailureE2E:
     """
 
     def test_e2e_full_flow_should_archive_then_write_file(self, tmp_path, monkeypatch):
-        """E2E: simulate parse failure then archive — verify file written to data/parse_failures/."""
+        """E2E: simulate parse failure then archive — verify file written to gmail_parse_failures/ under user-data root."""
         from job_finder.sources.gmail_source import _archive_parse_failure, _should_archive_failure
 
         sender = "noreply@glassdoor.com"
@@ -1728,12 +1725,12 @@ class TestParseFailureE2E:
         should_archive = _should_archive_failure(_UNPARSEABLE_LONG_HTML, jobs, sender)
         assert should_archive is True, "E2E: expected _should_archive_failure → True"
 
-        # Step 3: archive and verify file created
-        monkeypatch.chdir(tmp_path)
+        # Step 3: archive and verify file created under user-data root
+        monkeypatch.setenv("JOB_CANNON_USER_DATA_DIR", str(tmp_path))
         _archive_parse_failure(sender, _UNPARSEABLE_LONG_HTML)
 
-        failure_dir = tmp_path / "data" / "parse_failures"
-        assert failure_dir.exists(), "data/parse_failures/ directory should exist after archival"
+        failure_dir = tmp_path / "gmail_parse_failures"
+        assert failure_dir.exists(), "gmail_parse_failures/ directory should exist after archival"
         files = list(failure_dir.iterdir())
         assert len(files) == 1, f"Expected 1 archived file, got {len(files)}"
 
@@ -1742,10 +1739,10 @@ class TestParseFailureE2E:
         from job_finder.sources.gmail_source import _archive_parse_failure
 
         sender = "alert@indeed.com"
-        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("JOB_CANNON_USER_DATA_DIR", str(tmp_path))
         _archive_parse_failure(sender, _UNPARSEABLE_LONG_HTML)
 
-        failure_dir = tmp_path / "data" / "parse_failures"
+        failure_dir = tmp_path / "gmail_parse_failures"
         files = list(failure_dir.iterdir())
         assert len(files) == 1, f"Expected 1 archived file, got {len(files)}"
 
