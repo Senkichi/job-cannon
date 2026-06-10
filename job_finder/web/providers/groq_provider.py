@@ -7,6 +7,11 @@ score: ``llama-3.3-70b-versatile``).
 
 Phase 153 deliverable: re-implements the Groq adapter (previously built in
 commit 2585f43, deleted in 38ea791) using the openrouter_provider template.
+
+Issue 292 (2026-06-10): compute real ``cost_usd`` from usage tokens so that
+``_maybe_record_cost`` in the cascade records truthful per-call spend.  Groq
+has a free tier — a free-tier key bills nothing even though the meter records
+a notional cost (conservative: gate trips early rather than never).
 """
 
 from __future__ import annotations
@@ -24,6 +29,38 @@ logger = logging.getLogger(__name__)
 _DEFAULT_BASE_URL = "https://api.groq.com/openai/v1"
 _DEFAULT_TIMEOUT = 300.0
 
+# ---------------------------------------------------------------------------
+# Pricing table — price per million tokens (USD)
+# Source: https://groq.com/pricing  last_verified: 2026-06-10
+# ---------------------------------------------------------------------------
+_GROQ_PRICING: dict[str, dict[str, float]] = {
+    # quick-tier default (model_provider._PROVIDER_DEFAULTS groq.quick)
+    "llama-3.1-8b-instant": {"input": 0.05, "output": 0.08},
+    # score-tier default (model_provider._PROVIDER_DEFAULTS groq.score)
+    "llama-3.3-70b-versatile": {"input": 0.59, "output": 0.79},
+    # other production models available on Groq cloud
+    "llama-4-scout-17b-16e-instruct": {"input": 0.11, "output": 0.34},
+    "qwen-3-32b": {"input": 0.29, "output": 0.59},
+}
+
+
+def _groq_cost(model: str, input_tokens: int, output_tokens: int) -> float:
+    """Return cost in USD for a Groq API call.
+
+    Falls back to the most expensive known entry for unrecognised model IDs
+    (conservative — gate trips early rather than never).
+    """
+    pricing = _GROQ_PRICING.get(model)
+    if pricing is None:
+        logger.warning(
+            "Unknown Groq model '%s' in _groq_cost — using highest known pricing as fallback",
+            model,
+        )
+        pricing = max(_GROQ_PRICING.values(), key=lambda p: p["input"] + p["output"])
+    return (input_tokens / 1_000_000) * pricing["input"] + (output_tokens / 1_000_000) * pricing[
+        "output"
+    ]
+
 
 class GroqProvider(BaseProvider):
     """Provider adapter for Groq API (OpenAI-compatible).
@@ -33,10 +70,11 @@ class GroqProvider(BaseProvider):
     in config.yaml). Raises ``ValueError`` immediately when no key is found
     so the cascade can skip the provider gracefully.
 
-    Reports ``cost_usd=0.0``; Groq has both free and paid tiers but the
-    provider is intentionally kept out of ``FREE_PROVIDERS`` — callers that
-    add real cost tracking later can update this field without changing the
-    gating logic.
+    Computes real ``cost_usd`` from usage tokens (Issue 292, 2026-06-10).
+    Groq has a free tier — a free-tier key bills nothing even though the
+    meter records a notional cost (conservative).  ``"groq"`` is intentionally
+    kept out of ``FREE_PROVIDERS`` so the budget gate applies when a paid-tier
+    key is present.
 
     Args:
         config: Application config dict.
@@ -79,8 +117,8 @@ class GroqProvider(BaseProvider):
             timeout: Request timeout in seconds.  Defaults to 300.0.
 
         Returns:
-            ``ModelResult`` with ``provider="groq"``, ``cost_usd=0.0``,
-            and ``schema_valid=True``.
+            ``ModelResult`` with ``provider="groq"``, real ``cost_usd``
+            computed from ``_groq_cost()``, and ``schema_valid=True``.
 
         Raises:
             requests.HTTPError: On non-2xx response from the Groq API.
@@ -118,10 +156,11 @@ class GroqProvider(BaseProvider):
         usage = body.get("usage", {})
         input_tokens = usage.get("prompt_tokens", 0)
         output_tokens = usage.get("completion_tokens", 0)
+        cost_usd = _groq_cost(model, input_tokens, output_tokens)
 
         return ModelResult(
             data=data,
-            cost_usd=0.0,
+            cost_usd=cost_usd,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             model=model,

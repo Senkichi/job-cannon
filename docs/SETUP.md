@@ -44,7 +44,7 @@ The `--extra dev --extra eval` flags pull in test + benchmark tooling. If you on
 uv run job-cannon
 ```
 
-Open http://localhost:5000. With no `config.yaml` present, the app redirects to a 7-step wizard:
+Open http://localhost:5000. With no `config.yaml` present, the app redirects to an 8-step wizard:
 
 1. **Welcome** — machine check (Python version, keyring backend, Ollama, etc.)
 2. **AI provider** — auto-detects installed $0 CLIs (Ollama, Claude Code CLI, Gemini CLI). Top hit is recommended.
@@ -71,24 +71,22 @@ The example `config.yaml` has inline comments for every field. The app validates
 
 ## 3. AI Provider Reference
 
-Every scoring call cascades through providers in order. The default chain is **Ollama → Groq → Cerebras → Gemini → Anthropic** — all $0 in normal operation.
+Every scoring call cascades through providers in order. The default chain is **Ollama → Gemini → Claude Code CLI → Anthropic** — the first three are $0 in normal operation; Anthropic SDK is the paid emergency fallback.
 
 | Provider | Cost | How to enable |
 |---|---|---|
 | **Ollama** (`qwen2.5:14b`) | $0 (runs locally) | Install [Ollama](https://ollama.com), then `ollama pull qwen2.5:14b`. App auto-starts the service. Production primary per Phase 33 shootout. |
-| **Groq** | $0 (free tier, rate-limited) | Get key at [console.groq.com](https://console.groq.com). Enter in Settings → Providers (lands in keyring). |
-| **Cerebras** | $0 (free tier, rate-limited) | Get key at [cloud.cerebras.ai](https://cloud.cerebras.ai). Enter in Settings → Providers. |
-| **Gemini** | $0 (free tier, rate-limited) | Get key at [ai.google.dev](https://ai.google.dev). Enter in Settings → Providers. |
-| **Anthropic CLI** | $0 (via Claude.ai subscription) | Install [Claude Code CLI](https://docs.claude.com/en/docs/agents-and-tools/claude-code/overview), sign in with `claude /login`. Cascade dispatches via `claude -p` subprocess. |
-| **Anthropic API** | Paid (per call) | Get key at [console.anthropic.com](https://console.anthropic.com/settings/keys). Only consumed when the CLI isn't authenticated. |
+| **Gemini** | $0 (free tier, rate-limited) | Get key at [ai.google.dev](https://ai.google.dev). Enter in Settings → Providers (lands in keyring). |
+| **Claude Code CLI** | $0 (via Claude.ai subscription) | Install [Claude Code CLI](https://docs.claude.com/en/docs/agents-and-tools/claude-code/overview), sign in with `claude /login`. Cascade dispatches via `claude -p` subprocess. |
+| **Anthropic API** | Paid (per call) | Get key at [console.anthropic.com](https://console.anthropic.com/settings/keys). Final emergency fallback only — not reached in normal use. |
 
 Customize the cascade order in `config.yaml`:
 
 ```yaml
 providers:
   primary: ollama
-  fallback_chain: [groq, cerebras, gemini, anthropic]
-  daily_limits: {}       # e.g. {groq: 1000}
+  fallback_chain: [gemini, claude_code_cli, anthropic]
+  daily_limits: {}       # e.g. {gemini: 1000}
   throttle_delays: {}    # e.g. {gemini: 0.5}
 ```
 
@@ -97,6 +95,12 @@ The cascade audit harness lives at `evals/cascade_audit/` if you want to compare
 ---
 
 ## 4. Job Sources
+
+### Free portals — no credentials needed
+
+Three job boards (RemoteOK, Remotive, Himalayas) are queried using your target job titles as keywords. They return full job descriptions, so jobs are **AI-scored on the same sync they arrive** — unlike email-based sources which require a separate enrichment pass to fill the job description.
+
+The wizard enables this by default (`sources.portal_search.enabled: true`). To disable: uncheck the "Free job portals" toggle on the wizard's IMAP step, or set `sources.portal_search.enabled: false` in `config.yaml` after setup.
 
 ### Gmail via IMAP (default — no OAuth)
 

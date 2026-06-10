@@ -14,6 +14,13 @@ API used:
 - response.usage_metadata.prompt_token_count /
   response.usage_metadata.candidates_token_count
 - errors.APIError -- base class for all SDK-level API errors.
+
+Issue 292 (2026-06-10): compute real ``cost_usd`` from usage tokens.
+``"gemini"`` is in ``FREE_PROVIDERS``, so ``_maybe_record_cost`` in the cascade
+forces the recorded value to 0.0 regardless of what the adapter returns.
+We still compute a notional cost here so the ``ModelResult`` is truthful (and
+if ``"gemini"`` is ever reclassified as a paid provider, the meter is already
+wired).  Standard tier pricing (text / non-audio) is used for simplicity.
 """
 
 from __future__ import annotations
@@ -37,6 +44,42 @@ from job_finder.secrets import get_secret
 from job_finder.web.model_provider import BaseProvider, ModelResult
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Pricing table — price per million tokens (USD), standard tier, text input
+# Source: https://ai.google.dev/pricing  last_verified: 2026-06-10
+#
+# NOTE: Gemini is in FREE_PROVIDERS — _maybe_record_cost forces cost_usd=0.0
+# when recording to scoring_costs. The notional cost is computed here so the
+# ModelResult is truthful; it will matter if "gemini" is ever reclassified.
+# ---------------------------------------------------------------------------
+_GEMINI_PRICING: dict[str, dict[str, float]] = {
+    # quick-tier default (model_provider._PROVIDER_DEFAULTS gemini.quick)
+    # Standard tier, text/image/video input
+    "gemini-2.5-flash": {"input": 0.30, "output": 2.50},
+    # score-tier default (model_provider._PROVIDER_DEFAULTS gemini.score)
+    # Standard tier, prompts ≤200k tokens (conservative: use ≤200k pricing)
+    "gemini-2.5-pro": {"input": 1.25, "output": 10.00},
+}
+
+
+def _gemini_cost(model: str, input_tokens: int, output_tokens: int) -> float:
+    """Return notional cost in USD for a Gemini API call.
+
+    Falls back to the most expensive known entry for unrecognised model IDs
+    (conservative — gate trips early rather than never, should "gemini" ever
+    be removed from FREE_PROVIDERS).
+    """
+    pricing = _GEMINI_PRICING.get(model)
+    if pricing is None:
+        logger.warning(
+            "Unknown Gemini model '%s' in _gemini_cost — using highest known pricing as fallback",
+            model,
+        )
+        pricing = max(_GEMINI_PRICING.values(), key=lambda p: p["input"] + p["output"])
+    return (input_tokens / 1_000_000) * pricing["input"] + (output_tokens / 1_000_000) * pricing[
+        "output"
+    ]
 
 
 class GeminiProvider(BaseProvider):
@@ -106,8 +149,10 @@ class GeminiProvider(BaseProvider):
             timeout: Unused -- the SDK handles timeouts internally.
 
         Returns:
-            ModelResult with provider="gemini", cost_usd=0.0 (Gemini is in
-            FREE_PROVIDERS), and schema_valid=True.
+            ModelResult with provider="gemini", notional ``cost_usd``
+            computed from ``_gemini_cost()`` (Gemini is in FREE_PROVIDERS so
+            ``_maybe_record_cost`` forces the recorded value to 0.0, but the
+            ModelResult carries the truthful amount), and schema_valid=True.
 
         Raises:
             ValueError: If the response body is not valid JSON when
@@ -174,10 +219,11 @@ class GeminiProvider(BaseProvider):
         usage = response.usage_metadata
         input_tokens = (usage.prompt_token_count or 0) if usage else 0
         output_tokens = (usage.candidates_token_count or 0) if usage else 0
+        cost_usd = _gemini_cost(model, input_tokens, output_tokens)
 
         return ModelResult(
             data=data,
-            cost_usd=0.0,
+            cost_usd=cost_usd,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             model=model,

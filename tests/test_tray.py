@@ -259,3 +259,81 @@ def test_dispatch_tray_import_failure_falls_back_to_terminal(monkeypatch, _dispa
         main_mod.main()
     mock_terminal.assert_called_once()
     mock_tray_cls.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Issue #290: tray mode prints banner + schedules browser open
+# ---------------------------------------------------------------------------
+
+
+def test_tray_launch_prints_banner_and_schedules_browser(monkeypatch, capsys):
+    """Tray mode must print the URL banner (with tray-icon hint) and schedule
+    the browser-open Timer — same as terminal mode, so the first-time user is
+    not stranded."""
+    monkeypatch.delenv("JOB_CANNON_NO_BROWSER", raising=False)
+    monkeypatch.delenv("JOB_CANNON_NO_TRAY", raising=False)
+
+    fake_timer = MagicMock()
+    mock_tray_instance = MagicMock()
+
+    with (
+        patch("job_finder.config.load_config", return_value={}),
+        patch("job_finder.__main__.probe_existing_jc", return_value=None),
+        patch("job_finder.__main__._port_is_listening", return_value=False),
+        patch("job_finder.__main__.acquire_pidfile", return_value=MagicMock(acquired=True)),
+        patch("job_finder.web._process_lifecycle.install_kill_on_exit"),
+        patch("job_finder.__main__.threading.Timer", return_value=fake_timer) as mock_timer_cls,
+        patch("job_finder.tray.TrayApp", return_value=mock_tray_instance),
+        patch("job_finder.__main__.sys.argv", ["job-cannon"]),
+    ):
+        main_mod.main()
+
+    captured = capsys.readouterr()
+    # Banner must mention the URL
+    assert "Job Cannon is starting on http://127.0.0.1:5000" in captured.out
+    # Tray-mode hint must be present
+    assert "tray icon" in captured.out
+    # Browser open line must be present
+    assert "Opening your browser" in captured.out
+    # Timer was constructed with the correct arguments
+    mock_timer_cls.assert_called_once()
+    call = mock_timer_cls.call_args
+    assert call.args[0] == main_mod._BROWSER_OPEN_DELAY_SEC
+    assert call.args[1] is main_mod._open_browser
+    assert call.kwargs["args"] == ("http://127.0.0.1:5000",)
+    fake_timer.start.assert_called_once()
+    # TrayApp was still launched
+    mock_tray_instance.run.assert_called_once()
+
+
+def test_tray_launch_no_browser_env_suppresses_timer_keeps_banner(monkeypatch, capsys):
+    """JOB_CANNON_NO_BROWSER=1 in tray mode: Timer is suppressed but the URL
+    banner still prints (headless user still needs the URL to copy)."""
+    monkeypatch.setenv("JOB_CANNON_NO_BROWSER", "1")
+    monkeypatch.delenv("JOB_CANNON_NO_TRAY", raising=False)
+
+    mock_tray_instance = MagicMock()
+
+    with (
+        patch("job_finder.config.load_config", return_value={}),
+        patch("job_finder.__main__.probe_existing_jc", return_value=None),
+        patch("job_finder.__main__._port_is_listening", return_value=False),
+        patch("job_finder.__main__.acquire_pidfile", return_value=MagicMock(acquired=True)),
+        patch("job_finder.web._process_lifecycle.install_kill_on_exit"),
+        patch("job_finder.__main__.threading.Timer") as mock_timer_cls,
+        patch("job_finder.tray.TrayApp", return_value=mock_tray_instance),
+        patch("job_finder.__main__.sys.argv", ["job-cannon"]),
+    ):
+        main_mod.main()
+
+    captured = capsys.readouterr()
+    # Banner must still print
+    assert "Job Cannon is starting on http://127.0.0.1:5000" in captured.out
+    # Tray hint present
+    assert "tray icon" in captured.out
+    # "Opening your browser" line must be absent
+    assert "Opening your browser" not in captured.out
+    # No Timer was created
+    mock_timer_cls.assert_not_called()
+    # TrayApp still launched
+    mock_tray_instance.run.assert_called_once()

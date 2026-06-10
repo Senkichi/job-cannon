@@ -17,6 +17,79 @@ this project follows [Semantic Versioning](https://semver.org/).
   Dashboard batch scoring is a single control. `config.yaml` legacy keys
   auto-migrate on load via ruamel.yaml round-trip.
 
+## [5.0.0] — 2026-06-10
+
+The public-launch milestone. Packages on PyPI, onboarding wizard, OS keyring,
+IMAP (no OAuth), system tray, autoheal, and this audit wave.
+
+### Added
+
+- **Onboarding wizard** (8-step) — auto-detects installed $0 AI providers
+  (Ollama, Claude Code CLI, Gemini CLI), guides Gmail IMAP setup, and writes
+  secrets to the OS keyring. No manual YAML editing required on first install.
+- **OS keyring integration** — IMAP app password and provider API keys are
+  stored in Windows Credential Manager / macOS Keychain / Linux Secret Service
+  via `job_finder.secrets.get_secret()` (env → keyring → config.yaml fallback).
+- **Gmail via IMAP** — replaces the OAuth 2.0 / Google Cloud Console flow.
+  Uses an app password (`sources.imap.email` + `app_password`); no GCP project
+  or OAuth consent screen required. UNSEEN search scoped to known senders;
+  `BODY.PEEK[]` avoids marking messages as read.
+- **System tray app** (`pystray`) — menu-driven start/stop/open with
+  asymmetric fallback: if the tray cannot be created the app keeps serving
+  headless. Linux requires the AppIndicator GNOME extension; macOS shows a
+  brief Dock flash at startup.
+- **PyPI packaging** — `pipx install job-cannon` is now the recommended
+  end-user install path. `pyproject.toml` is the canonical surface; `uv.lock`
+  is committed. Python 3.13+ required.
+- **Autoheal pipeline** (Phases A–C) — declarative recipes detect and repair
+  stale ATS slugs, inflated salaries, heal-state drift, and duplicate company
+  records across m084–m088. Phase C ships the recipe-infra + email-override
+  seam, ATS resolvers, VALIDATE gate, and ADOPT path.
+- **Two-tier job board** — triage view (quick-scan) vs. deep-dive view;
+  OKLCH color tokens for 3-band score chips.
+- **Live SSE events stream** (`/events`) — per-job score events and
+  orchestration log emitted to the dashboard in real time.
+- **Cascade default updated** — shipped default is
+  `ollama → gemini → claude_code_cli → anthropic`; `claude_code_cli` ($0 via
+  Claude.ai subscription) replaces Groq/Cerebras in the default chain.
+  `scoring.daily_budget_usd` (default $10/day) gates the paid fallback only.
+
+### Changed
+
+- **Default cascade chain** — `Ollama → Gemini → Claude Code CLI → Anthropic`
+  (was `Ollama → Groq → Cerebras → Gemini → Anthropic` in v3.0.0). Groq and
+  Cerebras remain supported via `providers.fallback_chain` config but are no
+  longer in the out-of-the-box default.
+- **Budget key** — `scoring.daily_budget_usd` (default $10/day) replaces the
+  never-shipped `scoring.monthly_budget_usd` reference that appeared in some
+  docs. Free providers (`ollama`, `gemini`, `claude_code_cli`, `gemini_cli`,
+  `local_bundled`) are excluded from the gate.
+- **`jd_full` write boundary enforced** — cleanliness invariant applied at
+  persist time; HTML-polluted and stub JDs rejected upstream (m079, m015, m022).
+
+### Fixed (since 4.0.0)
+
+- Gemini provider ported to `google-genai` SDK v1+ (broke on v0.8.5 → v1
+  API surface change).
+- Playwright lazy-loaded to fix `pipx install` crash on machines without
+  a browser (careers crawler is optional).
+- Budget progress bar compared day-spend against daily cap (not monthly cap).
+- Onboarding wizard wrote invalid config on fresh install (empty
+  `target_titles` tripped validation before merge completed).
+- IMAP UNSEEN search scoped to known senders; bulk-fetch via `BODY.PEEK[]`.
+
+### Docs / audit wave (this PR)
+
+- README cascade chain, migration count (88), template count (58), blueprint
+  count (14), test count (5006), budget key, and Codecov badge corrected.
+- `monthly_budget_usd` removed from all docs and tests; replaced with
+  `daily_budget_usd` throughout.
+- v5.1 keyring-shipping paradox resolved: keyring shipped in v5.0.0.
+- CONTRIBUTING security email (`security@example.com`) replaced with GitHub
+  Advisories link.
+- Wizard step count corrected to 8 in INSTALL.md and SETUP.md.
+- Python 3.13+ requirement called out up-front in install docs.
+
 ## [4.0.0] — 2026-05-06
 
 ### Removed (BREAKING)

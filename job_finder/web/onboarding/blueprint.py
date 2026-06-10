@@ -368,9 +368,19 @@ def profile_edit():
 
 @onboarding_bp.route("/imap_credentials", methods=["GET", "POST"], strict_slashes=False)
 def imap_credentials():
-    """Step 5: Gmail IMAP smoke test (D-08, D-09). Failure re-renders the page (HTTP 200) with error + preserved form."""
+    """Step 5: free-portal toggle + Gmail IMAP smoke test (D-08, D-09, Issue #289).
+
+    The portal_search_enabled checkbox is rendered default-checked (True) on fresh
+    installs.  The done step reads ``sources.portal_search`` from wizard_data to
+    write the config slice.  IMAP failure re-renders the page (HTTP 200) with
+    error + preserved form.
+    """
     data = _wizard()
     existing_imap = data.get("imap") or {}
+    # Default True so a fresh-install GET shows the checkbox pre-checked (Issue #289).
+    # Re-renders after IMAP errors preserve the value the user actually set.
+    existing_portal = (data.get("sources") or {}).get("portal_search") or {}
+    portal_search_default = existing_portal.get("enabled", True)
 
     if request.method == "POST":
         email = request.form.get("email", "").strip()
@@ -378,6 +388,14 @@ def imap_credentials():
             "app_password", ""
         )  # do NOT strip - app passwords may include spaces
         skip = bool(request.form.get("skip"))
+        # Checkbox: present -> True, absent -> False (standard HTML checkbox behaviour).
+        portal_enabled = bool(request.form.get("portal_search_enabled"))
+
+        # Always persist the portal toggle regardless of the IMAP path taken.
+        state.write_wizard_data(
+            _db(),
+            {"sources": {"portal_search": {"enabled": portal_enabled}}},
+        )
 
         if skip:
             # D-08 escape hatch: user skipped IMAP setup — mark disabled so the
@@ -406,6 +424,7 @@ def imap_credentials():
                 "onboarding/imap_credentials.html",
                 error="Both Gmail address and app password are required.",
                 email=email,
+                portal_search_enabled=portal_enabled,
                 **_step("imap_credentials"),
             )
 
@@ -418,6 +437,7 @@ def imap_credentials():
                 "onboarding/imap_credentials.html",
                 error=result.message,
                 email=email,
+                portal_search_enabled=portal_enabled,
                 **_step("imap_credentials"),
             )
 
@@ -440,6 +460,7 @@ def imap_credentials():
     return render_template(
         "onboarding/imap_credentials.html",
         email=existing_imap.get("email", ""),
+        portal_search_enabled=portal_search_default,
         **_step("imap_credentials"),
     )
 
@@ -499,6 +520,11 @@ def done():
         imap_block = wizard_data.get("imap") or {}
         profile_edit = wizard_data.get("profile_edit") or {}
         schedule_block = wizard_data.get("schedule") or {"cadence_preset": "standard"}
+        # Issue #289: portal_search toggle written by imap_credentials step.
+        # Default True so a wizard completed entirely via skip paths still enables
+        # free portals — the zero-key path works out-of-the-box.
+        portal_search_block = (wizard_data.get("sources") or {}).get("portal_search") or {}
+        portal_search_enabled = portal_search_block.get("enabled", True)
 
         # Profile fields are textareas separated by newlines (D-06)
         def _split_lines(s: str) -> list[str]:
@@ -558,6 +584,12 @@ def done():
                     "email": imap_block.get("email", ""),
                     "app_password": imap_block.get("app_password", ""),
                     "folder": imap_block.get("folder", "INBOX"),
+                },
+                # Issue #289: write portal toggle so the first ingest can fetch
+                # RemoteOK/Remotive/Himalayas with no credentials.  Default True
+                # when the user skipped the imap_credentials step entirely.
+                "portal_search": {
+                    "enabled": portal_search_enabled,
                 },
             },
             "profile": {

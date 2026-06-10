@@ -1,12 +1,13 @@
 """Tests for the ``job-cannon`` console-script entry point (job_finder/__main__.py).
 
-These tests cover the UAT 2026-05-21 F2 behaviour: print a URL banner and
-open the user's browser ~1.5 s after launch, with ``JOB_CANNON_NO_BROWSER=1``
-as the opt-out switch.
+These tests cover the UAT 2026-05-21 F2 / Issue #290 behaviour: print a URL
+banner and open the user's browser ~1.5 s after launch in BOTH terminal mode
+and tray mode, with ``JOB_CANNON_NO_BROWSER=1`` as the opt-out switch.
 
 We don't actually call ``main()`` end-to-end (it would block on
-``app.run()``); instead we exercise ``_open_browser`` directly and verify
-the URL-banner / timer-scheduling logic via patching.
+``app.run()``); instead we exercise ``_open_browser`` and
+``_print_startup_banner`` directly and verify the URL-banner /
+timer-scheduling logic via patching.
 
 Note (Issue #40): tray mode is now the default launch mode, so the tests
 that exercise terminal-mode serving pass ``--terminal`` explicitly. The
@@ -17,6 +18,83 @@ wiring, now reached via the explicit flag instead of the bare invocation.
 from unittest.mock import MagicMock, patch
 
 from job_finder import __main__ as main_mod
+
+
+def test_no_utcnow_deprecation_warning(recwarn):
+    """__main__.py must not emit DeprecationWarning for datetime.utcnow().
+
+    The metadata dict in main() previously used datetime.utcnow() which emits
+    a DeprecationWarning in Python 3.12+.  This test imports the module and
+    checks that no such warning is present.
+    """
+    import warnings
+
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        import importlib
+
+        import job_finder.__main__
+
+        importlib.reload(job_finder.__main__)
+
+    utcnow_warnings = [
+        warning
+        for warning in w
+        if issubclass(warning.category, DeprecationWarning)
+        and "utcnow" in str(warning.message).lower()
+    ]
+    assert not utcnow_warnings, f"utcnow DeprecationWarning found: {utcnow_warnings}"
+
+
+# ---------------------------------------------------------------------------
+# _print_startup_banner unit tests (Issue #290)
+# ---------------------------------------------------------------------------
+
+
+def test_print_startup_banner_terminal_mode_prints_url(monkeypatch, capsys):
+    """Terminal mode banner prints 'Job Cannon is starting on <url>' without
+    the tray-icon hint."""
+    monkeypatch.setenv("JOB_CANNON_NO_BROWSER", "1")
+    with patch("job_finder.__main__.threading.Timer"):
+        main_mod._print_startup_banner("http://127.0.0.1:5000", tray_mode=False)
+    captured = capsys.readouterr()
+    assert "Job Cannon is starting on http://127.0.0.1:5000" in captured.out
+    assert "tray icon" not in captured.out
+
+
+def test_print_startup_banner_tray_mode_prints_url_and_hint(monkeypatch, capsys):
+    """Tray mode banner includes both the URL and the tray-icon hint."""
+    monkeypatch.setenv("JOB_CANNON_NO_BROWSER", "1")
+    with patch("job_finder.__main__.threading.Timer"):
+        main_mod._print_startup_banner("http://127.0.0.1:5000", tray_mode=True)
+    captured = capsys.readouterr()
+    assert "Job Cannon is starting on http://127.0.0.1:5000" in captured.out
+    assert "tray icon" in captured.out
+
+
+def test_print_startup_banner_schedules_timer_when_no_browser_not_set(monkeypatch, capsys):
+    """Without JOB_CANNON_NO_BROWSER, _print_startup_banner schedules the Timer
+    and returns it."""
+    monkeypatch.delenv("JOB_CANNON_NO_BROWSER", raising=False)
+    fake_timer = MagicMock()
+    with patch("job_finder.__main__.threading.Timer", return_value=fake_timer) as mock_timer_cls:
+        result = main_mod._print_startup_banner("http://127.0.0.1:5000", tray_mode=False)
+    mock_timer_cls.assert_called_once()
+    call = mock_timer_cls.call_args
+    assert call.args[0] == main_mod._BROWSER_OPEN_DELAY_SEC
+    assert call.args[1] is main_mod._open_browser
+    assert call.kwargs["args"] == ("http://127.0.0.1:5000",)
+    fake_timer.start.assert_called_once()
+    assert result is fake_timer
+
+
+def test_print_startup_banner_no_timer_when_no_browser_set(monkeypatch, capsys):
+    """JOB_CANNON_NO_BROWSER=1 suppresses the Timer; returns None."""
+    monkeypatch.setenv("JOB_CANNON_NO_BROWSER", "1")
+    with patch("job_finder.__main__.threading.Timer") as mock_timer_cls:
+        result = main_mod._print_startup_banner("http://127.0.0.1:5000", tray_mode=False)
+    mock_timer_cls.assert_not_called()
+    assert result is None
 
 
 def test_open_browser_calls_webbrowser_open():

@@ -13,7 +13,6 @@
 > Single-user, runs on localhost.
 
 [![CI](https://github.com/Senkichi/job-cannon/actions/workflows/ci.yml/badge.svg)](https://github.com/Senkichi/job-cannon/actions/workflows/ci.yml)
-[![Coverage](https://codecov.io/gh/Senkichi/job-cannon/graph/badge.svg)](https://codecov.io/gh/Senkichi/job-cannon)
 [![Python 3.13+](https://img.shields.io/badge/python-3.13%2B-blue.svg)](https://www.python.org/downloads/)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
@@ -25,9 +24,9 @@ pipx install job-cannon
 job-cannon
 ```
 
-`pipx install job-cannon` is the recommended path: one command, isolated venv, no Python-version conflicts. The `job-cannon` command launches the Flask app on http://localhost:5000 and opens your browser. On first launch the onboarding wizard auto-detects AI providers (Ollama / Claude Code CLI / Gemini CLI), helps you connect Gmail via IMAP app password, and writes secrets to your OS keyring — no manual YAML editing required.
+`pipx install job-cannon` is the recommended path: one command, isolated venv. Requires **Python 3.13+** — use `pipx install --python python3.13 job-cannon` if your default Python is older. The `job-cannon` command launches the Flask app on http://localhost:5000 and opens your browser. On first launch the onboarding wizard auto-detects AI providers (Ollama / Claude Code CLI / Gemini CLI), helps you connect Gmail via IMAP app password, and writes secrets to your OS keyring — no manual YAML editing required.
 
-**Don't have pipx yet?** Per-OS one-liners: `scoop install pipx` (Windows), `brew install pipx` (macOS), `sudo apt install pipx` (Ubuntu 23.04+).
+**Don't have pipx yet?** Per-OS one-liners: `scoop install pipx` (Windows), `brew install pipx` (macOS), `apt install pipx` (Ubuntu 23.04+).
 
 **Already cloning the repo to hack on it?** See [For Contributors](#for-contributors) at the bottom.
 
@@ -38,14 +37,14 @@ job-cannon
 - **Single-tier ordinal scoring through a multi-provider cascade.**
   Every job runs through one `'scoring'` tier with a six-axis ordinal
   rubric. The cascade tries free providers first
-  (Ollama local → Groq → Cerebras → Gemini) and falls through to
-  Anthropic only when all free options are exhausted or rate-limited.
-  Phase 33 shootout selected `qwen2.5:14b` (Ollama) as the production
-  primary; typical monthly cost is ~$0. Classification
+  (Ollama local → Gemini → Claude Code CLI) and falls through to
+  the paid Anthropic SDK only when all free options are exhausted or
+  rate-limited. Phase 33 shootout selected `qwen2.5:14b` (Ollama) as
+  the production primary; typical monthly cost is ~$0. Classification
   (`apply | consider | skip | reject`) is **derived in Python from
   the numeric sub-scores — never emitted by the LLM** — which
   prevents classification drift across model swaps.
-- **Schema-versioned SQLite migrations.** 48 idempotent migrations
+- **Schema-versioned SQLite migrations.** 88 idempotent migrations
   applied via `pragma user_version`. Migration 41 introduces a
   backup-recency preflight that refuses destructive schema changes
   without a recent userdata snapshot (override via
@@ -55,7 +54,7 @@ job-cannon
   single-instance enforced. Auto-starts a local Ollama service for the
   nightly agentic-backfill tier.
 - **HTMX-only frontend.** No JS framework, no bundler, no build step.
-  Inline expansion, partial fragments, server-driven UI. 36 Jinja2
+  Inline expansion, partial fragments, server-driven UI. 58 Jinja2
   templates, Tailwind via CDN, SortableJS for the kanban.
 - **ATS coverage across 5 platforms with a tier-4 AI navigator.**
   Greenhouse, Lever, Ashby, SmartRecruiters, and Workday have explicit
@@ -65,11 +64,12 @@ job-cannon
 - **Eval harness with paired MAE + BCa bootstrap 95% CIs** for
   prompt-variant A/B testing across the full provider matrix
   (Ollama-local, Groq, Cerebras, Gemini, Anthropic).
-- **Cost-gated execution.** Configurable monthly budget cap; the
-  cost-gate returns a bool and lets callers decide whether to
-  fail-open or raise — the orchestrator and the scheduler choose
-  differently and that's intentional.
-- **2163 tests** (unit + integration + Playwright e2e) green on the CI
+- **Cost-gated execution.** Configurable daily budget cap
+  (`scoring.daily_budget_usd`, default $10/day); the cost-gate returns
+  a bool and lets callers decide whether to fail-open or raise — the
+  orchestrator and the scheduler choose differently and that's
+  intentional.
+- **5006 tests** (unit + integration + Playwright e2e) green on the CI
   matrix (Ubuntu + Windows × Python 3.13).
 - **In-app update notifications.** Dashboard surfaces an "Update available"
   banner when a newer GitHub release is detected; check is throttled to
@@ -87,7 +87,7 @@ flowchart LR
   ATS[ATS Scanners<br/>Greenhouse / Lever / Ashby / Workday / SmartRecruiters] --> Parser
   Parser[Source Parsers<br/>+ Normalize] --> DB[(SQLite + WAL)]
   DB --> Score[Cascade Scoring<br/>six-axis ordinal rubric]
-  Score -->|tries in order| Cascade{{Ollama qwen2.5:14b<br/>→ Groq → Cerebras<br/>→ Gemini → Anthropic}}
+  Score -->|tries in order| Cascade{{Ollama qwen2.5:14b<br/>→ Gemini → Claude Code CLI<br/>→ Anthropic}}
   Cascade --> Classify[Python-derived<br/>classification]
   Classify --> Dashboard[Flask + HTMX<br/>localhost:5000]
   DB --> Pipeline[Application<br/>Pipeline Tracker]
@@ -103,16 +103,16 @@ For deeper subsystem detail, see [`docs/architecture/`](docs/architecture/).
 | Runtime | Python 3.13, Flask 3.1, APScheduler 3.x |
 | Storage | SQLite (WAL mode) — raw SQL, no ORM |
 | Frontend | Jinja2 + jinja2-fragments, HTMX 2.x, Tailwind (CDN), SortableJS |
-| AI | Multi-provider cascade: Ollama (qwen2.5:14b primary) → Groq → Cerebras → Gemini → Anthropic CLI ($0 via Claude.ai subscription, dispatched through `claude -p`) |
+| AI | Multi-provider cascade: Ollama (qwen2.5:14b primary) → Gemini → Claude Code CLI ($0 via Claude.ai subscription, dispatched through `claude -p`) → Anthropic SDK (paid, final fallback) |
 | Sources | Gmail API v1 (OAuth), SerpAPI, Thordata, DataForSEO |
 | Tooling | uv (canonical), ruff, pre-commit, gitleaks, commitizen, pytest |
-| CI | GitHub Actions (Ubuntu + Windows matrix), Codecov upload |
+| CI | GitHub Actions (Ubuntu + Windows matrix) |
 
 ## Project Structure
 
 ```
 job_finder/
-|-- web/                    # Flask app (11 blueprints, scheduler, AI clients, ATS)
+|-- web/                    # Flask app (14 blueprints, scheduler, AI clients, ATS)
 |-- parsers/                # Email parsers (LinkedIn, Glassdoor, ZipRecruiter, Indeed stub)
 |-- sources/                # Data sources (Gmail, SerpAPI, Thordata, DataForSEO)
 |-- scoring/                # Single-tier ordinal scoring + six-axis rubric helpers
@@ -121,35 +121,36 @@ job_finder/
 |-- config.py               # YAML config loader + path discovery
 |-- __main__.py             # `uv run job-cannon` entry point
 `-- db/                     # SQLite persistence (raw SQL, no ORM); package since S7d (2026-05-06)
-tests/                      # 2163 tests, unit + integration + e2e
+tests/                      # 5006 tests, unit + integration + e2e
 docs/
 |-- SETUP.md                # Gmail OAuth, config reference, troubleshooting
 `-- architecture/           # Subsystem deep-dives
 ```
 
-The 11 blueprints: `admin`, `batch_scoring`, `companies`, `costs`,
-`dashboard`, `detections`, `jobs`, `pipeline`, `profile`, `settings`,
-`sync`.
+The 14 blueprints: `admin`, `batch_scoring`, `companies`, `costs`,
+`dashboard`, `detections`, `events`, `jobs`, `onboarding`, `pipeline`,
+`profile`, `settings`, `sync`, `updates`.
 
 ## Cost Estimates
 
 Every provider in the default cascade is **$0** out-of-pocket. Ollama
-runs locally; Groq, Cerebras, and Gemini sit on their free tiers; and
-the Anthropic CLI fallback dispatches through `claude -p` against
-your Claude.ai subscription, so usage there is metered against your
-existing plan rather than billed per call.
+runs locally; Gemini sits on its free tier; and the Claude Code CLI
+fallback dispatches through `claude -p` against your Claude.ai
+subscription, so usage there is metered against your existing plan
+rather than billed per call.
 
 | Provider | Cost | When |
 |------|------|------|
 | Ollama (qwen2.5:14b local) | $0 | Primary — runs locally |
-| Groq / Cerebras / Gemini free tiers | $0 | Each gated by per-day request limits |
-| Anthropic CLI (`claude -p`) | $0 (via Claude.ai subscription) | Only when all free providers exhausted; uses your plan's allowance |
+| Gemini free tier | $0 | Falls through if Ollama unavailable or returns invalid output |
+| Claude Code CLI (`claude -p`) | $0 (via Claude.ai subscription) | Next in chain; uses your plan's allowance |
+| Anthropic SDK | Paid (per call) | Final emergency fallback only — not reached in normal use |
 
-A configurable budget cap (default $25/mo, set in `config.yaml` under
-`scoring.monthly_budget_usd`) trips only on non-free BYO-key providers
-in the cascade — in practice, the OpenRouter judge used by the
-cascade-audit harness. All members of `claude_client.FREE_PROVIDERS`
-(including the Anthropic CLI fallback) are excluded from the gate.
+A configurable daily budget cap (default $10/day, set in `config.yaml`
+under `scoring.daily_budget_usd`) trips only on non-free BYO-key
+providers in the cascade — in practice, the OpenRouter judge used by
+the cascade-audit harness. All members of `claude_client.FREE_PROVIDERS`
+(including the Claude Code CLI fallback) are excluded from the gate.
 
 **Optional SERP sources:** SerpAPI, Thordata, and DataForSEO
 are all opt-in. Each has its own pricing tier — see
@@ -215,9 +216,9 @@ uv sync --extra dev --extra eval
 uv run job-cannon
 ```
 
-Open http://localhost:5000 (the app auto-opens it for you). On first launch the **onboarding wizard** auto-detects AI providers, helps you connect Gmail via IMAP app-password, and writes secrets to your OS keyring — no manual config editing required.
+Open http://localhost:5000 (the app auto-opens it for you). On first launch the **onboarding wizard** auto-detects AI providers, enables free job portals (RemoteOK / Remotive / Himalayas — no credentials, jobs arrive on the first sync), helps you connect Gmail via IMAP app-password, and writes secrets to your OS keyring — no manual config editing required.
 
-**Works with zero API keys via Ollama.** Prefer to edit YAML directly? Copy the templates instead and skip the wizard:
+**Works with zero API keys.** Free portals (RemoteOK, Remotive, Himalayas) are enabled by default so the first ingest returns real results even before you set up Gmail alerts. Add Ollama for $0 local AI scoring, or the wizard auto-detects Gemini CLI and Claude Code CLI as free-cloud fallbacks. Prefer to edit YAML directly? Copy the templates instead and skip the wizard:
 
 ```bash
 cp config.example.yaml config.yaml
