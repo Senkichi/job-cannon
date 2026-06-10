@@ -36,6 +36,12 @@ from thefuzz import fuzz
 from job_finder.config import COMPANY_DENYLIST, get_company_denylist, load_config
 from job_finder.web import company_resolver as _company_resolver
 from job_finder.web.ats_scanner import probe_ats_slugs
+from job_finder.web.company_dedup import (
+    find_mispromoted_ats_slugs,
+    heal_ats_slug_clusters,
+    heal_mispromoted_ats_slugs,
+    merge_exact_name_duplicates,
+)
 from job_finder.web.db_helpers import standalone_connection
 from job_finder.web.dedup_normalizer import normalize_company
 
@@ -592,22 +598,93 @@ def cleanup_invalid_company_data(
 
 
 def run_registry_hygiene(db_path: str, config: dict) -> dict:
-    """Orchestrator: cleanup denylist companies, repair links, then orphan cleanup.
+    """Orchestrator: cleanup denylist companies, repair links, orphan cleanup, and audit.
+
+    Steps (in order):
+      1. Cleanup denylist companies.
+      2. Repair invalid company data / re-normalize links.
+      3. Orphan cleanup.
+      4. Collapse exact normalised-name duplicates (safe auto-merge via shared
+         company_dedup helpers).  NEVER auto-merges find_fuzzy_false_positives
+         output — that cohort is FP-dominated.
+      5. Heal aggregator mis-promotions (NielsenIQ/id-2629 class) via the m068
+         heuristic.
+      6. Re-assert the m076 invariant: heal remaining (ats_platform, ats_slug)
+         clusters and ensure idx_companies_ats_pair exists.
+      7. Run audit diagnostics (find_duplicate_companies, find_fuzzy_false_positives,
+         find_mispromoted_ats_slugs) and surface counts in the return dict.
+         log.warning when any count is non-zero so drift is visible in app.log.
 
     Returns:
-        Dict with "companies_denylist_deleted", "jobs_denylist_unlinked",
-        "jobs_normalized", "orphans_deleted" (all int).
+        Dict with all original keys plus:
+          "duplicate_company_pairs"   — int (exact normalised-name pairs remaining)
+          "fuzzy_review_pairs"        — int (near-dup pairs for human review only)
+          "mispromoted_ats_slugs"     — int (aggregator-slug mis-attribution cases remaining)
     """
     with standalone_connection(db_path) as conn:
+        # --- original cleanup steps ---
         denylist_result = cleanup_denylist_companies(conn, config)
         repair_result = cleanup_invalid_company_data(conn, config)
         orphan_result = cleanup_orphan_companies(conn)
+
+        # --- step 4: safe auto-merge of exact normalised-name duplicates ---
+        exact_merge_result = merge_exact_name_duplicates(conn)
+        conn.commit()
+
+        # --- step 5: heal aggregator mis-promotions ---
+        mispromo_heal_result = heal_mispromoted_ats_slugs(conn)
+        conn.commit()
+
+        # --- step 6: re-assert m076 invariant ---
+        ats_cluster_result = heal_ats_slug_clusters(conn)
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_companies_ats_pair "
+            "ON companies(ats_platform, ats_slug) "
+            "WHERE ats_platform IS NOT NULL AND ats_slug IS NOT NULL"
+        )
+        conn.commit()
+
+        # --- step 7: audit diagnostics (detect-and-surface, no auto-merge) ---
+        dup_pairs = find_duplicate_companies(conn)
+        fuzzy_pairs = find_fuzzy_false_positives(conn, threshold=90)
+        mispromo_remaining = find_mispromoted_ats_slugs(conn)
+
+    duplicate_count = len(dup_pairs)
+    fuzzy_count = len(fuzzy_pairs)
+    mispromo_count = len(mispromo_remaining)
+
+    if duplicate_count:
+        logger.warning(
+            "registry_hygiene: %d exact-name duplicate company pair(s) remain after merge — "
+            "inspect find_duplicate_companies output",
+            duplicate_count,
+        )
+    if fuzzy_count:
+        logger.warning(
+            "registry_hygiene: %d near-duplicate company pair(s) flagged for human review "
+            "(threshold=90) — do NOT auto-merge; these are FP-dominated",
+            fuzzy_count,
+        )
+    if mispromo_count:
+        logger.warning(
+            "registry_hygiene: %d aggregator mis-promotion(s) remain after heal — "
+            "inspect find_mispromoted_ats_slugs output",
+            mispromo_count,
+        )
 
     return {
         "companies_denylist_deleted": denylist_result.get("companies_deleted", 0),
         "jobs_denylist_unlinked": denylist_result.get("jobs_unlinked", 0),
         "jobs_normalized": repair_result.get("normalized", 0),
         "orphans_deleted": orphan_result["orphans_deleted"],
+        # dedup auto-merge stats
+        "exact_pairs_merged": exact_merge_result.get("pairs_merged", 0),
+        "mispromo_healed": mispromo_heal_result.get("healed", 0),
+        "ats_clusters_healed": ats_cluster_result.get("clusters_resolved", 0),
+        # audit counts (detect-and-surface)
+        "duplicate_company_pairs": duplicate_count,
+        "fuzzy_review_pairs": fuzzy_count,
+        "mispromoted_ats_slugs": mispromo_count,
     }
 
 
