@@ -28,12 +28,15 @@ import requests
 from bs4 import BeautifulSoup
 
 from job_finder.web._http_constants import _HEADERS, _TIMEOUT
+from job_finder.web.careers_crawler._autoheal_seam import (
+    record_careers_capture,
+    try_careers_override,
+)
 from job_finder.web.careers_crawler._static_tier import (
     _extract_candidates,
     _extract_jobs_from_soup,
     _filter_candidates,
 )
-from job_finder.web.db_helpers import standalone_connection
 
 logger = logging.getLogger(__name__)
 
@@ -70,28 +73,22 @@ def _try_playwright_extract(
         html = page.content()
         soup = BeautifulSoup(html, "html.parser")
         candidates = _extract_candidates(soup, url)
-        jobs = _filter_candidates(candidates, target_titles, exclusions)
+        generic_jobs = _filter_candidates(candidates, target_titles, exclusions)
 
-        # --- Autoheal D3: per-company capture, structural counts (I4, detect=True) ---
-        if db_path:
-            try:
-                from job_finder.web.autoheal import careers_source_key
-                from job_finder.web.autoheal.health_monitor import record_extraction as _rec
+        # --- Autoheal D4: override first; generic is the shadow comparator ---
+        ovr_jobs, ovr_structural = try_careers_override(html, url, target_titles, exclusions)
+        used_override = bool(ovr_jobs)
+        jobs = ovr_jobs if used_override else generic_jobs
 
-                with standalone_connection(db_path) as cap_conn:
-                    _rec(
-                        cap_conn,
-                        careers_source_key(url),
-                        "careers",
-                        html[:50000],
-                        job_count=len(candidates),
-                        detect=True,
-                        extractor="generic",
-                        filtered_count=len(jobs),
-                    )
-                    cap_conn.commit()
-            except Exception:
-                pass  # observability must never break ingestion
+        record_careers_capture(
+            db_path,
+            url,
+            html,
+            generic_structural=len(candidates),
+            override_structural=ovr_structural,
+            used_override=used_override,
+            filtered_count=len(jobs),
+        )
 
         return jobs
 
@@ -173,6 +170,24 @@ def _try_playwright_active(
 
         html = page.content()
         soup = BeautifulSoup(html, "html.parser")
+
+        # --- Autoheal D4: override-first, applied ONCE to the initial render.
+        # When the override yields, its (filtered) results are the answer and
+        # the interaction loop is skipped — a healed page is extracted by its
+        # recipe, not by exercising generic interaction heuristics. ---
+        ovr_jobs, ovr_structural = try_careers_override(html, url, target_titles, exclusions)
+        if ovr_jobs:
+            record_careers_capture(
+                db_path,
+                url,
+                html,
+                generic_structural=len(_extract_candidates(soup, url)),
+                override_structural=ovr_structural,
+                used_override=True,
+                filtered_count=len(ovr_jobs),
+            )
+            return ovr_jobs, None
+
         initial = _extract_jobs_from_soup(soup, url, target_titles, exclusions)
         _merge_jobs(initial)
 
@@ -271,25 +286,19 @@ def _try_playwright_active(
         # the accumulated matched total for yield metrics (I4). ---
         if db_path:
             try:
-                from job_finder.web.autoheal import careers_source_key
-                from job_finder.web.autoheal.health_monitor import record_extraction as _rec
-
                 final_html = page.content()
                 final_candidates = _extract_candidates(
                     BeautifulSoup(final_html, "html.parser"), url
                 )
-                with standalone_connection(db_path) as cap_conn:
-                    _rec(
-                        cap_conn,
-                        careers_source_key(url),
-                        "careers",
-                        final_html[:50000],
-                        job_count=len(final_candidates),
-                        detect=True,
-                        extractor="generic",
-                        filtered_count=len(all_jobs),
-                    )
-                    cap_conn.commit()
+                record_careers_capture(
+                    db_path,
+                    url,
+                    final_html,
+                    generic_structural=len(final_candidates),
+                    override_structural=None,
+                    used_override=False,
+                    filtered_count=len(all_jobs),
+                )
             except Exception:
                 pass  # observability must never break ingestion
 

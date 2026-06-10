@@ -26,12 +26,15 @@ from bs4 import BeautifulSoup
 
 from job_finder.web._http_constants import _HEADERS, _TIMEOUT
 from job_finder.web.ats_platforms import _title_matches
+from job_finder.web.careers_crawler._autoheal_seam import (
+    record_careers_capture,
+    try_careers_override,
+)
 from job_finder.web.careers_crawler._title_filters import (
     _clean_title,
     _is_metadata_blob,
     _is_nav_path,
 )
-from job_finder.web.db_helpers import standalone_connection
 
 logger = logging.getLogger(__name__)
 
@@ -270,28 +273,22 @@ def _try_static_extract(
     # computed once and reused for both the filtered extraction and the
     # structural detection count (no double parse).
     candidates = _extract_candidates(soup, url)
-    jobs = _filter_candidates(candidates, target_titles, exclusions)
+    generic_jobs = _filter_candidates(candidates, target_titles, exclusions)
 
-    # --- Autoheal D3: per-company capture, structural counts (I4, detect=True) ---
-    if db_path:
-        try:
-            from job_finder.web.autoheal import careers_source_key
-            from job_finder.web.autoheal.health_monitor import record_extraction as _rec
+    # --- Autoheal D4: per-company override first; generic is the shadow comparator ---
+    ovr_jobs, ovr_structural = try_careers_override(html, url, target_titles, exclusions)
+    used_override = bool(ovr_jobs)
+    jobs = ovr_jobs if used_override else generic_jobs
 
-            with standalone_connection(db_path) as cap_conn:
-                _rec(
-                    cap_conn,
-                    careers_source_key(url),
-                    "careers",
-                    html[:50000],
-                    job_count=len(candidates),
-                    detect=True,
-                    extractor="generic",
-                    filtered_count=len(jobs),
-                )
-                cap_conn.commit()
-        except Exception:
-            pass  # observability must never break ingestion
+    record_careers_capture(
+        db_path,
+        url,
+        html,
+        generic_structural=len(candidates),
+        override_structural=ovr_structural,
+        used_override=used_override,
+        filtered_count=len(jobs),
+    )
 
     if jobs:
         # Found jobs statically — no need for Playwright
