@@ -374,8 +374,11 @@ def run_enrichment_backfill(
     """Backfill unenriched jobs using the cost-ordered tier pipeline.
 
     Queries jobs where enrichment_tier IS NULL or in a resumable state.
-    Skips terminal tiers ('exhausted', 'serpapi', 'agentic') and the balanced
-    enrichment terminal tier ('mid') — none of these can advance further.
+    Skips known terminal tiers: 'exhausted', 'serpapi', 'agentic', 'mid'
+    (standard pipeline terminals), 'agentic_exhausted' (written by agentic_enricher
+    after exhausting the agentic tier), and legacy migration tiers 'low'/'high'
+    (left by m050). Unknown/future stray tier values are treated as terminal by
+    _start_tier_index (fail-closed), but are not excluded at the SQL level.
     Processes up to `limit` jobs per call (omit ``limit`` / pass ``None`` to
     process the full backlog in one run — no SQL ``LIMIT``).
 
@@ -406,7 +409,8 @@ def run_enrichment_backfill(
         # enrichment pipeline (fully enriched at balanced tier).
         base_sql = """SELECT * FROM jobs
                WHERE (enrichment_tier IS NULL
-                      OR enrichment_tier NOT IN ('exhausted', 'serpapi', 'agentic', 'mid'))
+                      OR enrichment_tier NOT IN ('exhausted', 'serpapi', 'agentic', 'mid',
+                                                 'agentic_exhausted', 'low', 'high'))
                  AND (jd_full IS NULL OR jd_full = '' OR salary_min IS NULL)
                ORDER BY first_seen DESC"""
         if limit is None:
@@ -495,7 +499,11 @@ def _start_tier_index(current_tier: str | None) -> int:
         idx = TIER_ORDER.index(current_tier)
         return idx + 1  # Resume from NEXT tier
     except ValueError:
-        return 0
+        logger.warning(
+            "Unknown enrichment_tier %r — treating as terminal (fail-closed); no tiers will run",
+            current_tier,
+        )
+        return len(TIER_ORDER)
 
 
 def _resolve_from_fragments(
