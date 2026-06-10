@@ -308,19 +308,22 @@ class TestDeriveClassification:
         assert derive_classification(sub_scores, note) == expected
 
     def test_derive_classification_skip_branch_documented_edge(self):
-        """The "skip" branch is unreachable for integer 1-5 sub-scores.
+        """The "skip" branch is unreachable for valid integer 1-5 sub-scores.
 
-        Rule order: reject (any==1) -> apply (all>=3) -> consider (all>=2) -> skip.
-        With domain {1..5}, any value <2 is 1 which already returned reject.
-        The branch is retained for defense against future domain changes.
+        Rule order: domain-guard -> reject (any==1) -> apply (all>=3) ->
+        consider (all>=2) -> skip.
+        With domain {1..5}, any value <2 is 1 which already triggers reject.
+        The skip branch is retained for defense-in-depth but is effectively dead.
+
+        Out-of-domain values (0, negative, >5) now raise ValueError at the
+        domain guard (issue #257) rather than silently flowing to "skip".
         """
         from job_finder.db import derive_classification
 
-        # Passing a hypothetical 0 (outside the documented 1-5 domain) would hit skip.
-        # This test documents the guarantee without relying on out-of-domain values
-        # reaching production (schema validator rejects <1 upstream).
+        # Out-of-domain value 0 is now caught by the domain guard.
         out_of_domain = dict.fromkeys(_ALL_KEYS, 0)
-        assert derive_classification(out_of_domain, None) == "skip"
+        with pytest.raises(ValueError, match=r"values must be int in 1\.\.5"):
+            derive_classification(out_of_domain, None)
 
     def test_derive_classification_legitimacy_precedence(self):
         """legitimacy_note check runs BEFORE sub-score checks (order-sensitive)."""
