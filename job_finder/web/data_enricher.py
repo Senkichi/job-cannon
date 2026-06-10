@@ -46,6 +46,7 @@ from job_finder.config import JD_STORAGE_MAX_CHARS
 from job_finder.db._direct_link import set_direct_url
 from job_finder.db._jd_full import set_jd_full as _set_jd_full
 from job_finder.db._jobs import _reconcile_salary_for_write
+from job_finder.json_utils import utc_now_iso
 from job_finder.web.direct_link import pick_direct_link
 from job_finder.web.enrichment_sources import merge_apply_urls, parse_source_urls
 from job_finder.web.enrichment_tiers import (
@@ -307,31 +308,52 @@ def enrich_job(
             job_row.get("jd_full") or fragments.get("url_jd") or fragments.get("jd_full")
         )
 
+        # Gate 1: sources.serpapi.enabled must be true (or absent — treat absent
+        # as enabled for backward-compat with configs predating this key).
+        _serpapi_cfg = (config or {}).get("sources", {}).get("serpapi", {})
+        _serpapi_enabled = _serpapi_cfg.get("enabled", True)
+
+        # Gate 2: optional daily call cap (config key sources.serpapi.daily_call_cap).
+        # Absent or 0 means uncapped.  Checked against the scoring_costs ledger so
+        # the cap survives Flask restarts (mirrors the google_cse_source pattern).
+        _daily_cap: int = int(_serpapi_cfg.get("daily_call_cap", 0))
+        _cap_reached = bool(_daily_cap > 0 and _serpapi_daily_calls_used(conn) >= _daily_cap)
+
         if start_idx <= TIER_ORDER.index("serpapi") and serpapi_key and jd_still_missing:
-            try:
-                query = f"{title} {company}"
-                serpapi_result, apply_url_list = search_serpapi(query, serpapi_key)
-                if conn and job_row.get("dedup_key") and apply_url_list:
-                    merge_apply_urls(conn, job_row["dedup_key"], apply_url_list)
-                    _maybe_reconcile_ats_identity(
-                        conn, job_row, config, reason="enrichment_serpapi_apply_urls"
-                    )
+            if not _serpapi_enabled:
+                logger.debug("SerpAPI tier skipped for '%s': sources.serpapi.enabled=false", title)
+            elif _cap_reached:
+                logger.warning(
+                    "SerpAPI tier skipped for '%s': daily_call_cap=%d reached", title, _daily_cap
+                )
+            else:
+                try:
+                    query = f"{title} {company}"
+                    serpapi_result, apply_url_list = search_serpapi(query, serpapi_key)
+                    _record_serpapi_call(conn)
+                    if conn and job_row.get("dedup_key") and apply_url_list:
+                        merge_apply_urls(conn, job_row["dedup_key"], apply_url_list)
+                        _maybe_reconcile_ats_identity(
+                            conn, job_row, config, reason="enrichment_serpapi_apply_urls"
+                        )
 
-                if serpapi_result:
-                    for k, v in serpapi_result.items():
-                        if k not in fragments:
-                            fragments[k] = v
+                    if serpapi_result:
+                        for k, v in serpapi_result.items():
+                            if k not in fragments:
+                                fragments[k] = v
 
-                    enriched = _resolve_from_fragments(
-                        {**fragments, **serpapi_result}, missing, job_row
-                    )
-                    if enriched:
-                        enriched = _apply_post_fetch_extraction(enriched, job_row, conn, config)
-                        _persist(conn, job_row, enriched, "serpapi")
-                        return enriched
+                        enriched = _resolve_from_fragments(
+                            {**fragments, **serpapi_result}, missing, job_row
+                        )
+                        if enriched:
+                            enriched = _apply_post_fetch_extraction(
+                                enriched, job_row, conn, config
+                            )
+                            _persist(conn, job_row, enriched, "serpapi")
+                            return enriched
 
-            except Exception as e:
-                logger.debug("SerpAPI tier failed for '%s': %s", title, e)
+                except Exception as e:
+                    logger.debug("SerpAPI tier failed for '%s': %s", title, e)
 
         # ---------------------------------------------------------------
         # Tier 3: agentic — Ollama-driven query + Playwright fetch
@@ -430,6 +452,18 @@ def run_enrichment_backfill(
             if result:
                 enriched_count += 1
 
+        # Per-run SerpAPI call summary (helps operators track paid spend).
+        serpapi_calls_today = _serpapi_daily_calls_used(conn)
+        _serpapi_cfg = config.get("sources", {}).get("serpapi", {})
+        _daily_cap: int = int(_serpapi_cfg.get("daily_call_cap", 0))
+        cap_info = f"/{_daily_cap}" if _daily_cap > 0 else " (uncapped)"
+        logger.info(
+            "Enrichment backfill complete: %d enriched, SerpAPI calls today: %d%s",
+            enriched_count,
+            serpapi_calls_today,
+            cap_info,
+        )
+
         return enriched_count
 
 
@@ -474,6 +508,65 @@ def _find_missing_fields(job_row: dict) -> list:
     if job_row.get("salary_min") is None:
         missing.append("salary_min")
     return missing
+
+
+def _serpapi_daily_calls_used(conn: Any) -> int:
+    """Return today's SerpAPI enrichment call count from the scoring_costs ledger.
+
+    Uses the same calendar-day window as google_cse_source: UTC timestamps
+    stored by utc_now_iso(), compared via local_day_utc_window() so the reset
+    aligns with the user's clock.  Falls back to 0 on any DB error so a
+    quota-read failure never blocks enrichment outright.
+
+    Args:
+        conn: SQLite connection (may be None — returns 0 immediately).
+    """
+    if conn is None:
+        return 0
+    try:
+        from job_finder.json_utils import local_day_utc_window
+
+        start, end = local_day_utc_window()
+        row = conn.execute(
+            "SELECT COUNT(*) FROM scoring_costs "
+            "WHERE provider=? AND timestamp >= ? AND timestamp < ?",
+            ("serpapi_enrichment", start, end),
+        ).fetchone()
+        return int(row[0]) if row and row[0] is not None else 0
+    except Exception as exc:
+        logger.warning(
+            "SerpAPI daily quota read failed (%s); quota gate skipped",
+            type(exc).__name__,
+        )
+        return 0
+
+
+def _record_serpapi_call(conn: Any) -> None:
+    """Append a quota-ledger row to scoring_costs for one SerpAPI enrichment call.
+
+    Uses provider='serpapi_enrichment' and cost_usd=0 (cost is real but
+    untracked per-call — this row exists only as a daily quota counter,
+    mirroring the google_cse_source pattern).  Silent no-op when conn is
+    None or the INSERT fails (best-effort; never raises).
+
+    Args:
+        conn: SQLite connection (may be None — skips silently).
+    """
+    if conn is None:
+        return
+    try:
+        conn.execute(
+            "INSERT INTO scoring_costs "
+            "(job_id, purpose, model, input_tokens, output_tokens, cost_usd, timestamp, provider) "
+            "VALUES (NULL, ?, ?, 0, 0, 0, ?, ?)",
+            ("serpapi_enrichment", "serpapi_enrichment", utc_now_iso(), "serpapi_enrichment"),
+        )
+        conn.commit()
+    except Exception as exc:
+        logger.warning(
+            "SerpAPI quota ledger write failed (%s); call not counted against cap",
+            type(exc).__name__,
+        )
 
 
 def _filter_non_none(d: dict) -> dict:

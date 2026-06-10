@@ -71,6 +71,13 @@ sources:
     api_key: ""
     # Max pages to fetch per query (10 results/page, each page = 1 API credit)
     max_pages: 5
+    # Optional: max SerpAPI calls per calendar day for the enrichment pipeline
+    # (the paid enrichment tier that fills jd_full when all free tiers fail).
+    # Persisted in scoring_costs so the cap survives Flask restarts.
+    # 0 or absent = uncapped (original behavior). Recommended: 50-200 depending
+    # on your plan limits. The enrichment backfill logs today's call count and
+    # cap on every run so you can tune this value without guesswork.
+    daily_call_cap: 0
     queries:
       - query: Data Scientist
         location: San Francisco Bay Area
