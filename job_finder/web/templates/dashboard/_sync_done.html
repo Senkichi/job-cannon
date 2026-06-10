@@ -13,7 +13,14 @@
   {% else %}
     <span class="text-emerald-400">
       Sync complete: {{ total }} fetched, {{ scored }} new
-      {% if skipped > 0 %}, {{ skipped }} errors{% endif %}
+      {%- if skipped > 0 %}, <span class="text-amber-400" title="{{ error_details | join('\n') }}">{{ skipped }} error{{ 's' if skipped != 1 else '' }}</span>{% endif %}
     </span>
+    {%- if error_details %}
+    <ul class="mt-1 text-amber-400 list-none">
+      {%- for detail in error_details %}
+      <li>&#9888; {{ detail }}</li>
+      {%- endfor %}
+    </ul>
+    {%- endif %}
   {% endif %}
 </div>

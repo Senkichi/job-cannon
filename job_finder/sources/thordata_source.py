@@ -90,8 +90,20 @@ class ThordataSource:
 
             try:
                 resp = requests.post(_BASE_URL, headers=headers, data=payload, timeout=30)
+                if resp.status_code in (401, 403):
+                    raise RuntimeError(
+                        f"Thordata key rejected (HTTP {resp.status_code}) — check your API key"
+                    )
                 resp.raise_for_status()
                 data = resp.json()
+                # Detect expired/invalid subscription surfaced as a 200 with an
+                # error payload (e.g. {"message": "Package has expired!"}).
+                if isinstance(data, dict) and not data.get("jobs_results") and data.get("message"):
+                    msg = data["message"]
+                    if any(kw in msg.lower() for kw in ("expired", "invalid", "unauthorized")):
+                        raise RuntimeError(f"Thordata account error: {msg}")
+            except RuntimeError:
+                raise
             except Exception as e:
                 logger.warning("Thordata search failed for '%s' (page %d): %s", query, page, e)
                 break
