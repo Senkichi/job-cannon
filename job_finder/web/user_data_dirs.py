@@ -90,6 +90,33 @@ def update_check_path() -> Path:
     return user_data_root() / "update_check.json"
 
 
+def token_path() -> Path:
+    """Return the path to the Gmail OAuth token file.
+
+    Returns:
+        Path to token.json under the user data root.
+    """
+    return user_data_root() / "token.json"
+
+
+def credentials_path() -> Path:
+    """Return the path to the Gmail OAuth credentials file.
+
+    Returns:
+        Path to credentials.json under the user data root.
+    """
+    return user_data_root() / "credentials.json"
+
+
+def parse_failures_dir() -> Path:
+    """Return the path to the Gmail parse-failures archive directory.
+
+    Returns:
+        Path to gmail_parse_failures/ under the user data root.
+    """
+    return user_data_root() / "gmail_parse_failures"
+
+
 def warn_if_data_split(cwd: Path | None = None) -> bool:
     """Warn at startup when an unset env var is silently shadowing real data.
 

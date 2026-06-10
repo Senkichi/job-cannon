@@ -1,11 +1,11 @@
-"""Tests for enhanced gmail_auth.py OAuth flow with upgrade detection and validation.
+"""Tests for gmail_auth.py OAuth flow (Gmail-only, no Drive scope).
 
 Covers:
 - _check_token_scopes: reads actual granted scopes from token.json
-- authenticate: detects Gmail-only tokens and forces re-auth
-- authenticate: prints scope checklist after successful auth
-- _validate_drive_api: tests Drive API access and prints Console link on failure
-- _ensure_drive_folder: auto-creates folder, saves folder_id to config.yaml
+- authenticate: basic flow, token saved under user-data dir
+- authenticate: prints Gmail scope checklist only (no Drive entry)
+- get_credentials: load, refresh, error paths
+- No Drive scope, no _validate_drive_api, no _ensure_drive_folder
 """
 
 import sys
@@ -57,7 +57,6 @@ class TestGetCredentials:
         mock_creds.refresh_token = "refresh_tok"
         mock_creds.to_json.return_value = '{"token": "refreshed"}'
 
-        # After refresh, make it valid
         def _refresh(request):
             mock_creds.valid = True
 
@@ -71,7 +70,6 @@ class TestGetCredentials:
 
         assert result is mock_creds
         mock_creds.refresh.assert_called_once()
-        # Token should be persisted
         assert Path(token_path).read_text() == '{"token": "refreshed"}'
 
     def test_raises_on_missing_token(self, tmp_path):
@@ -135,14 +133,10 @@ class TestCheckTokenScopes:
         from job_finder.gmail_auth import _check_token_scopes
 
         token_path = str(tmp_path / "token.json")
-        with open(token_path, "w") as f:
-            f.write('{"token": "fake"}')
+        Path(token_path).write_text('{"token": "fake"}')
 
         mock_creds = MagicMock()
-        mock_creds.scopes = [
-            "https://www.googleapis.com/auth/gmail.readonly",
-            "https://www.googleapis.com/auth/drive.file",
-        ]
+        mock_creds.scopes = ["https://www.googleapis.com/auth/gmail.readonly"]
 
         with patch(
             "job_finder.gmail_auth.Credentials.from_authorized_user_file",
@@ -150,10 +144,7 @@ class TestCheckTokenScopes:
         ):
             result = _check_token_scopes(token_path)
 
-        assert result == {
-            "https://www.googleapis.com/auth/gmail.readonly",
-            "https://www.googleapis.com/auth/drive.file",
-        }
+        assert result == {"https://www.googleapis.com/auth/gmail.readonly"}
 
     def test_returns_empty_set_when_no_token(self, tmp_path):
         """_check_token_scopes returns empty set when token.json does not exist."""
@@ -169,8 +160,7 @@ class TestCheckTokenScopes:
         from job_finder.gmail_auth import _check_token_scopes
 
         token_path = str(tmp_path / "token.json")
-        with open(token_path, "w") as f:
-            f.write("not valid json{")
+        Path(token_path).write_text("not valid json{")
 
         with patch(
             "job_finder.gmail_auth.Credentials.from_authorized_user_file",
@@ -181,143 +171,133 @@ class TestCheckTokenScopes:
         assert result == set()
 
 
-class TestAuthenticateUpgradeDetection:
-    """authenticate() detects Gmail-only tokens and forces re-auth."""
+class TestScopesNodriveScope:
+    """SCOPES must contain only gmail.readonly — no Drive scope."""
 
-    def test_deletes_token_when_drive_scope_missing(self, tmp_path, capsys):
-        """authenticate deletes token.json when Gmail-only token detected."""
-        from job_finder import gmail_auth
+    def test_scopes_contains_only_gmail_readonly(self):
+        """SCOPES has exactly one entry: gmail.readonly."""
+        from job_finder.gmail_auth import SCOPES
 
-        token_path = str(tmp_path / "token.json")
-        creds_path = str(tmp_path / "credentials.json")
-        with open(token_path, "w") as f:
-            f.write('{"token": "fake"}')
-        with open(creds_path, "w") as f:
-            f.write('{"installed": {}}')
+        assert SCOPES == ["https://www.googleapis.com/auth/gmail.readonly"]
 
-        mock_gmail_only_creds = MagicMock()
-        mock_gmail_only_creds.scopes = ["https://www.googleapis.com/auth/gmail.readonly"]
+    def test_no_drive_in_scopes(self):
+        """No drive scope present in SCOPES."""
+        from job_finder.gmail_auth import SCOPES
 
-        mock_new_creds = MagicMock()
-        mock_new_creds.scopes = [
-            "https://www.googleapis.com/auth/gmail.readonly",
-            "https://www.googleapis.com/auth/drive.file",
-        ]
-        mock_new_creds.valid = True
-        mock_new_creds.expired = False
-        mock_new_creds.to_json.return_value = '{"token": "new"}'
+        for scope in SCOPES:
+            assert "drive" not in scope.lower(), f"Drive scope found: {scope}"
 
-        mock_flow = MagicMock()
-        mock_flow.run_local_server.return_value = mock_new_creds
+    def test_no_validate_drive_api(self):
+        """_validate_drive_api is not present (Drive validation removed)."""
+        import job_finder.gmail_auth as mod
 
-        original_token_path = gmail_auth.TOKEN_PATH
-        original_creds_path = gmail_auth.CREDENTIALS_PATH
-        try:
-            gmail_auth.TOKEN_PATH = token_path
-            gmail_auth.CREDENTIALS_PATH = creds_path
-
-            with (
-                patch.object(
-                    gmail_auth.Credentials,
-                    "from_authorized_user_file",
-                    return_value=mock_gmail_only_creds,
-                ),
-                patch(
-                    "google_auth_oauthlib.flow.InstalledAppFlow.from_client_secrets_file",
-                    return_value=mock_flow,
-                ),
-                patch(
-                    "job_finder.gmail_auth._validate_drive_api",
-                ),
-                patch(
-                    "job_finder.gmail_auth._ensure_drive_folder",
-                ),
-            ):
-                gmail_auth.authenticate()
-
-            # Token should have been deleted and re-created
-            assert Path(token_path).exists(), "Token should be re-created after re-auth"
-        finally:
-            gmail_auth.TOKEN_PATH = original_token_path
-            gmail_auth.CREDENTIALS_PATH = original_creds_path
-
-    def test_prints_upgrading_message_when_gmail_only_token(self, tmp_path, capsys):
-        """authenticate prints 'Upgrading to include Drive scope' for Gmail-only token."""
-        from job_finder import gmail_auth
-
-        token_path = str(tmp_path / "token.json")
-        creds_path = str(tmp_path / "credentials.json")
-        with open(token_path, "w") as f:
-            f.write('{"token": "fake"}')
-        with open(creds_path, "w") as f:
-            f.write('{"installed": {}}')
-
-        mock_gmail_only_creds = MagicMock()
-        mock_gmail_only_creds.scopes = ["https://www.googleapis.com/auth/gmail.readonly"]
-
-        mock_new_creds = MagicMock()
-        mock_new_creds.scopes = [
-            "https://www.googleapis.com/auth/gmail.readonly",
-            "https://www.googleapis.com/auth/drive.file",
-        ]
-        mock_new_creds.valid = True
-        mock_new_creds.expired = False
-        mock_new_creds.to_json.return_value = '{"token": "new"}'
-
-        mock_flow = MagicMock()
-        mock_flow.run_local_server.return_value = mock_new_creds
-
-        original_token_path = gmail_auth.TOKEN_PATH
-        original_creds_path = gmail_auth.CREDENTIALS_PATH
-        try:
-            gmail_auth.TOKEN_PATH = token_path
-            gmail_auth.CREDENTIALS_PATH = creds_path
-
-            with (
-                patch.object(
-                    gmail_auth.Credentials,
-                    "from_authorized_user_file",
-                    return_value=mock_gmail_only_creds,
-                ),
-                patch(
-                    "google_auth_oauthlib.flow.InstalledAppFlow.from_client_secrets_file",
-                    return_value=mock_flow,
-                ),
-                patch(
-                    "job_finder.gmail_auth._validate_drive_api",
-                ),
-                patch(
-                    "job_finder.gmail_auth._ensure_drive_folder",
-                ),
-            ):
-                gmail_auth.authenticate()
-        finally:
-            gmail_auth.TOKEN_PATH = original_token_path
-            gmail_auth.CREDENTIALS_PATH = original_creds_path
-
-        captured = capsys.readouterr()
-        assert "Upgrading" in captured.out or "upgrade" in captured.out.lower(), (
-            f"Should print upgrade message, got: {captured.out}"
+        assert not hasattr(mod, "_validate_drive_api"), (
+            "_validate_drive_api should not exist after Drive removal"
         )
+
+    def test_no_ensure_drive_folder(self):
+        """_ensure_drive_folder is not present (Drive folder creation removed)."""
+        import job_finder.gmail_auth as mod
+
+        assert not hasattr(mod, "_ensure_drive_folder"), (
+            "_ensure_drive_folder should not exist after Drive removal"
+        )
+
+
+class TestAuthenticateTokenPaths:
+    """authenticate() writes token.json to user-data dir, not CWD."""
+
+    def test_token_saved_under_user_data_dir(self, tmp_path, monkeypatch):
+        """authenticate saves token.json under JOB_CANNON_USER_DATA_DIR."""
+        monkeypatch.setenv("JOB_CANNON_USER_DATA_DIR", str(tmp_path))
+
+        from job_finder import gmail_auth
+        from job_finder.web.user_data_dirs import token_path as canonical_token_path
+
+        canonical = str(canonical_token_path())
+        creds_path = str(tmp_path / "credentials.json")
+        (tmp_path / "credentials.json").write_text('{"installed": {}}')
+
+        mock_new_creds = MagicMock()
+        mock_new_creds.scopes = ["https://www.googleapis.com/auth/gmail.readonly"]
+        mock_new_creds.valid = True
+        mock_new_creds.expired = False
+        mock_new_creds.to_json.return_value = '{"token": "new"}'
+
+        mock_flow = MagicMock()
+        mock_flow.run_local_server.return_value = mock_new_creds
+
+        original_token = gmail_auth.TOKEN_PATH
+        original_creds = gmail_auth.CREDENTIALS_PATH
+        try:
+            gmail_auth.TOKEN_PATH = canonical
+            gmail_auth.CREDENTIALS_PATH = creds_path
+
+            with (
+                patch(
+                    "google_auth_oauthlib.flow.InstalledAppFlow.from_client_secrets_file",
+                    return_value=mock_flow,
+                ),
+            ):
+                gmail_auth.authenticate()
+
+            assert Path(canonical).exists(), "Token should be saved at canonical path"
+            # Must NOT be written to CWD
+            assert not Path("token.json").exists(), "Token must not be written to CWD"
+        finally:
+            gmail_auth.TOKEN_PATH = original_token
+            gmail_auth.CREDENTIALS_PATH = original_creds
+
+    def test_no_config_yaml_write_in_authenticate(self, tmp_path, monkeypatch):
+        """authenticate() never writes config.yaml (Drive folder removal check)."""
+        monkeypatch.setenv("JOB_CANNON_USER_DATA_DIR", str(tmp_path))
+
+        from job_finder import gmail_auth
+
+        canonical_token = str(tmp_path / "token.json")
+        creds_path = str(tmp_path / "credentials.json")
+        (tmp_path / "credentials.json").write_text('{"installed": {}}')
+
+        mock_new_creds = MagicMock()
+        mock_new_creds.scopes = ["https://www.googleapis.com/auth/gmail.readonly"]
+        mock_new_creds.valid = True
+        mock_new_creds.expired = False
+        mock_new_creds.to_json.return_value = '{"token": "new"}'
+
+        mock_flow = MagicMock()
+        mock_flow.run_local_server.return_value = mock_new_creds
+
+        config_yaml = tmp_path / "config.yaml"
+        original_token = gmail_auth.TOKEN_PATH
+        original_creds = gmail_auth.CREDENTIALS_PATH
+        try:
+            gmail_auth.TOKEN_PATH = canonical_token
+            gmail_auth.CREDENTIALS_PATH = creds_path
+
+            with patch(
+                "google_auth_oauthlib.flow.InstalledAppFlow.from_client_secrets_file",
+                return_value=mock_flow,
+            ):
+                gmail_auth.authenticate()
+
+            assert not config_yaml.exists(), "authenticate() must not write config.yaml"
+        finally:
+            gmail_auth.TOKEN_PATH = original_token
+            gmail_auth.CREDENTIALS_PATH = original_creds
 
 
 class TestAuthenticateScopeChecklist:
-    """authenticate() prints scope checklist after successful auth."""
+    """authenticate() prints Gmail-only scope checklist."""
 
-    def test_prints_scope_checklist_after_auth(self, tmp_path, capsys):
-        """authenticate prints scope checklist with checkmarks after successful auth."""
+    def test_prints_gmail_scope_checklist(self, tmp_path, capsys):
+        """authenticate prints scope checklist with Gmail checkmark only."""
         from job_finder import gmail_auth
 
         token_path = str(tmp_path / "token.json")
         creds_path = str(tmp_path / "credentials.json")
-        with open(creds_path, "w") as f:
-            f.write('{"installed": {}}')
+        (tmp_path / "credentials.json").write_text('{"installed": {}}')
 
         mock_new_creds = MagicMock()
-        mock_new_creds.scopes = [
-            "https://www.googleapis.com/auth/gmail.readonly",
-            "https://www.googleapis.com/auth/drive.file",
-        ]
         mock_new_creds.valid = True
         mock_new_creds.expired = False
         mock_new_creds.to_json.return_value = '{"token": "new"}'
@@ -325,8 +305,10 @@ class TestAuthenticateScopeChecklist:
         mock_flow = MagicMock()
         mock_flow.run_local_server.return_value = mock_new_creds
 
-        original_token_path = gmail_auth.TOKEN_PATH
-        original_creds_path = gmail_auth.CREDENTIALS_PATH
+        gmail_scope = "https://www.googleapis.com/auth/gmail.readonly"
+
+        original_token = gmail_auth.TOKEN_PATH
+        original_creds = gmail_auth.CREDENTIALS_PATH
         try:
             gmail_auth.TOKEN_PATH = token_path
             gmail_auth.CREDENTIALS_PATH = creds_path
@@ -337,136 +319,19 @@ class TestAuthenticateScopeChecklist:
                     return_value=mock_flow,
                 ),
                 patch(
-                    "job_finder.gmail_auth._validate_drive_api",
-                ),
-                patch(
-                    "job_finder.gmail_auth._ensure_drive_folder",
+                    "job_finder.gmail_auth._check_token_scopes",
+                    return_value={gmail_scope},
                 ),
             ):
                 gmail_auth.authenticate()
         finally:
-            gmail_auth.TOKEN_PATH = original_token_path
-            gmail_auth.CREDENTIALS_PATH = original_creds_path
+            gmail_auth.TOKEN_PATH = original_token
+            gmail_auth.CREDENTIALS_PATH = original_creds
 
         captured = capsys.readouterr()
-        assert "Scope checklist" in captured.out or "checklist" in captured.out.lower(), (
-            f"Should print scope checklist, got: {captured.out}"
-        )
-        # Should show checkmarks for both scopes
-        assert "[x]" in captured.out or "✓" in captured.out or "check" in captured.out.lower(), (
-            f"Should show checkmarks, got: {captured.out}"
-        )
-
-
-class TestValidateDriveApi:
-    """_validate_drive_api tests Drive API access."""
-
-    def test_prints_success_on_successful_call(self, capsys):
-        """_validate_drive_api prints success message when Drive API responds."""
-        from job_finder.gmail_auth import _validate_drive_api
-
-        mock_creds = MagicMock()
-        mock_service = MagicMock()
-        mock_service.files.return_value.list.return_value.execute.return_value = {"files": []}
-
-        with patch("job_finder.gmail_auth.build", return_value=mock_service):
-            _validate_drive_api(mock_creds)
-
-        captured = capsys.readouterr()
-        assert "verified" in captured.out.lower() or "success" in captured.out.lower(), (
-            f"Should print success message, got: {captured.out}"
-        )
-
-    def test_prints_console_link_on_403(self, capsys):
-        """_validate_drive_api prints Console link when HttpError 403 received."""
-        from googleapiclient.errors import HttpError
-
-        from job_finder.gmail_auth import _validate_drive_api
-
-        mock_creds = MagicMock()
-        mock_service = MagicMock()
-
-        # Simulate 403 HttpError
-        mock_resp = MagicMock()
-        mock_resp.status = 403
-        mock_service.files.return_value.list.return_value.execute.side_effect = HttpError(
-            resp=mock_resp, content=b'{"error": {"code": 403}}'
-        )
-
-        with patch("job_finder.gmail_auth.build", return_value=mock_service):
-            _validate_drive_api(mock_creds)
-
-        captured = capsys.readouterr()
-        assert "console.cloud.google.com" in captured.out, (
-            f"Should print Console link on 403, got: {captured.out}"
-        )
-
-
-class TestEnsureDriveFolder:
-    """_ensure_drive_folder auto-creates folder and saves folder_id to config.yaml."""
-
-    def test_skips_when_folder_id_already_configured(self, tmp_path, capsys):
-        """_ensure_drive_folder skips folder creation when folder_id is set."""
-        from job_finder.gmail_auth import _ensure_drive_folder
-
-        config_path = str(tmp_path / "config.yaml")
-        with open(config_path, "w") as f:
-            f.write("drive:\n  folder_id: existing-folder-id\n")
-
-        mock_creds = MagicMock()
-
-        _ensure_drive_folder(mock_creds, config_path=config_path)
-
-        captured = capsys.readouterr()
-        assert "already" in captured.out.lower() or "configured" in captured.out.lower(), (
-            f"Should print 'already configured' message, got: {captured.out}"
-        )
-
-    def test_creates_folder_and_saves_folder_id_to_config(self, tmp_path):
-        """_ensure_drive_folder creates Drive folder and saves folder_id to config.yaml."""
-        from job_finder.gmail_auth import _ensure_drive_folder
-
-        config_path = str(tmp_path / "config.yaml")
-        with open(config_path, "w") as f:
-            f.write('drive:\n  folder_id: ""\n')
-
-        mock_creds = MagicMock()
-        mock_service = MagicMock()
-        mock_service.files.return_value.create.return_value.execute.return_value = {
-            "id": "new-folder-id-abc"
-        }
-
-        with patch("job_finder.gmail_auth.build", return_value=mock_service):
-            _ensure_drive_folder(mock_creds, config_path=config_path)
-
-        # Verify folder_id was saved to config.yaml
-        import yaml
-
-        with open(config_path) as f:
-            saved_config = yaml.safe_load(f)
-
-        assert saved_config["drive"]["folder_id"] == "new-folder-id-abc", (
-            f"folder_id should be saved to config.yaml, got: {saved_config}"
-        )
-
-    def test_handles_missing_config_yaml_gracefully(self, tmp_path, capsys):
-        """_ensure_drive_folder handles missing config.yaml gracefully."""
-        from job_finder.gmail_auth import _ensure_drive_folder
-
-        config_path = str(tmp_path / "no_config.yaml")  # does not exist
-
-        mock_creds = MagicMock()
-        mock_service = MagicMock()
-        mock_service.files.return_value.create.return_value.execute.return_value = {
-            "id": "new-folder-id-xyz"
-        }
-
-        with patch("job_finder.gmail_auth.build", return_value=mock_service):
-            # Should NOT raise -- graceful degradation
-            _ensure_drive_folder(mock_creds, config_path=config_path)
-
-        captured = capsys.readouterr()
-        # Should print the folder_id so user can add it manually
-        assert "new-folder-id-xyz" in captured.out, (
-            f"Should print folder_id for manual config, got: {captured.out}"
+        assert "Scope checklist" in captured.out
+        assert "[x]" in captured.out
+        # Drive must not appear in output
+        assert "drive" not in captured.out.lower(), (
+            f"Drive should not appear in scope checklist output: {captured.out}"
         )

@@ -7,7 +7,9 @@ Run `python -m job_finder.gmail_auth` to set up authentication.
 import base64
 import logging
 import os
+import shutil
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 from googleapiclient.discovery import build
 
@@ -22,8 +24,33 @@ from job_finder.parsers.monster_parser import parse_monster_alert
 from job_finder.parsers.trueup_parser import parse_trueup_alert
 from job_finder.parsers.ziprecruiter_parser import parse_ziprecruiter_alert
 from job_finder.web.autoheal.recipe_extractor import RecipeExtractor
+from job_finder.web.user_data_dirs import parse_failures_dir, token_path
 
 logger = logging.getLogger(__name__)
+
+
+def _resolve_token_path() -> str:
+    """Return the canonical token.json path, migrating legacy CWD file if needed.
+
+    If the user-data token doesn't exist but a CWD-relative token.json does,
+    move it to the user-data location so the app continues working after an
+    upgrade from a CWD-based setup.
+
+    Returns:
+        String path to the canonical token.json location.
+    """
+    canonical = token_path()
+    if not canonical.exists():
+        cwd_token = Path("token.json")
+        if cwd_token.exists():
+            canonical.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(cwd_token), str(canonical))
+            logger.info(
+                "Migrated token.json from working directory to user-data directory: %s",
+                canonical,
+            )
+    return str(canonical)
+
 
 # Map sender addresses to parser functions
 SENDER_PARSERS = {
@@ -53,13 +80,13 @@ SENDER_LABEL: dict[str, str] = {
     "monster@notifications.monster.com": "monster",
 }
 
-TOKEN_PATH = "token.json"
+TOKEN_PATH: str = _resolve_token_path()
 SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
 
-# Intentional hardcoded default — parse failures are a local debugging artifact,
-# not user data, so this path does not belong in config.yaml.  Override by
-# passing a different directory to _archive_parse_failure if needed.
-PARSE_FAILURES_DIR = "data/parse_failures"
+# Parse-failure archives live in the user-data directory so they're always
+# co-located with other user data regardless of CWD.  Override by passing
+# a different directory to _archive_parse_failure if needed.
+PARSE_FAILURES_DIR: str = str(parse_failures_dir())
 
 # Meta-email indicator phrases (checked against lowercased first 200 chars of body)
 _ARCHIVE_META_INDICATORS = [
@@ -95,10 +122,8 @@ def _should_archive_failure(body: str, jobs: list, sender: str) -> bool:
     return not any(indicator in preamble for indicator in _ARCHIVE_META_INDICATORS)
 
 
-def _archive_parse_failure(
-    sender: str, body: str, *, failures_dir: str = PARSE_FAILURES_DIR
-) -> None:
-    """Archive HTML body from a failed parse to PARSE_FAILURES_DIR.
+def _archive_parse_failure(sender: str, body: str, *, failures_dir: str | None = None) -> None:
+    """Archive HTML body from a failed parse to the parse-failures directory.
 
     Filename: {sender_domain}_{ISO_timestamp}.html
     Creates directory if needed. Logs warning on write failure — never raises.
@@ -106,13 +131,16 @@ def _archive_parse_failure(
     Args:
         sender: Sender email address (used for filename prefix).
         body: Raw email body HTML to archive.
-        failures_dir: Directory to write failure files into (default: PARSE_FAILURES_DIR).
+        failures_dir: Directory to write failure files into. Defaults to
+            ``str(parse_failures_dir())`` (resolved at call time so that
+            JOB_CANNON_USER_DATA_DIR overrides are honoured in tests).
     """
+    resolved_dir = failures_dir if failures_dir is not None else str(parse_failures_dir())
     try:
-        os.makedirs(failures_dir, exist_ok=True)
+        os.makedirs(resolved_dir, exist_ok=True)
         domain = sender.split("@")[-1].replace(".", "_") if "@" in sender else sender
         ts = datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
-        path = f"{failures_dir}/{domain}_{ts}.html"
+        path = f"{resolved_dir}/{domain}_{ts}.html"
         with open(path, "w", encoding="utf-8") as f:
             f.write(body)
         logger.info("Parse failure archived: %s", path)
@@ -123,8 +151,11 @@ def _archive_parse_failure(
 class GmailSource:
     """Fetch and parse job alert emails from Gmail."""
 
-    def __init__(self, token_path: str = TOKEN_PATH):
-        self.service = self._authenticate(token_path)
+    def __init__(self, token_path: str | None = None):
+        # Resolve token path at construction time (not import time) so that
+        # JOB_CANNON_USER_DATA_DIR test overrides are honoured.
+        resolved = token_path if token_path is not None else _resolve_token_path()
+        self.service = self._authenticate(resolved)
         self.parse_failures: list[dict] = []
         self.extraction_records: list[dict] = []
 

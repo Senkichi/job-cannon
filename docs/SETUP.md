@@ -170,7 +170,7 @@ Adding yourself as a test user is required; without it the OAuth flow is blocked
 2. **Create Credentials → OAuth client ID**
 3. Application type: **Desktop app**, name it, click **Create**
 4. **Download JSON**, rename to `credentials.json`
-5. Move it to your user-data directory (see Section 6) or the project root if `JOB_CANNON_USER_DATA_DIR` points there
+5. Move it to your user-data directory (see Section 6) — e.g. `%APPDATA%\JobCannon\credentials.json` on Windows
 
 #### Step 5: Run the Auth Flow
 
@@ -178,11 +178,13 @@ Adding yourself as a test user is required; without it the OAuth flow is blocked
 uv run python -m job_finder.gmail_auth
 ```
 
-Browser opens — sign in, accept the Gmail read-only permission. `token.json` is written next to `credentials.json`.
+Browser opens — sign in, accept the **Gmail read-only** permission. `token.json` is written to your user-data directory (same location as `credentials.json`).
 
 You'll see an "App Not Verified" warning. This is expected — click **Advanced → Go to Job Cannon (unsafe)**. Safe because it's your own app under your own Google account.
 
 Then set `sources.gmail.enabled: true` in `config.yaml` (and `sources.imap.enabled: false` if you're switching away from IMAP).
+
+> **Previously authorized?** If you ran the auth flow before v5, your old token included a Google Drive scope that is no longer requested. The old token keeps working for Gmail reads, but you can optionally revoke it at [myaccount.google.com/permissions](https://myaccount.google.com/permissions) and re-run the auth flow to issue a clean Gmail-only token.
 
 ---
 
