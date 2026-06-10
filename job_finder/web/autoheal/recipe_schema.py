@@ -1,7 +1,8 @@
 """Recipe schema dataclasses and strict validation for autoheal declarative recipes.
 
 Two recipe types:
-- HtmlRecipe: CSS-selector + per-field map for HTML email bodies.
+- HtmlRecipe: CSS-selector + per-field map for HTML documents — email bodies
+  (surface "email") and rendered careers pages (surface "careers", D4).
 - AtsAliasRecipe: extra field alias lists for ATS platforms (merged after canonical lists).
 
 validate_recipe() is pure (no I/O), strict (unknown keys raise), and returns
@@ -96,7 +97,7 @@ def validate_recipe(surface: str, data: dict) -> HtmlRecipe | AtsAliasRecipe:
     """Strictly validate a raw recipe dict and return the appropriate frozen dataclass.
 
     Args:
-        surface: ``"email"`` or ``"ats"``.
+        surface: ``"email"``, ``"careers"`` (both → HtmlRecipe), or ``"ats"``.
         data: Raw dict (typically from JSON deserialization).
 
     Returns:
@@ -106,9 +107,11 @@ def validate_recipe(surface: str, data: dict) -> HtmlRecipe | AtsAliasRecipe:
         ValueError: On any schema violation — unknown surface, unknown keys,
                     missing required fields, empty lists, non-string values.
     """
-    if surface not in ("email", "ats"):
-        raise ValueError(f"Unknown surface {surface!r}; expected 'email' or 'ats'")
-    if surface == "email":
+    if surface not in ("email", "ats", "careers"):
+        raise ValueError(
+            f"Unknown surface {surface!r}; expected 'email', 'ats', or 'careers'"
+        )
+    if surface in ("email", "careers"):
         return _validate_html_recipe(data)
     return _validate_ats_alias_recipe(data)
 
