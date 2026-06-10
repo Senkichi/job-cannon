@@ -416,3 +416,9 @@ autoheal:
   heal_attempt_reset_days: 30
   # Wall-clock timeout (seconds) for the subprocess corpus-replay validator.
   validate_timeout_s: 30
+  # Maintainer-instance only: auto-open an upstream PR (via gh) shipping each
+  # adopted recipe as a package default. Leave false unless you maintain the
+  # upstream repo — nothing leaves your machine when false (see PRIVACY.md).
+  maintainer_auto_pr: false
+  # Repository targeted by contribution issue links and the maintainer auto-PR.
+  upstream_repo: "Senkichi/job-cannon"

@@ -113,7 +113,7 @@ def run_heal(conn: sqlite3.Connection, config: dict, source: str) -> str | None:
     record_audit(conn, source, surface, "validated")
 
     # --- ADOPT (C5) — write the override, hot-swap, reset health ---
-    return _adopt_stage(conn, source, surface, candidate, max_attempts)
+    return _adopt_stage(conn, source, surface, candidate, max_attempts, autoheal_cfg)
 
 
 # ---------------------------------------------------------------------------
@@ -122,7 +122,12 @@ def run_heal(conn: sqlite3.Connection, config: dict, source: str) -> str | None:
 
 
 def _adopt_stage(
-    conn: sqlite3.Connection, source: str, surface: str, candidate, max_attempts: int
+    conn: sqlite3.Connection,
+    source: str,
+    surface: str,
+    candidate,
+    max_attempts: int,
+    autoheal_cfg: dict | None = None,
 ) -> str:
     """Write the validated recipe as an override, hot-swap the cache, reset health.
 
@@ -150,6 +155,27 @@ def _adopt_stage(
         return "rejected:write_failed"
 
     record_audit(conn, source, surface, "adopted")
+
+    # --- Upstream contribution bundle (D5) — consent-gated, local-only.
+    # Adoption stands regardless: a bundle failure is audited, never raised. ---
+    bundle = None
+    try:
+        from job_finder.web.autoheal import upstream_reporter
+
+        bundle = upstream_reporter.build_bundle(conn, source, surface, recipe_to_dict(candidate))
+        upstream_reporter.write_bundle(bundle)
+    except Exception as exc:
+        logger.exception("autoheal: contribution bundle for %s failed", source)
+        record_audit(conn, source, surface, "contrib_failed", str(exc))
+
+    # Maintainer auto-PR (default-off; remote-only; never raises).
+    if bundle is not None:
+        from job_finder.web.autoheal import upstream_reporter
+
+        pr_outcome = upstream_reporter.maintainer_pr(bundle, autoheal_cfg or {})
+        if pr_outcome is not None:
+            record_audit(conn, source, surface, pr_outcome)
+
     conn.execute(
         "UPDATE source_health SET status = 'healthy', consecutive_breaks = 0, "
         "heal_attempts = heal_attempts + 1, shadow_legacy_wins = 0, last_heal_at = ? "

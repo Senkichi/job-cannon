@@ -25,6 +25,32 @@ os.environ.setdefault("GSD_BACKUP_CONFIRMED", "1")
 os.environ.setdefault("PYSTRAY_BACKEND", "dummy")
 
 
+@pytest.fixture(autouse=True)
+def _isolated_user_data_root(tmp_path, monkeypatch):
+    """Point JOB_CANNON_USER_DATA_DIR at a per-test temp dir for EVERY test.
+
+    Production code paths write into the user-data root as side effects
+    (heal contribution bundles on adoption, OAuth artifacts, update-check
+    cache); without this, any test exercising those paths litters the real
+    OS user-data directory — and on a dev machine the suite silently READS
+    the developer's real config.yaml.
+
+    CI's contract (ci.yml "seed config" step) is that a config.yaml built
+    from config.example.yaml exists in the user-data root, and many tests
+    rely on a fail-fast load_config() succeeding ambiently — so this fixture
+    seeds the same file. Tests that need different env semantics override
+    with their own monkeypatch.setenv/delenv (test-level monkeypatch wins).
+    """
+    import shutil
+    from pathlib import Path
+
+    root = tmp_path / "_userdata"
+    root.mkdir(parents=True, exist_ok=True)
+    example = Path(__file__).resolve().parents[1] / "config.example.yaml"
+    shutil.copyfile(example, root / "config.yaml")
+    monkeypatch.setenv("JOB_CANNON_USER_DATA_DIR", str(root))
+
+
 def _seed_onboarding_complete(db_path: str) -> None:
     """Seed onboarding_state(id=1, onboarding_complete=1) so the @before_request gate does not redirect tests to /onboarding/welcome.
 

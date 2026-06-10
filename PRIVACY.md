@@ -99,6 +99,52 @@ Per-provider list of API endpoints called and what payload reaches them:
 - **Careers pages and ATS endpoints** — outbound HTTP fetches with the
   standard `User-Agent` for crawler tiers 1-4.
 
+## Parser Auto-Heal & Contribution Bundles
+
+To detect and repair broken parsers, the app keeps a rolling per-source corpus
+of the inputs its parsers saw (email alert bodies, ATS API responses, rendered
+careers-page HTML) in `jobs.db`. Every sample is PII-scrubbed **before it is
+written to disk**:
+
+- recipient headers (`To:`, `Cc:`, `Bcc:`, `Delivered-To:`, …) are dropped;
+- all email addresses are replaced with `[redacted]`;
+- your own name/email identifiers from `config.yaml` are replaced with
+  `[redacted]`.
+
+The corpus is capped at 50 samples per source and never leaves your machine
+on its own.
+
+When the auto-healer adopts a repair recipe, it writes a **contribution
+bundle** to `<user_data_dir>/heal_contrib/`. A bundle contains the generated
+recipe (CSS selectors / field aliases — no personal data), ONE PII-scrubbed
+failing sample clipped to 20,000 characters, a drift summary (break counts,
+baseline yield), the app version, and a timestamp.
+
+**Nothing is uploaded.** Bundles sit on disk until you act on them from the
+dashboard's *Heal Activity* panel, which offers two explicit actions:
+
+- **Open GitHub issue** — opens a pre-filled new-issue page in your browser.
+  Nothing is posted until you review the content and submit the issue
+  yourself.
+- **Copy bundle** — copies the bundle JSON to your clipboard for manual
+  sharing.
+
+The panel shows a reminder before either action: the bundle contains a
+PII-scrubbed sample of a real input from your inbox or a scanned page —
+**review it before posting**. The scrubber is conservative but mechanical; if
+an alert email embeds personal data in an unusual shape, redact it yourself
+before sharing.
+
+One exception exists for the upstream maintainer's own instance:
+`autoheal.maintainer_auto_pr` (default `false`) pushes each adopted recipe as
+a pull request to `autoheal.upstream_repo` via the `gh` CLI, including the
+scrubbed failing sample in the PR body. At its default, the app never invokes
+`gh` and no heal data leaves your machine.
+
+Recipe defaults bundled with the package (`job_finder/data/default_overrides/`)
+contain only extraction rules contributed through this channel — never
+samples or personal data.
+
 ## Threat Model
 
 In scope:

@@ -1,0 +1,53 @@
+{# Heal activity — autoheal Phase D / D5 panel.
+   Required context:
+     heal_audit (list[dict])   — last 10 heal_audit rows, no_provider excluded;
+                                 each {source, surface, outcome, created_at}.
+     heal_bundles (list[dict]) — pending contribution bundles; each
+                                 {source, created_at, filename, issue_url, bundle_json}.
+   Server-rendered in the dashboard index context — no HTMX fragment route.
+   Nothing here leaves the machine without the explicit "Open GitHub issue"
+   click (new tab) or a manual copy-paste. #}
+<div class="bg-slate-800 rounded-xl border border-slate-700 p-4">
+  <h3 class="text-sm font-semibold text-slate-300 mb-3">Heal Activity</h3>
+
+  {% if heal_audit %}
+    <ul class="space-y-1 {% if heal_bundles %}mb-4{% endif %}">
+      {% for a in heal_audit %}
+        <li class="flex items-center justify-between gap-2 text-xs">
+          <span class="font-mono text-slate-200 truncate">{{ a.source }}</span>
+          <span class="text-slate-400 whitespace-nowrap">
+            {{ a.outcome }} · {{ a.created_at | relative_date }}
+          </span>
+        </li>
+      {% endfor %}
+    </ul>
+  {% else %}
+    <p class="text-slate-500 text-sm {% if heal_bundles %}mb-4{% endif %}">No heal activity yet.</p>
+  {% endif %}
+
+  {% if heal_bundles %}
+    <h4 class="text-xs font-semibold text-slate-300 mb-1">Pending contributions</h4>
+    <p class="text-xs text-slate-500 mb-2">
+      This bundle contains a PII-scrubbed sample of a real input from your inbox /
+      the scanned page. Review before posting.
+    </p>
+    {% for b in heal_bundles %}
+      <div class="border border-slate-700 rounded-lg p-2 mb-2">
+        <div class="flex items-center justify-between gap-2 text-xs mb-1">
+          <span class="font-mono text-slate-200 truncate">{{ b.source }}</span>
+          <a href="{{ b.issue_url }}" target="_blank" rel="noopener noreferrer"
+             class="text-sky-400 hover:underline whitespace-nowrap">Open GitHub issue</a>
+        </div>
+        <textarea readonly id="heal-bundle-{{ loop.index }}"
+                  class="w-full h-20 bg-slate-900 text-slate-400 text-xs font-mono rounded p-1.5 resize-y"
+                  aria-label="Contribution bundle JSON for {{ b.source }}">{{ b.bundle_json }}</textarea>
+        <button type="button"
+                aria-label="Copy bundle JSON to clipboard"
+                class="mt-1 text-xs text-slate-300 bg-slate-700 hover:bg-slate-600 rounded px-2 py-0.5"
+                onclick="navigator.clipboard.writeText(document.getElementById('heal-bundle-{{ loop.index }}').value).then(() => { this.textContent = 'Copied!'; setTimeout(() => this.textContent = 'Copy bundle', 1500); }).catch(() => { this.textContent = 'Copy failed — select the text manually'; })">
+          Copy bundle
+        </button>
+      </div>
+    {% endfor %}
+  {% endif %}
+</div>
