@@ -137,9 +137,7 @@ _COMMIT_MUTATION = (
 
 def _gh(args: list[str], timeout_s: float):
     """Single subprocess seam for all gh invocations (tests fake this)."""
-    return subprocess.run(
-        ["gh", *args], capture_output=True, text=True, timeout=timeout_s
-    )
+    return subprocess.run(["gh", *args], capture_output=True, text=True, timeout=timeout_s)
 
 
 def maintainer_pr(bundle: dict, autoheal_cfg: dict) -> str | None:
