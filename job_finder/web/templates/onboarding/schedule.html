@@ -5,18 +5,18 @@
 <h1 class="text-2xl font-bold text-slate-100 mb-4">How often should we check for new jobs?</h1>
 <p class="text-slate-300 mb-6">You can change this anytime in Settings.</p>
 <form method="post" action="{{ url_for('onboarding.schedule') }}" class="space-y-3">
-  <label class="flex items-start gap-3 p-3 rounded border border-slate-700 hover:border-blue-500 cursor-pointer">
+  <label class="flex items-start gap-3 p-3 rounded border border-slate-700 hover:border-indigo-500 cursor-pointer">
     <input type="radio" name="cadence_preset" value="light" class="mt-1">
     <div><div class="text-slate-200 font-medium">Light</div><div class="text-slate-400 text-xs">Once a day at 8 AM</div></div>
   </label>
-  <label class="flex items-start gap-3 p-3 rounded border border-slate-700 hover:border-blue-500 cursor-pointer">
+  <label class="flex items-start gap-3 p-3 rounded border border-slate-700 hover:border-indigo-500 cursor-pointer">
     <input type="radio" name="cadence_preset" value="standard" checked class="mt-1">
     <div><div class="text-slate-200 font-medium">Standard (recommended)</div><div class="text-slate-400 text-xs">Three times a day at midnight, 8 AM, 4 PM</div></div>
   </label>
-  <label class="flex items-start gap-3 p-3 rounded border border-slate-700 hover:border-blue-500 cursor-pointer">
+  <label class="flex items-start gap-3 p-3 rounded border border-slate-700 hover:border-indigo-500 cursor-pointer">
     <input type="radio" name="cadence_preset" value="heavy" class="mt-1">
     <div><div class="text-slate-200 font-medium">Heavy</div><div class="text-slate-400 text-xs">Every 4 hours starting at midnight</div></div>
   </label>
-  <button type="submit" class="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded mt-4">Continue</button>
+  <button type="submit" class="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded mt-4">Continue</button>
 </form>
 {% endblock %}

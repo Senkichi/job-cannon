@@ -23,7 +23,7 @@
           hx-target="#sync-status"
           hx-swap="outerHTML">
       <button type="submit"
-              class="px-4 py-2 bg-emerald-700 hover:bg-emerald-600 text-white text-sm font-medium rounded-lg transition-colors">
+              class="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium rounded-lg transition-colors">
         Sync Now
       </button>
     </form>
@@ -43,7 +43,7 @@
           hx-target="#batch-score-status"
           hx-swap="outerHTML">
       <button type="submit"
-              class="px-4 py-2 bg-emerald-700 hover:bg-emerald-600 text-white text-sm font-medium rounded-lg transition-colors"
+              class="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium rounded-lg transition-colors"
               title="Run AI scoring on {{ unscored_count }} scorable jobs">
         Score {{ unscored_count }} unscored {% if unscored_count == 1 %}job{% else %}jobs{% endif %}
         <span class="ml-1 bg-emerald-500 text-white text-xs rounded-full px-1.5 py-0.5">{{ unscored_count }}</span>

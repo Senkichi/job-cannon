@@ -61,7 +61,7 @@
     <span class="text-2xl font-bold {{ cost_text }}">${{ "%.2f" | format(cost_stats.today) }}</span>
     <span class="text-xs text-slate-500">${{ "%.2f" | format(cost_stats.month) }} / ${{ "%.0f" | format(budget_cap) }} this month</span>
     <a href="{{ url_for('costs.index') }}"
-       class="text-xs text-violet-400 hover:text-violet-300 transition-colors mt-1"
+       class="text-xs text-indigo-400 hover:text-indigo-300 transition-colors mt-1"
        hx-on:click="event.stopPropagation()">View details &rarr;</a>
   </div>
 

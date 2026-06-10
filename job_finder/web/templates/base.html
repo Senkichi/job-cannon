@@ -24,10 +24,99 @@
 
   <style type="text/tailwindcss">
     @custom-variant dark (&:where(.dark, .dark *));
+
+    /* ===================================================================== *
+     * JOB CANNON DESIGN TOKENS — single accent (indigo), dark-first.        *
+     * Overrides the default slate/indigo/emerald/amber/red/blue ramps so    *
+     * every existing utility class adopts the tuned OKLCH system with no     *
+     * template edits. Semantic aliases (bg-canvas, text-ink-muted,          *
+     * bg-accent-600, …) are available for new screens. Full annotated       *
+     * source + migration notes live in handoff/theme.css + HANDOFF.md.      *
+     * ===================================================================== */
+    @theme {
+      /* Neutral ramp — cool slate, hue 264 */
+      --color-slate-950: oklch(0.17 0.022 264);
+      --color-slate-900: oklch(0.21 0.024 264);
+      --color-slate-850: oklch(0.25 0.026 264);
+      --color-slate-800: oklch(0.28 0.028 264);
+      --color-slate-750: oklch(0.32 0.029 264);
+      --color-slate-700: oklch(0.37 0.030 264);
+      --color-slate-600: oklch(0.45 0.030 264);
+      --color-slate-500: oklch(0.56 0.028 264);
+      --color-slate-400: oklch(0.68 0.024 264);
+      --color-slate-300: oklch(0.79 0.018 264);
+      --color-slate-200: oklch(0.88 0.012 264);
+      --color-slate-100: oklch(0.94 0.008 264);
+
+      /* Accent — indigo, hue 274 (the one primary) */
+      --color-indigo-300: oklch(0.78 0.115 274);
+      --color-indigo-400: oklch(0.70 0.165 274);
+      --color-indigo-500: oklch(0.62 0.205 274);
+      --color-indigo-600: oklch(0.55 0.215 274);
+      --color-indigo-700: oklch(0.48 0.195 274);
+      --color-indigo-900: oklch(0.30 0.110 274);
+      /* strays folded into indigo */
+      --color-violet-300: oklch(0.78 0.115 274);
+      --color-violet-400: oklch(0.70 0.165 274);
+
+      /* Success — emerald, hue 158 (green folded in) */
+      --color-emerald-100: oklch(0.92 0.05 158);
+      --color-emerald-400: oklch(0.74 0.16 158);
+      --color-emerald-500: oklch(0.66 0.16 158);
+      --color-emerald-600: oklch(0.58 0.155 158);
+      --color-emerald-700: oklch(0.50 0.135 158);
+      --color-green-400: oklch(0.74 0.16 158);
+      --color-green-500: oklch(0.66 0.16 158);
+
+      /* Warning — amber, hue 70-78 */
+      --color-amber-400: oklch(0.80 0.14 78);
+      --color-amber-500: oklch(0.72 0.15 70);
+      --color-amber-600: oklch(0.64 0.145 65);
+      --color-amber-700: oklch(0.52 0.125 60);
+      --color-amber-900: oklch(0.34 0.085 58);
+
+      /* Error — red, hue 22-25 */
+      --color-red-200: oklch(0.86 0.06 22);
+      --color-red-300: oklch(0.78 0.10 22);
+      --color-red-400: oklch(0.70 0.18 22);
+      --color-red-500: oklch(0.62 0.20 25);
+      --color-red-700: oklch(0.48 0.165 25);
+      --color-red-900: oklch(0.32 0.105 25);
+
+      /* Info — sky, hue 232 (blue retargeted) */
+      --color-blue-400: oklch(0.74 0.13 232);
+      --color-blue-700: oklch(0.50 0.115 232);
+      --color-blue-900: oklch(0.32 0.075 232);
+      --color-sky-400: oklch(0.74 0.13 232);
+      --color-sky-500: oklch(0.66 0.14 232);
+
+      /* Semantic aliases for new screens */
+      --color-canvas:  var(--color-slate-950);
+      --color-surface: var(--color-slate-900);
+      --color-card:    var(--color-slate-800);
+      --color-raised:  var(--color-slate-750);
+      --color-inset:   var(--color-slate-950);
+      --color-ink:           var(--color-slate-100);
+      --color-ink-secondary: var(--color-slate-300);
+      --color-ink-muted:     var(--color-slate-400);
+      --color-ink-faint:     var(--color-slate-500);
+      --color-line:        var(--color-slate-700);
+      --color-line-strong: var(--color-slate-600);
+      --color-accent-300: var(--color-indigo-300);
+      --color-accent-400: var(--color-indigo-400);
+      --color-accent-500: var(--color-indigo-500);
+      --color-accent-600: var(--color-indigo-600);
+      --color-accent-700: var(--color-indigo-700);
+      --color-success: var(--color-emerald-400);
+      --color-warning: var(--color-amber-400);
+      --color-error:   var(--color-red-400);
+      --color-info:    var(--color-sky-400);
+    }
   </style>
   <style>
     @keyframes highlight-flash {
-      0% { background-color: rgba(99, 102, 241, 0.25); }
+      /* accent (indigo) at 25% — was rgba(99,102,241,…); now reads the token */
+      0% { background-color: oklch(0.62 0.205 274 / 0.25); }
       100% { background-color: transparent; }
     }
     .highlight-flash { animation: highlight-flash 1.5s ease-out; }
@@ -78,7 +167,7 @@
           {% for category, message in messages %}
             <div class="px-4 py-3 rounded-lg text-sm
               {% if category == 'error' %}bg-red-900/50 text-red-200 border border-red-700
-              {% elif category == 'success' %}bg-green-900/50 text-green-200 border border-green-700
+              {% elif category == 'success' %}bg-emerald-900/50 text-emerald-200 border border-emerald-700
               {% else %}bg-slate-700/50 text-slate-200 border border-slate-600{% endif %}">
               {{ message }}
             </div>
