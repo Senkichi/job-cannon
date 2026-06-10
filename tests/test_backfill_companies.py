@@ -1078,3 +1078,462 @@ class TestRunRegistryHygiene:
         ):
             assert key in result
             assert isinstance(result[key], int)
+
+    def test_hygiene_returns_new_audit_keys(self, migrated_db):
+        """run_registry_hygiene return dict includes the three new audit-count keys."""
+        db_path, conn = migrated_db
+        conn.close()
+
+        from job_finder.web.backfill_companies import run_registry_hygiene
+
+        result = run_registry_hygiene(db_path, {"filters": {}})
+
+        for key in ("duplicate_company_pairs", "fuzzy_review_pairs", "mispromoted_ats_slugs"):
+            assert key in result, f"missing key: {key}"
+            assert isinstance(result[key], int), f"{key} must be int"
+
+    # ------------------------------------------------------------------
+    # Acceptance criterion: exact normalised-name duplicates are collapsed
+    # ------------------------------------------------------------------
+
+    def test_hygiene_collapses_exact_name_duplicates(self, migrated_db):
+        """Two same-normalised-name rows are merged; all jobs re-pointed to survivor."""
+        from datetime import datetime
+
+        db_path, conn = migrated_db
+
+        now = datetime.now().isoformat()
+        # Insert two companies that normalise to "acmecorp"
+        conn.execute(
+            "INSERT INTO companies (name, name_raw, ats_probe_status, jobs_found_total, "
+            "created_at, updated_at) VALUES ('acmecorp', 'Acme Corp', 'pending', 2, ?, ?)",
+            (now, now),
+        )
+        conn.execute(
+            "INSERT INTO companies (name, name_raw, ats_probe_status, jobs_found_total, "
+            "created_at, updated_at) VALUES ('acmecorp', 'ACME Corp', 'pending', 0, ?, ?)",
+            (now, now),
+        )
+        conn.commit()
+
+        ids = [r["id"] for r in conn.execute("SELECT id FROM companies WHERE name = 'acmecorp'")]
+        assert len(ids) == 2, "precondition: two rows with same normalised name"
+
+        # Attach one job to each company row
+        for i, cid in enumerate(ids):
+            conn.execute(
+                "INSERT INTO jobs (dedup_key, title, company, company_id, location, "
+                "first_seen, last_seen) VALUES (?, 'Engineer', 'Acme Corp', ?, 'Remote', ?, ?)",
+                (f"acme-dup-{i}", cid, now, now),
+            )
+        conn.commit()
+        conn.close()
+
+        from job_finder.web.backfill_companies import run_registry_hygiene
+
+        result = run_registry_hygiene(db_path, {"filters": {}})
+
+        assert result["exact_pairs_merged"] >= 1
+
+        # Reopen to verify
+        import sqlite3 as _sqlite3
+
+        conn2 = _sqlite3.connect(db_path)
+        conn2.row_factory = _sqlite3.Row
+        surviving = conn2.execute("SELECT id FROM companies WHERE name = 'acmecorp'").fetchall()
+        assert len(surviving) == 1, "exactly one company row should remain after merge"
+
+        survivor_id = surviving[0]["id"]
+        job_company_ids = [
+            r["company_id"]
+            for r in conn2.execute(
+                "SELECT company_id FROM jobs WHERE dedup_key LIKE 'acme-dup-%'"
+            ).fetchall()
+        ]
+        # All surviving jobs must point to the canonical row
+        assert all(cid == survivor_id for cid in job_company_ids), (
+            "all jobs must be re-pointed to the canonical company"
+        )
+        conn2.close()
+
+    # ------------------------------------------------------------------
+    # Acceptance criterion: fuzzy false-positive pairs are surfaced, NOT merged
+    # ------------------------------------------------------------------
+
+    def test_hygiene_does_not_merge_fuzzy_false_positive_pair(self, migrated_db):
+        """Known false-positive pair (UC San Francisco vs SF Maritime) both survive.
+
+        Both companies need at least one linked job so orphan cleanup doesn't
+        remove them before the fuzzy audit runs.
+        """
+        from datetime import datetime
+
+        db_path, conn = migrated_db
+        now = datetime.now().isoformat()
+
+        # These two names score >= 90 on fuzz.token_set_ratio yet are unrelated.
+        conn.execute(
+            "INSERT INTO companies (name, name_raw, ats_probe_status, created_at, updated_at) "
+            "VALUES ('uc san francisco', 'UC San Francisco', 'pending', ?, ?)",
+            (now, now),
+        )
+        conn.execute(
+            "INSERT INTO companies (name, name_raw, ats_probe_status, created_at, updated_at) "
+            "VALUES ('san francisco maritime national park association', "
+            "'San Francisco Maritime National Park Association', 'pending', ?, ?)",
+            (now, now),
+        )
+        conn.commit()
+        uc_id = conn.execute(
+            "SELECT id FROM companies WHERE name = 'uc san francisco'"
+        ).fetchone()["id"]
+        sf_id = conn.execute(
+            "SELECT id FROM companies WHERE name_raw LIKE 'San Francisco Maritime%'"
+        ).fetchone()["id"]
+
+        # Attach a job to each so orphan cleanup doesn't remove them.
+        conn.execute(
+            "INSERT INTO jobs (dedup_key, title, company, company_id, location, "
+            "first_seen, last_seen) VALUES ('uc-sf-1', 'Researcher', 'UC San Francisco', "
+            "?, 'SF', ?, ?)",
+            (uc_id, now, now),
+        )
+        conn.execute(
+            "INSERT INTO jobs (dedup_key, title, company, company_id, location, "
+            "first_seen, last_seen) VALUES ('sf-maritime-1', 'Ranger', "
+            "'San Francisco Maritime National Park Association', ?, 'SF', ?, ?)",
+            (sf_id, now, now),
+        )
+        conn.commit()
+        conn.close()
+
+        from job_finder.web.backfill_companies import run_registry_hygiene
+
+        result = run_registry_hygiene(db_path, {"filters": {}})
+
+        # Both companies must still exist
+        import sqlite3 as _sqlite3
+
+        conn2 = _sqlite3.connect(db_path)
+        conn2.row_factory = _sqlite3.Row
+        surviving_ids = {r["id"] for r in conn2.execute("SELECT id FROM companies").fetchall()}
+        conn2.close()
+
+        assert uc_id in surviving_ids, "UC San Francisco must not have been merged"
+        assert sf_id in surviving_ids, "SF Maritime must not have been merged"
+        # And the fuzzy count is surfaced
+        assert result["fuzzy_review_pairs"] >= 1
+
+    # ------------------------------------------------------------------
+    # Acceptance criterion: aggregator mis-promotion is detected + healed
+    # ------------------------------------------------------------------
+
+    def test_hygiene_heals_mispromoted_ats_slug(self, migrated_db):
+        """Aggregator-named row owning a real company's slug gets re-pointed.
+
+        The NielsenIQ shape from the issue: an aggregator-shaped name (containing
+        one of the hints: "jobs", "careers", "hiring", "talent") owns an ATS slug
+        whose value matches a better-named sibling.  The aggregator row must have
+        jobs attached so orphan cleanup doesn't remove it before the heal runs.
+        """
+        from datetime import datetime
+
+        db_path, conn = migrated_db
+        now = datetime.now().isoformat()
+
+        # Aggregator owner: "Headway Careers Jobs" contains "careers" + "jobs"
+        # and owns greenhouse/headway.  Real sibling: "Headway" has no ATS yet.
+        conn.execute(
+            "INSERT INTO companies (name, name_raw, ats_platform, ats_slug, "
+            "ats_probe_status, jobs_found_total, created_at, updated_at) "
+            "VALUES ('headway careers jobs', 'Headway Careers Jobs', "
+            "'greenhouse', 'headway', 'hit', 5, ?, ?)",
+            (now, now),
+        )
+        conn.execute(
+            "INSERT INTO companies (name, name_raw, ats_probe_status, "
+            "jobs_found_total, created_at, updated_at) "
+            "VALUES ('headway', 'Headway', 'pending', 1, ?, ?)",
+            (now, now),
+        )
+        conn.commit()
+        agg_id = conn.execute(
+            "SELECT id FROM companies WHERE name = 'headway careers jobs'"
+        ).fetchone()["id"]
+        real_id = conn.execute("SELECT id FROM companies WHERE name = 'headway'").fetchone()["id"]
+
+        # Attach jobs to aggregator so orphan cleanup doesn't remove it first.
+        for i in range(3):
+            conn.execute(
+                "INSERT INTO jobs (dedup_key, title, company, company_id, location, "
+                "first_seen, last_seen) VALUES (?, 'Engineer', 'Headway Careers Jobs', "
+                "?, 'Remote', ?, ?)",
+                (f"headway-job-{i}", agg_id, now, now),
+            )
+        # Attach one job to real company too (survive orphan cleanup).
+        conn.execute(
+            "INSERT INTO jobs (dedup_key, title, company, company_id, location, "
+            "first_seen, last_seen) VALUES ('headway-real-0', 'PM', 'Headway', "
+            "?, 'Remote', ?, ?)",
+            (real_id, now, now),
+        )
+        conn.commit()
+        conn.close()
+
+        from job_finder.web.backfill_companies import run_registry_hygiene
+
+        result = run_registry_hygiene(db_path, {"filters": {}})
+
+        assert result["mispromo_healed"] >= 1
+
+        import sqlite3 as _sqlite3
+
+        conn2 = _sqlite3.connect(db_path)
+        conn2.row_factory = _sqlite3.Row
+
+        # Real company should now own the slug
+        real_row = conn2.execute(
+            "SELECT ats_platform, ats_slug FROM companies WHERE id = ?", (real_id,)
+        ).fetchone()
+        assert real_row["ats_platform"] == "greenhouse"
+        assert real_row["ats_slug"] == "headway"
+
+        # Aggregator row should have its ATS fields cleared
+        agg_row = conn2.execute(
+            "SELECT ats_platform, ats_slug FROM companies WHERE id = ?", (agg_id,)
+        ).fetchone()
+        assert agg_row is not None, "aggregator row still exists (has re-pointed jobs)"
+        assert not agg_row["ats_platform"]
+        assert not agg_row["ats_slug"]
+
+        conn2.close()
+
+    # ------------------------------------------------------------------
+    # Acceptance criterion: m076 invariant re-asserted (idx exists after run)
+    # ------------------------------------------------------------------
+
+    def test_hygiene_creates_ats_pair_index(self, migrated_db):
+        """After run, idx_companies_ats_pair exists in sqlite_master."""
+        db_path, conn = migrated_db
+        conn.close()
+
+        from job_finder.web.backfill_companies import run_registry_hygiene
+
+        run_registry_hygiene(db_path, {"filters": {}})
+
+        import sqlite3 as _sqlite3
+
+        conn2 = _sqlite3.connect(db_path)
+        row = conn2.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='index' AND name='idx_companies_ats_pair'"
+        ).fetchone()
+        conn2.close()
+        assert row is not None, "idx_companies_ats_pair must exist after hygiene run"
+
+    def test_hygiene_heals_ats_slug_cluster(self, migrated_db):
+        """After run on a DB with (ats_platform, ats_slug) cluster, cluster is resolved.
+
+        Both cluster members must have linked jobs so orphan cleanup doesn't
+        remove them before the heal step runs.
+        """
+        from datetime import datetime
+
+        db_path, conn = migrated_db
+        now = datetime.now().isoformat()
+
+        # Drop the unique index to allow inserting the cluster (simulating pre-m088).
+        conn.execute("DROP INDEX IF EXISTS idx_companies_ats_pair")
+        conn.commit()
+
+        # Insert two companies sharing the same ATS pair — a raw cluster.
+        conn.execute(
+            "INSERT INTO companies (name, name_raw, ats_platform, ats_slug, "
+            "ats_probe_status, jobs_found_total, created_at, updated_at) "
+            "VALUES ('mercury', 'Mercury', 'greenhouse', 'mercury', 'hit', 10, ?, ?)",
+            (now, now),
+        )
+        conn.execute(
+            "INSERT INTO companies (name, name_raw, ats_platform, ats_slug, "
+            "ats_probe_status, jobs_found_total, created_at, updated_at) "
+            "VALUES ('mercury duplicate', 'Mercury (duplicate)', 'greenhouse', 'mercury', "
+            "'hit', 0, ?, ?)",
+            (now, now),
+        )
+        conn.commit()
+        canon_id = conn.execute("SELECT id FROM companies WHERE name = 'mercury'").fetchone()["id"]
+        dupe_id = conn.execute(
+            "SELECT id FROM companies WHERE name = 'mercury duplicate'"
+        ).fetchone()["id"]
+
+        # Attach jobs so orphan cleanup doesn't remove them before heal runs.
+        conn.execute(
+            "INSERT INTO jobs (dedup_key, title, company, company_id, location, "
+            "first_seen, last_seen) VALUES ('mercury-c-0', 'SWE', 'Mercury', "
+            "?, 'Remote', ?, ?)",
+            (canon_id, now, now),
+        )
+        conn.execute(
+            "INSERT INTO jobs (dedup_key, title, company, company_id, location, "
+            "first_seen, last_seen) VALUES ('mercury-d-0', 'SWE', 'Mercury (duplicate)', "
+            "?, 'Remote', ?, ?)",
+            (dupe_id, now, now),
+        )
+        conn.commit()
+        conn.close()
+
+        from job_finder.web.backfill_companies import run_registry_hygiene
+
+        result = run_registry_hygiene(db_path, {"filters": {}})
+
+        assert result["ats_clusters_healed"] >= 1
+
+        import sqlite3 as _sqlite3
+
+        conn2 = _sqlite3.connect(db_path)
+        conn2.row_factory = _sqlite3.Row
+
+        # Cluster should be gone
+        cluster_rows = conn2.execute(
+            "SELECT COUNT(*) AS n FROM companies "
+            "WHERE ats_platform='greenhouse' AND ats_slug='mercury'"
+        ).fetchone()
+        assert cluster_rows["n"] == 1, "cluster must be resolved to a single row"
+
+        # Index must now exist
+        idx = conn2.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='index' AND name='idx_companies_ats_pair'"
+        ).fetchone()
+        assert idx is not None
+        conn2.close()
+
+
+# ---------------------------------------------------------------------------
+# Tests: company_dedup shared module
+# ---------------------------------------------------------------------------
+
+
+class TestCompanyDedup:
+    """Tests for the shared company_dedup module helpers."""
+
+    def _insert_company(
+        self,
+        conn,
+        name: str,
+        name_raw: str,
+        ats_platform: str | None = None,
+        ats_slug: str | None = None,
+        jobs_found_total: int = 0,
+    ) -> int:
+        from datetime import datetime
+
+        now = datetime.now().isoformat()
+        cursor = conn.execute(
+            "INSERT INTO companies (name, name_raw, ats_platform, ats_slug, "
+            "ats_probe_status, jobs_found_total, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, 'pending', ?, ?, ?)",
+            (name, name_raw, ats_platform, ats_slug, jobs_found_total, now, now),
+        )
+        conn.commit()
+        return cursor.lastrowid
+
+    def _insert_job(self, conn, key: str, company_id: int, company_name: str) -> None:
+        from datetime import datetime
+
+        now = datetime.now().isoformat()
+        conn.execute(
+            "INSERT INTO jobs (dedup_key, title, company, company_id, location, "
+            "first_seen, last_seen) VALUES (?, 'Engineer', ?, ?, 'Remote', ?, ?)",
+            (key, company_name, company_id, now, now),
+        )
+        conn.commit()
+
+    def test_find_mispromoted_detects_aggregator_with_better_named_sibling(self, migrated_db):
+        """find_mispromoted_ats_slugs flags aggregator-named owner when real sibling exists."""
+        from job_finder.web.company_dedup import find_mispromoted_ats_slugs
+
+        _path, conn = migrated_db
+        self._insert_company(
+            conn, "hiring jobs", "Hiring Jobs", ats_platform="greenhouse", ats_slug="acmecorp"
+        )
+        self._insert_company(conn, "acme corp", "Acme Corp")
+
+        results = find_mispromoted_ats_slugs(conn)
+
+        names = {r["owner_name"] for r in results}
+        assert "Hiring Jobs" in names
+
+    def test_find_mispromoted_ignores_real_company(self, migrated_db):
+        """find_mispromoted_ats_slugs does not flag a real company owning its own slug."""
+        from job_finder.web.company_dedup import find_mispromoted_ats_slugs
+
+        _path, conn = migrated_db
+        self._insert_company(
+            conn, "stripe", "Stripe", ats_platform="greenhouse", ats_slug="stripe"
+        )
+
+        results = find_mispromoted_ats_slugs(conn)
+
+        names = {r["owner_name"] for r in results}
+        assert "Stripe" not in names
+
+    def test_merge_exact_name_duplicates_collapses_pair(self, migrated_db):
+        """merge_exact_name_duplicates merges two same-normalised-name rows."""
+        from job_finder.web.company_dedup import merge_exact_name_duplicates
+
+        _path, conn = migrated_db
+        id_a = self._insert_company(conn, "google", "Google", jobs_found_total=5)
+        id_b = self._insert_company(conn, "google", "Google LLC", jobs_found_total=0)
+        self._insert_job(conn, "g-job-0", id_a, "Google")
+        self._insert_job(conn, "g-job-1", id_b, "Google LLC")
+
+        result = merge_exact_name_duplicates(conn)
+
+        assert result["pairs_merged"] >= 1
+        assert result["companies_deleted"] >= 1
+
+        surviving = conn.execute("SELECT id FROM companies WHERE name = 'google'").fetchall()
+        assert len(surviving) == 1
+        survivor_id = surviving[0]["id"]
+
+        job_ids = {
+            r["company_id"]
+            for r in conn.execute(
+                "SELECT company_id FROM jobs WHERE dedup_key LIKE 'g-job-%'"
+            ).fetchall()
+        }
+        assert job_ids == {survivor_id}
+
+    def test_heal_ats_slug_clusters_resolves_cluster(self, migrated_db):
+        """heal_ats_slug_clusters resolves a (platform, slug) cluster with >1 row."""
+        from job_finder.web.company_dedup import heal_ats_slug_clusters
+
+        _path, conn = migrated_db
+        # Drop the unique index to allow inserting the cluster
+        conn.execute("DROP INDEX IF EXISTS idx_companies_ats_pair")
+        conn.commit()
+
+        self._insert_company(
+            conn,
+            "lever arcadia",
+            "Lever Arcadia",
+            ats_platform="lever",
+            ats_slug="arcadia",
+            jobs_found_total=0,
+        )
+        self._insert_company(
+            conn,
+            "arcadia",
+            "Arcadia",
+            ats_platform="lever",
+            ats_slug="arcadia",
+            jobs_found_total=3,
+        )
+
+        result = heal_ats_slug_clusters(conn)
+
+        assert result["clusters_resolved"] >= 1
+
+        remaining = conn.execute(
+            "SELECT COUNT(*) AS n FROM companies WHERE ats_platform='lever' AND ats_slug='arcadia'"
+        ).fetchone()["n"]
+        assert remaining == 1
