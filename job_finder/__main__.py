@@ -5,10 +5,16 @@ Exposes :func:`main` for the ``[project.scripts]`` entry registered in
 but resolves ``config.yaml`` via :func:`job_finder.config.resolve_config_path`
 so the binary can be launched from any working directory once installed.
 
-Also (UAT 2026-05-21 F2): prints a "Job Cannon is starting on <url>" banner
-and opens the user's default browser ~1.5 s after launch, so a neophyte
-running ``uv run job-cannon`` is not stranded at the Werkzeug log line.
-Disable with ``JOB_CANNON_NO_BROWSER=1`` for headless / CI use.
+UAT 2026-05-21 F2 / Issue #290: prints a "Job Cannon is starting on <url>"
+banner and opens the user's default browser ~1.5 s after launch in **both**
+terminal mode and tray mode, so a neophyte running ``job-cannon`` is not
+stranded regardless of the launch path.  Disable with
+``JOB_CANNON_NO_BROWSER=1`` for headless / CI use.
+
+In tray mode the banner also says "look for the tray icon" so the user
+understands why no terminal keeps running.  On first run (no config.yaml
+yet), opening the browser is what lands the user in the onboarding wizard —
+the ``gate_onboarding`` redirect handles routing once the browser opens.
 """
 
 from __future__ import annotations
@@ -22,7 +28,7 @@ import sys
 import threading
 import time
 import webbrowser
-from datetime import datetime
+from datetime import UTC, datetime
 
 import psutil
 import requests
@@ -149,6 +155,38 @@ def _open_browser(url: str) -> None:
         webbrowser.open(url, new=2)  # new tab if possible
     except Exception as exc:
         logger.warning("Could not open browser at %s: %s", url, exc)
+
+
+def _print_startup_banner(url: str, *, tray_mode: bool = False) -> None:
+    """Print the user-facing startup banner and (unless opted out) schedule a
+    delayed browser open.
+
+    Called from **both** terminal mode and tray mode so neither path strands
+    the user.  In tray mode the banner includes a hint about the system-tray
+    icon.  ``JOB_CANNON_NO_BROWSER=1`` suppresses the Timer and the
+    "Opening your browser…" line; the URL banner always prints so the user
+    has something to copy even in headless sessions.
+
+    Args:
+        url:       Client-accessible base URL (e.g. ``http://127.0.0.1:5000``).
+        tray_mode: If True, append the tray-icon hint to the first line.
+
+    Returns:
+        The scheduled :class:`threading.Timer` if one was started, or None.
+    """
+    if tray_mode:
+        print(f"Job Cannon is starting on {url} — look for the tray icon")
+    else:
+        print(f"Job Cannon is starting on {url}")
+
+    no_browser = bool(os.environ.get("JOB_CANNON_NO_BROWSER"))
+    if not no_browser:
+        print("Opening your browser…  (Ctrl+C to stop)")
+        timer = threading.Timer(_BROWSER_OPEN_DELAY_SEC, _open_browser, args=(url,))
+        timer.daemon = True
+        timer.start()
+        return timer
+    return None
 
 
 def probe_existing_jc(url: str, timeout: float = 1.0) -> dict | None:
@@ -441,24 +479,16 @@ def _run_terminal_mode(cfg: dict, bind_host: str, port: int, debug: bool, url: s
 
     app = create_app(config=cfg)
 
-    # F2: surface the URL before any Werkzeug noise and (unless opted out)
-    # kick off a delayed browser open. The print() lands in stdout before
+    # F2 / Issue #290: surface the URL before any Werkzeug noise and
+    # (unless opted out) kick off a delayed browser open.  The shared helper
+    # _print_startup_banner handles both the print and the Timer so terminal
+    # and tray paths behave identically. The print() lands in stdout before
     # logging is fully attached — this is the one user-facing print in the
     # whole project, justified because the alternative is a stranded user.
-    no_browser = bool(os.environ.get("JOB_CANNON_NO_BROWSER"))
-
-    print(f"Job Cannon is starting on {url}")
-    if not no_browser:
-        print("Opening your browser…  (Ctrl+C to stop)")
-        # webbrowser.open is documented as thread-safe; firing from a Timer
-        # avoids racing app.run() and keeps the open non-blocking. We use
-        # use_reloader=False below, so this Timer fires exactly once.
-        # daemon=True: if the main thread exits before the Timer fires (e.g.
-        # very fast crash at startup), the Timer thread does not keep the
-        # process alive.
-        timer = threading.Timer(_BROWSER_OPEN_DELAY_SEC, _open_browser, args=(url,))
-        timer.daemon = True
-        timer.start()
+    # webbrowser.open is documented as thread-safe; firing from a Timer
+    # avoids racing app.run() and keeps the open non-blocking. We use
+    # use_reloader=False below, so this Timer fires exactly once.
+    _print_startup_banner(url, tray_mode=False)
 
     _install_terminal_shutdown(app)
 
@@ -590,7 +620,7 @@ def main() -> None:
     metadata = {
         "pid": os.getpid(),
         "url": url,
-        "start_time_utc": datetime.utcnow().isoformat() + "Z",
+        "start_time_utc": datetime.now(UTC).isoformat(),
         "lock_path": str(lock_path),
     }
 
@@ -630,6 +660,11 @@ def main() -> None:
             logger.warning("Tray mode unavailable (%s); falling back to terminal mode", exc)
             _run_terminal_mode(cfg, bind_host, port, debug, url)
         else:
+            # Issue #290: print banner + schedule browser open BEFORE the icon
+            # event loop blocks the main thread.  The tray banner includes a
+            # hint about the tray icon so the user isn't puzzled by a silent
+            # terminal.  _print_startup_banner honours JOB_CANNON_NO_BROWSER.
+            _print_startup_banner(url, tray_mode=True)
             TrayApp(cfg).run()
 
 
