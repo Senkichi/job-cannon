@@ -226,6 +226,18 @@ def create_app(config_path: str = "config.yaml", config: dict | None = None) -> 
     app.jinja_env.globals["DEFAULT_MAX_RESULTS"] = DEFAULT_MAX_RESULTS
     app.jinja_env.globals["DEFAULT_DAILY_BUDGET_USD"] = DEFAULT_DAILY_BUDGET_USD
 
+    # Apply-button target precedence — single enforcement point shared by every
+    # template with an Apply anchor (strict direct_url > source_urls[0]; loose
+    # direct_url only when config direct_link.loose_apply_default is true).
+    from job_finder.web.direct_link import apply_url_for as _apply_url_for
+
+    _loose_apply_default = bool((cfg.get("direct_link") or {}).get("loose_apply_default", False))
+
+    def apply_url_for_global(job):
+        return _apply_url_for(job, loose_apply_default=_loose_apply_default)
+
+    app.jinja_env.globals["apply_url_for"] = apply_url_for_global
+
     # --- Custom Jinja2 filters ---
     @app.template_filter("from_json")
     def from_json_filter(value):

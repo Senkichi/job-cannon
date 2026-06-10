@@ -961,7 +961,7 @@ requires-dist = [
     { name = "defusedxml", specifier = ">=0.7,<0.8" },
     { name = "flask", specifier = "~=3.1" },
     { name = "ftfy", specifier = ">=6.2,<7" },
-    { name = "geonamescache", specifier = ">=2.0,<3" },
+    { name = "geonamescache", specifier = ">=2.0,<4" },
     { name = "google-api-python-client", specifier = "~=2.100" },
     { name = "google-auth-httplib2", specifier = "~=0.2" },
     { name = "google-auth-oauthlib", specifier = "~=1.2" },

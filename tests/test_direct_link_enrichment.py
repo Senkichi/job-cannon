@@ -67,6 +67,123 @@ def test_query_ats_api_no_postings_omits_direct_url(tmp_path):
     conn.close()
 
 
+def test_query_ats_api_ambiguous_match_yields_link_only(tmp_path):
+    """Contamination regression (G4): an ambiguous title match must never
+    merge posting data — a loose match yields the link, nothing else."""
+    from job_finder.web import enrichment_tiers
+
+    conn = _migrated_db(tmp_path)
+    conn.execute(
+        "INSERT INTO companies "
+        "(id, name, name_raw, ats_platform, ats_slug, ats_probe_status, created_at, updated_at) "
+        "VALUES (1, 'Acme', 'Acme', 'lever', 'acme', 'hit', "
+        "'2026-01-01T00:00:00', '2026-01-01T00:00:00')"
+    )
+    conn.commit()
+
+    fake_postings = [
+        {
+            "title": "Senior Data Scientist",
+            "source_url": "https://jobs.lever.co/acme/1",
+            "description": "NYC ROLE " * 50,
+            "salary_min": 100000,
+        },
+        {
+            "title": "Senior Data Scientist",
+            "source_url": "https://jobs.lever.co/acme/2",
+            "description": "LONDON ROLE " * 50,
+            "salary_min": 90000,
+        },
+    ]
+    with patch("job_finder.web.ats_scanner.scan_lever", return_value=fake_postings):
+        result = enrichment_tiers.query_ats_api(
+            {"company_id": 1, "title": "Senior Data Scientist"}, conn, {}
+        )
+
+    assert result.get("direct_url") == "https://jobs.lever.co/acme/1"
+    assert result.get("direct_url_confidence") == "loose"
+    assert "jd_full" not in result
+    assert "salary_min" not in result
+    assert "salary_max" not in result
+    assert "_primary_posting" not in result
+    conn.close()
+
+
+def test_query_ats_api_strict_match_includes_primary_posting(tmp_path):
+    """A strict match carries the matched posting for the wider field merge."""
+    from job_finder.web import enrichment_tiers
+
+    conn = _migrated_db(tmp_path)
+    conn.execute(
+        "INSERT INTO companies "
+        "(id, name, name_raw, ats_platform, ats_slug, ats_probe_status, created_at, updated_at) "
+        "VALUES (1, 'Acme', 'Acme', 'lever', 'acme', 'hit', "
+        "'2026-01-01T00:00:00', '2026-01-01T00:00:00')"
+    )
+    conn.commit()
+
+    fake_postings = [
+        {
+            "title": "Senior Data Scientist",
+            "source_url": "https://jobs.lever.co/acme/1",
+            "description": "x" * 300,
+            "salary_min": 150000,
+            "salary_max": 190000,
+        },
+    ]
+    with patch("job_finder.web.ats_scanner.scan_lever", return_value=fake_postings):
+        result = enrichment_tiers.query_ats_api(
+            {"company_id": 1, "title": "Senior Data Scientist"}, conn, {}
+        )
+
+    assert result.get("direct_url_confidence") == "strict"
+    assert result.get("jd_full") == "x" * 300
+    assert result.get("salary_min") == 150000
+    assert result.get("salary_max") == 190000
+    assert result.get("_primary_posting") is fake_postings[0]
+    conn.close()
+
+
+def test_query_ats_api_location_disambiguates_duplicate_titles(tmp_path):
+    """Multi-location board: the job's location picks the strict posting."""
+    from job_finder.web import enrichment_tiers
+
+    conn = _migrated_db(tmp_path)
+    conn.execute(
+        "INSERT INTO companies "
+        "(id, name, name_raw, ats_platform, ats_slug, ats_probe_status, created_at, updated_at) "
+        "VALUES (1, 'Acme', 'Acme', 'lever', 'acme', 'hit', "
+        "'2026-01-01T00:00:00', '2026-01-01T00:00:00')"
+    )
+    conn.commit()
+
+    fake_postings = [
+        {
+            "title": "Senior Data Scientist",
+            "source_url": "https://jobs.lever.co/acme/1",
+            "location": "New York",
+            "description": "NYC " + "x" * 300,
+        },
+        {
+            "title": "Senior Data Scientist",
+            "source_url": "https://jobs.lever.co/acme/2",
+            "location": "London, UK",
+            "description": "LON " + "x" * 300,
+        },
+    ]
+    with patch("job_finder.web.ats_scanner.scan_lever", return_value=fake_postings):
+        result = enrichment_tiers.query_ats_api(
+            {"company_id": 1, "title": "Senior Data Scientist", "location": "New York, NY"},
+            conn,
+            {},
+        )
+
+    assert result.get("direct_url") == "https://jobs.lever.co/acme/1"
+    assert result.get("direct_url_confidence") == "strict"
+    assert result.get("jd_full", "").startswith("NYC")
+    conn.close()
+
+
 def test_enrich_job_promotes_existing_ats_source_url(tmp_path):
     """A job whose source_urls already contain an ATS link gets direct_url for free."""
     from job_finder.web.data_enricher import enrich_job

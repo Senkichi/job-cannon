@@ -22,7 +22,7 @@ from bs4 import BeautifulSoup
 from ddgs import DDGS
 
 from job_finder.config import JD_STORAGE_MAX_CHARS
-from job_finder.web.direct_link import resolve_direct_link
+from job_finder.web.direct_link import resolve_primary_posting
 from job_finder.web.domain_policy import domain_priority, is_blocked_domain
 from job_finder.web.html_extract import html_to_clean_text
 from job_finder.web.model_provider import call_model
@@ -168,7 +168,9 @@ def query_ats_api(job_row: dict, conn: Any, config: dict) -> dict:
         config: Application config dict.
 
     Returns:
-        Dict with any of: jd_full, salary_min, salary_max. Empty if not found.
+        Dict with direct_url + direct_url_confidence when any posting links,
+        plus jd_full / salary_min / salary_max / _primary_posting ONLY on a
+        strict (unambiguous) title match. Empty if not found.
     """
     try:
         company_id = job_row.get("company_id")
@@ -214,19 +216,27 @@ def query_ats_api(job_row: dict, conn: Any, config: dict) -> dict:
         if not postings:
             return {}
 
-        # Take the first matching posting
-        posting = postings[0]
-        result = {}
-        if posting.get("description"):
-            result["jd_full"] = posting["description"][:_MAX_JD_CHARS]
-        if posting.get("salary_min"):
-            result["salary_min"] = posting["salary_min"]
-        if posting.get("salary_max"):
-            result["salary_max"] = posting["salary_max"]
+        # Strict-gated data merge: posting DATA (jd_full, salary) is taken only
+        # from an unambiguous title match — a loose match yields the LINK only,
+        # so a wrong job's description can never reach jd_full and the scorer.
+        resolved = resolve_primary_posting(postings, title, job_row.get("location") or "")
+        if resolved is None:
+            return {}
+        posting, url, confidence = resolved
 
-        link = resolve_direct_link(postings, title)
-        if link:
-            result["direct_url"], result["direct_url_confidence"] = link
+        result: dict = {"direct_url": url, "direct_url_confidence": confidence}
+        if posting is not None:
+            if posting.get("description"):
+                result["jd_full"] = posting["description"][:_MAX_JD_CHARS]
+            if posting.get("salary_min"):
+                result["salary_min"] = posting["salary_min"]
+            if posting.get("salary_max"):
+                result["salary_max"] = posting["salary_max"]
+            # Full posting for the wider authoritative-field merge (currency,
+            # period, posted_date, locations, source_id). Underscore key: not
+            # a DB column; _resolve_from_fragments only lifts missing fields,
+            # so it never reaches _persist.
+            result["_primary_posting"] = posting
 
         return result
 
@@ -247,7 +257,9 @@ def scrape_careers(job_row: dict, conn: Any, config: dict) -> dict:
         config: Application config dict.
 
     Returns:
-        Dict with any of: jd_full. Empty if not found.
+        Dict with direct_url + direct_url_confidence when any posting links,
+        plus jd_full / _primary_posting ONLY on a strict title match.
+        Empty if not found.
     """
     try:
         company_id = job_row.get("company_id")
@@ -293,14 +305,17 @@ def scrape_careers(job_row: dict, conn: Any, config: dict) -> dict:
         if not postings:
             return {}
 
-        posting = postings[0]
-        result = {}
-        if posting.get("description"):
-            result["jd_full"] = posting["description"][:_MAX_JD_CHARS]
+        # Strict-gated data merge — same contamination guard as query_ats_api.
+        resolved = resolve_primary_posting(postings, title, job_row.get("location") or "")
+        if resolved is None:
+            return {}
+        posting, url, confidence = resolved
 
-        link = resolve_direct_link(postings, title)
-        if link:
-            result["direct_url"], result["direct_url_confidence"] = link
+        result: dict = {"direct_url": url, "direct_url_confidence": confidence}
+        if posting is not None:
+            if posting.get("description"):
+                result["jd_full"] = posting["description"][:_MAX_JD_CHARS]
+            result["_primary_posting"] = posting
 
         return result
 

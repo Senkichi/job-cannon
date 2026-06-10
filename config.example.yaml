@@ -315,6 +315,15 @@ ats:
     max_unique_urls_per_company: 500
     max_companies_per_promote_run: 500
 
+# --- Direct company-posting link (primary-source resolution) ---
+direct_link:
+  # Apply-button precedence. A 'strict' direct_url (unambiguous title match on
+  # the company's own ATS/careers board) always becomes the Apply target.
+  # When true, a 'loose' (first-plausible-match) direct link may also become
+  # the Apply target; default false keeps loose links on the provenance badge
+  # only, until the strict/loose link-quality experiment concludes.
+  loose_apply_default: false
+
 # --- Scheduler cadence (Phase 42 wizard writes this; Settings allows custom edits) ---
 scheduler:
   cadence_preset: standard  # one of: light (1x/day 08:00), standard (3x/day 0/8/16), heavy (6x/day every 4h)

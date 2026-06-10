@@ -59,6 +59,7 @@ from job_finder.web.enrichment_tiers import (
     search_duckduckgo,
     search_serpapi,
 )
+from job_finder.web.primary_source_merge import merge_primary_posting_fields
 
 logger = logging.getLogger(__name__)
 
@@ -242,6 +243,15 @@ def enrich_job(
                     direct = pick_direct_link(source_urls, ats_result, careers_result)
                     if direct:
                         set_direct_url(conn, job_row["dedup_key"], direct[0], direct[1])
+
+                    # Strict-matched primary posting: fold its authoritative
+                    # fields (salary metadata, posted date, locations, the ATS
+                    # URL itself) into the row via the canonical upsert merge.
+                    primary_posting = ats_result.get("_primary_posting") or careers_result.get(
+                        "_primary_posting"
+                    )
+                    if primary_posting:
+                        merge_primary_posting_fields(conn, job_row, primary_posting)
 
                 # Resolve what free tier found
                 enriched = _resolve_from_fragments(fragments, missing, job_row)
