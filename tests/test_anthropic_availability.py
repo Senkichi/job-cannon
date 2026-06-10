@@ -33,7 +33,13 @@ def test_is_anthropic_available_unset():
         for k, v in os.environ.items()
         if k not in ("ANTHROPIC_API_KEY", "JF_ANTHROPIC_API_KEY")
     }
-    with patch.dict(os.environ, env, clear=True):
+    # The predicate also accepts a `claude` binary on PATH (subscription
+    # transport) — mock it absent so the test passes on dev machines that
+    # have Claude Code installed, not just on bare CI runners.
+    with (
+        patch.dict(os.environ, env, clear=True),
+        patch("job_finder.web.claude_client.shutil.which", return_value=None),
+    ):
         assert is_anthropic_available() is False
 
 
@@ -44,5 +50,8 @@ def test_is_anthropic_available_empty_string_is_false():
         if k not in ("ANTHROPIC_API_KEY", "JF_ANTHROPIC_API_KEY")
     }
     env["ANTHROPIC_API_KEY"] = ""
-    with patch.dict(os.environ, env, clear=True):
+    with (
+        patch.dict(os.environ, env, clear=True),
+        patch("job_finder.web.claude_client.shutil.which", return_value=None),
+    ):
         assert is_anthropic_available() is False
