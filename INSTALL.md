@@ -131,7 +131,7 @@ The `--extra dev --extra eval` flags pull in test + benchmark tooling. If you on
 
 ## Native installers (coming in v5.1)
 
-Native installers (single-click `.msi` / `.pkg` / `.AppImage`) are planned for v5.1+. Until then, pipx is the primary path. Track progress in [ROADMAP.md](.planning/ROADMAP.md).
+Native installers (single-click `.msi` / `.pkg` / `.AppImage`) are planned for v5.1+. Until then, pipx is the primary path.
 
 ---
 

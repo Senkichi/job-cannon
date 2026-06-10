@@ -47,6 +47,12 @@ data/
 .claude/
 .windsurf/
 AUDIT_LOG.md
+AUDIT*.md
+
+# Root-level session / orchestrator notes (internal working files; not for distribution)
+PLAN.md
+FOLLOWUPS.md
+JD-LAYER2-PLAN.md
 
 # Code review / audit tool working directories
 .nit/
@@ -75,30 +81,16 @@ orchestrator-state/
 *.db-wal
 *.db.bak*
 
-# Internal planning + working notes — files at the top level of .planning/
-# are ignored by default, with explicit exceptions below. Subdirectories are
-# fully ignored unless explicitly re-included.
-/.planning/*
-/.planning/*/
-
-# Eval-harness baseline reports — tracked as portfolio artifacts. The
-# eval harness writes new reports here by default; only files explicitly
-# checked in are version-controlled.
-!/.planning/eval_results/
-!/.planning/eval_results/**
-
-# Source benchmark reports (scripts/benchmark_sources.py output) — the
-# baseline and dated stage reports are tracked so post-impl comparisons
-# survive across machines.
-!/.planning/SOURCE-BENCHMARK-BASELINE.md
-!/.planning/SOURCE-BENCHMARK-[0-9]*.md
+# Internal planning + working notes — entire .planning/ tree is untracked.
+# All subdirectories and files are ignored; no exceptions (issue #305).
+.planning/
 
 # Cascade audit (phase 36/37) artifact outputs — regenerable, may contain
 # LLM cost details and per-row provider responses. JD source samples under
-# round_*/jd/ and the dedup_keys.json corpus lock are tracked (reproducibility);
-# harness per-provider outputs, recipe/HTML caches, and generated reports are not.
+# round_*/jd/ are untracked (AUP §25-28 redistribution concern, issue #305).
 /evals/cascade_audit/artifacts/round_*/*.json
 !/evals/cascade_audit/artifacts/round_0/dedup_keys.json
+/evals/cascade_audit/artifacts/round_*/jd/
 /evals/cascade_audit/artifacts/round_*/recipes/
 /evals/cascade_audit/artifacts/round_*/html/
 /evals/cascade_audit/artifacts/round_*/descriptions/

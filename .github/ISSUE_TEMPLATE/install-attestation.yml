@@ -1,5 +1,5 @@
 name: Install Attestation
-description: Report a pipx install of job-cannon — successful or not. Helps close the PYPI-09 gate (see .planning/v5.0/PYPI-GATE-attestations.md).
+description: Report a pipx install of job-cannon — successful or not. Helps close the PYPI-09 gate.
 title: "[Attestation] <OS> install on <YYYY-MM-DD>"
 labels: ["attestation", "install-report"]
 body:
