@@ -1,13 +1,13 @@
 """Tests for careers raw-HTML capture — Phase B (issue #205).
 
 Verifies that _try_static_extract records a corpus_sample row with
-surface='careers' and the raw HTML (truncated to 50 000 chars), and updates
+surface='careers' (source keyed per company since D3) and the raw HTML (truncated to 50 000 chars), and updates
 source_health with detect=True semantics, when called with a db_path.
 
 Acceptance criteria (from issue #205):
 - A mocked static fetch returning job HTML records a corpus_sample row with
   surface=careers and the raw HTML (truncated).
-- source_health is updated for source='careers'.
+- source_health is updated for the per-company source key (D3 re-keying).
 - detect=True means zero-yield pages after a baseline increment
   consecutive_breaks (unlike the superseded Phase-A detect=False hook).
 """
@@ -74,9 +74,9 @@ def test_static_tier_records_corpus_sample(tmp_path):
 
     # corpus_sample row exists with correct surface and HTML content
     row = conn.execute(
-        "SELECT source, surface, raw_text FROM corpus_sample WHERE source='careers'"
+        "SELECT source, surface, raw_text FROM corpus_sample WHERE source='careers:example.com'"
     ).fetchone()
-    assert row is not None, "corpus_sample row missing for source='careers'"
+    assert row is not None, "corpus_sample row missing for source='careers:example.com'"
     assert row["surface"] == "careers"
     # raw_text is the HTML truncated to 50 000 chars
     assert row["raw_text"] == _JOB_HTML[:50000]
@@ -85,7 +85,7 @@ def test_static_tier_records_corpus_sample(tmp_path):
 
 
 def test_static_tier_updates_source_health(tmp_path):
-    """After a static fetch, source_health has a row for source='careers'."""
+    """After a static fetch, source_health has a row for the per-company key."""
     db = _setup_db(tmp_path)
 
     with patch("requests.get", return_value=_mock_response(_JOB_HTML)):
@@ -94,9 +94,9 @@ def test_static_tier_updates_source_health(tmp_path):
     conn = sqlite3.connect(db)
     conn.row_factory = sqlite3.Row
     health = conn.execute(
-        "SELECT source, surface, status FROM source_health WHERE source='careers'"
+        "SELECT source, surface, status FROM source_health WHERE source='careers:example.com'"
     ).fetchone()
-    assert health is not None, "source_health row missing for source='careers'"
+    assert health is not None, "source_health row missing for source='careers:example.com'"
     assert health["surface"] == "careers"
     assert health["status"] == "healthy"
     conn.close()
@@ -122,7 +122,7 @@ def test_static_tier_detect_true_counts_breaks_after_baseline(tmp_path):
     conn = sqlite3.connect(db)
     conn.row_factory = sqlite3.Row
     row = conn.execute(
-        "SELECT consecutive_breaks FROM source_health WHERE source='careers'"
+        "SELECT consecutive_breaks FROM source_health WHERE source='careers:example.com'"
     ).fetchone()
     assert row is not None
     # detect=True: a baseline-violating zero-yield increments the counter
@@ -148,7 +148,9 @@ def test_static_tier_html_truncated_to_50000(tmp_path):
 
     conn = sqlite3.connect(db)
     conn.row_factory = sqlite3.Row
-    row = conn.execute("SELECT raw_text FROM corpus_sample WHERE source='careers'").fetchone()
+    row = conn.execute(
+        "SELECT raw_text FROM corpus_sample WHERE source='careers:example.com'"
+    ).fetchone()
     assert row is not None
     assert len(row["raw_text"]) <= 50000
     conn.close()

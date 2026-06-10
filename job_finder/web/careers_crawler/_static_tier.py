@@ -72,28 +72,20 @@ def _find_title_via_context(tag) -> str:
     return ""
 
 
-def _extract_jobs_from_soup(
-    soup: BeautifulSoup,
-    base_url: str,
-    target_titles: list[str],
-    exclusions: list[str],
-) -> list[dict]:
-    """Extract job listings from parsed HTML using JSON-LD and link matching.
+def _extract_candidates(soup: BeautifulSoup, base_url: str) -> list[dict]:
+    """Structural candidate extraction: JSON-LD + link passes WITHOUT title filtering.
 
-    Returns list of dicts with 'title', 'url', 'description' keys.
-    Description is always empty — the enrichment pipeline handles JD fetching.
+    Returns every plausible job posting/link in DOM order — nav links,
+    metadata blobs, and exact ``(url, title)`` duplicates excluded (those are
+    structural junk), but titles NOT matched against the user's targets.
 
-    Args:
-        soup: Parsed HTML.
-        base_url: Base URL for resolving relative hrefs.
-        target_titles: Target title keywords for inclusion filter.
-        exclusions: Title keywords for exclusion filter.
-
-    Returns:
-        List of matched job dicts. May be empty.
+    The autoheal detector counts these (invariant I4): a page that still
+    renders job links but has zero *matching* titles is "your roles were
+    filled", not "the page broke". ``_filter_candidates`` applies the user's
+    title filter on top to produce the crawl result.
     """
-    results = []
-    seen_urls: set[str] = set()
+    candidates: list[dict] = []
+    seen_pairs: set[tuple[str, str]] = set()
 
     # --- Pass 1: JSON-LD structured data ---
     for script in soup.find_all("script", type="application/ld+json"):
@@ -108,15 +100,15 @@ def _extract_jobs_from_soup(
             url = posting.get("url") or posting.get("sameAs") or ""
             if not title:
                 continue
-            if not _title_matches(title, target_titles, exclusions):
-                continue
             if url and url.startswith("/"):
                 url = urljoin(base_url, url)
-            if url in seen_urls:
-                continue
+            # Collapse exact duplicates only when a URL exists — URL-less
+            # JSON-LD postings were never deduped by the pre-split code.
             if url:
-                seen_urls.add(url)
-            results.append({"title": title, "url": url, "description": ""})
+                if (url, title) in seen_pairs:
+                    continue
+                seen_pairs.add((url, title))
+            candidates.append({"title": title, "url": url, "description": ""})
 
     # --- Pass 2: Link text matching ---
     for tag in soup.find_all("a", href=True):
@@ -143,29 +135,74 @@ def _extract_jobs_from_soup(
         if _is_nav_path(parsed.path):
             continue
 
-        # Deduplicate by URL
-        if absolute_url in seen_urls:
-            continue
-
-        # Clean title and apply keyword filter. A context-resolved title
-        # already comes from a heading element and skips _clean_title's
-        # suffix-stripping (the heading text is clean by construction).
+        # Clean title. A context-resolved title already comes from a heading
+        # element and skips _clean_title's suffix-stripping (the heading text
+        # is clean by construction).
         title = context_title or _clean_title(tag, raw_text)
-        # Retained as an early-exit optimisation: skip URL dedup, keyword
-        # matching, and result-list allocation for obvious metadata blobs
-        # from aggregator-style pages.  ParsedJob.from_job() provides
-        # universal enforcement (Phase 48.01), so this check is redundant
-        # for ingestion filtering but avoids wasted work on garbage titles.
-        # See FOLLOWUPS.md 2026-05-27 audit.
+        # Obvious metadata blobs from aggregator-style pages are structural
+        # junk, not postings. ParsedJob.from_job() provides universal
+        # enforcement (Phase 48.01); this avoids wasted work on garbage
+        # titles. See FOLLOWUPS.md 2026-05-27 audit.
         if _is_metadata_blob(title):
             continue
-        if not _title_matches(title, target_titles, exclusions):
+
+        if (absolute_url, title) in seen_pairs:
             continue
+        seen_pairs.add((absolute_url, title))
+        candidates.append({"title": title, "url": absolute_url, "description": ""})
 
-        seen_urls.add(absolute_url)
-        results.append({"title": title, "url": absolute_url, "description": ""})
+    return candidates
 
+
+def _filter_candidates(
+    candidates: list[dict],
+    target_titles: list[str],
+    exclusions: list[str],
+) -> list[dict]:
+    """Apply the user's title filter + URL dedup to structural candidates.
+
+    Filter-then-dedup reproduces the pre-split semantics exactly: only
+    MATCHED results ever claimed a URL, so a tile whose generic "Apply" link
+    precedes its title link still yields the titled match.
+    """
+    results: list[dict] = []
+    seen_urls: set[str] = set()
+    for cand in candidates:
+        if cand["url"] and cand["url"] in seen_urls:
+            continue
+        if not _title_matches(cand["title"], target_titles, exclusions):
+            continue
+        if cand["url"]:
+            seen_urls.add(cand["url"])
+        results.append(cand)
     return results
+
+
+def _extract_jobs_from_soup(
+    soup: BeautifulSoup,
+    base_url: str,
+    target_titles: list[str],
+    exclusions: list[str],
+) -> list[dict]:
+    """Extract job listings from parsed HTML using JSON-LD and link matching.
+
+    Returns list of dicts with 'title', 'url', 'description' keys.
+    Description is always empty — the enrichment pipeline handles JD fetching.
+
+    Composed of ``_extract_candidates`` (structural pass — what the autoheal
+    detector counts, I4) and ``_filter_candidates`` (the user's title filter);
+    output is behavior-identical to the pre-split implementation.
+
+    Args:
+        soup: Parsed HTML.
+        base_url: Base URL for resolving relative hrefs.
+        target_titles: Target title keywords for inclusion filter.
+        exclusions: Title keywords for exclusion filter.
+
+    Returns:
+        List of matched job dicts. May be empty.
+    """
+    return _filter_candidates(_extract_candidates(soup, base_url), target_titles, exclusions)
 
 
 def _extract_jsonld_postings(data) -> list[dict]:
@@ -229,22 +266,28 @@ def _try_static_extract(
     ratio = len(plain_text) / max(len(html), 1)
 
     # Extract jobs regardless — JSON-LD works even on JS-heavy pages
-    # if the structured data is embedded in the initial HTML
-    jobs = _extract_jobs_from_soup(soup, url, target_titles, exclusions)
+    # if the structured data is embedded in the initial HTML. Candidates are
+    # computed once and reused for both the filtered extraction and the
+    # structural detection count (no double parse).
+    candidates = _extract_candidates(soup, url)
+    jobs = _filter_candidates(candidates, target_titles, exclusions)
 
-    # --- Autoheal Phase B: record raw HTML + extraction count (detect=True) ---
+    # --- Autoheal D3: per-company capture, structural counts (I4, detect=True) ---
     if db_path:
         try:
+            from job_finder.web.autoheal import careers_source_key
             from job_finder.web.autoheal.health_monitor import record_extraction as _rec
 
             with standalone_connection(db_path) as cap_conn:
                 _rec(
                     cap_conn,
-                    "careers",
+                    careers_source_key(url),
                     "careers",
                     html[:50000],
-                    job_count=len(jobs),
+                    job_count=len(candidates),
                     detect=True,
+                    extractor="generic",
+                    filtered_count=len(jobs),
                 )
                 cap_conn.commit()
         except Exception:
