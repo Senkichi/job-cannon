@@ -9,6 +9,7 @@ LLM in this phase. See .planning/specs/2026-06-06-parser-auto-heal-design.md.
 MIN_MEANINGFUL_LEN = 200  # inputs shorter than this never count as a break (meta/empty emails)
 BREAK_THRESHOLD = 3  # consecutive baseline-violating zero-yields → DEGRADED
 BASELINE_WINDOW = 20  # how many recent non-zero samples define baseline_yield
+SHADOW_ROLLBACK_WINS = 2  # consecutive legacy-outperforms-override comparisons → auto-rollback
 
 
 def surface_for_source(source: str) -> str:

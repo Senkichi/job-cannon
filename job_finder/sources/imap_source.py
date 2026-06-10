@@ -25,7 +25,7 @@ from imapclient import IMAPClient
 
 import job_finder.web.autoheal.override_loader as _override_loader
 from job_finder.models import Job
-from job_finder.parsers import extract_with_fallback
+from job_finder.parsers import extract_primary, extract_with_fallback
 from job_finder.sources.gmail_source import (
     SENDER_LABEL,
     SENDER_PARSERS,
@@ -186,8 +186,14 @@ class ImapSource:
                     try:
                         # Phase C: email override pre-check (dormant when no override files present).
                         # With no override, falls through to extract_with_fallback unchanged.
-                        _label = SENDER_LABEL.get(sender_lower, sender_lower)
+                        # Keyed on the MATCHED sender_key (a bare address), not the full
+                        # From header: a display-name From ("LinkedIn <jobalerts-…>")
+                        # previously missed the SENDER_LABEL lookup, so the gate never
+                        # fired and records landed under a different key than gmail's.
+                        _label = SENDER_LABEL.get(sender_key, sender_key)
                         _recipe = _override_loader.html_recipe(_label)
+                        _legacy_count = None
+                        _extractor = "legacy"
                         if _recipe is not None:
                             _recipe_jobs = RecipeExtractor(_recipe, job_source="email_recipe")(
                                 body
@@ -195,15 +201,21 @@ class ImapSource:
                         else:
                             _recipe_jobs = []
                         if _recipe_jobs:
+                            # Phase D shadow guard: the primary parser runs too; counts
+                            # are compared post-ingestion (see health_monitor).
+                            _legacy_count = len(extract_primary(parser_fn, body, email_date))
+                            _extractor = "override"
                             jobs = _recipe_jobs
                         else:
                             jobs = extract_with_fallback(parser_fn, body, email_date)
                         all_jobs.extend(jobs)
                         self.extraction_records.append(
                             {
-                                "label": SENDER_LABEL.get(sender, sender),
+                                "label": _label,
                                 "raw_text": body,
                                 "job_count": len(jobs),
+                                "legacy_count": _legacy_count,
+                                "extractor": _extractor,
                             }
                         )
 

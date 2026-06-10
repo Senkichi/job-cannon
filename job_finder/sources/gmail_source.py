@@ -15,7 +15,7 @@ from googleapiclient.discovery import build
 
 import job_finder.web.autoheal.override_loader as _override_loader
 from job_finder.models import Job
-from job_finder.parsers import extract_with_fallback
+from job_finder.parsers import extract_primary, extract_with_fallback
 from job_finder.parsers.glassdoor_parser import parse_glassdoor_alert
 from job_finder.parsers.greenhouse_parser import parse_greenhouse_alert
 from job_finder.parsers.indeed_parser import parse_indeed_alert, parse_indeed_match_alert
@@ -228,20 +228,28 @@ class GmailSource:
                     # With no override, falls through to extract_with_fallback unchanged.
                     _label = SENDER_LABEL.get(sender, sender)
                     _recipe = _override_loader.html_recipe(_label)
+                    _legacy_count = None
+                    _extractor = "legacy"
                     if _recipe is not None:
                         _recipe_jobs = RecipeExtractor(_recipe, job_source="email_recipe")(body)
                     else:
                         _recipe_jobs = []
                     if _recipe_jobs:
+                        # Phase D shadow guard: the primary parser runs too; counts
+                        # are compared post-ingestion (see health_monitor).
+                        _legacy_count = len(extract_primary(parser_fn, body, email_date))
+                        _extractor = "override"
                         jobs = _recipe_jobs
                     else:
                         jobs = extract_with_fallback(parser_fn, body, email_date)
                     all_jobs.extend(jobs)
                     self.extraction_records.append(
                         {
-                            "label": SENDER_LABEL.get(sender, sender),
+                            "label": _label,
                             "raw_text": body,
                             "job_count": len(jobs),
+                            "legacy_count": _legacy_count,
+                            "extractor": _extractor,
                         }
                     )
 

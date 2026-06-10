@@ -42,7 +42,7 @@ def extract_with_fallback(
         Jobs from the primary parser, or (if empty + job URL present) jobs
         from the positional fallback, or ``[]``.
     """
-    jobs = primary_fn(body, email_date)
+    jobs = extract_primary(primary_fn, body, email_date)
     if jobs:
         return jobs
     if body and has_job_urls(body):
@@ -56,7 +56,31 @@ def extract_with_fallback(
     return []
 
 
+def extract_primary(
+    primary_fn: Callable,
+    body: str,
+    email_date: datetime | None,
+) -> list:
+    """Run ONLY the primary parser step of ``extract_with_fallback``.
+
+    The Phase D shadow guard compares an active override against this — not
+    against the positional fallback, whose loose extraction could "win" a
+    count comparison with garbage and get a good override deleted. The
+    primary parser is the meaningful health signal.
+
+    Args:
+        primary_fn: The parser callable, e.g. ``parse_linkedin_alert``.
+        body: Raw email body text.
+        email_date: When the email was sent.
+
+    Returns:
+        Jobs from the primary parser, or ``[]``.
+    """
+    return primary_fn(body, email_date) or []
+
+
 __all__ = [
+    "extract_primary",
     "extract_with_fallback",
     "parse_glassdoor_alert",
     "parse_greenhouse_alert",
