@@ -25,6 +25,20 @@ os.environ.setdefault("GSD_BACKUP_CONFIRMED", "1")
 os.environ.setdefault("PYSTRAY_BACKEND", "dummy")
 
 
+@pytest.fixture(autouse=True)
+def _isolated_user_data_root(tmp_path, monkeypatch):
+    """Point JOB_CANNON_USER_DATA_DIR at a per-test temp dir for EVERY test.
+
+    Production code paths write into the user-data root as side effects
+    (heal contribution bundles on adoption, OAuth artifacts, update-check
+    cache); without this, any test exercising those paths litters the real
+    OS user-data directory. Tests that need different env semantics override
+    with their own monkeypatch.setenv/delenv (test-level monkeypatch wins
+    over this fixture).
+    """
+    monkeypatch.setenv("JOB_CANNON_USER_DATA_DIR", str(tmp_path / "_userdata"))
+
+
 def _seed_onboarding_complete(db_path: str) -> None:
     """Seed onboarding_state(id=1, onboarding_complete=1) so the @before_request gate does not redirect tests to /onboarding/welcome.
 

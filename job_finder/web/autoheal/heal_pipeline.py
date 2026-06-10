@@ -150,6 +150,18 @@ def _adopt_stage(
         return "rejected:write_failed"
 
     record_audit(conn, source, surface, "adopted")
+
+    # --- Upstream contribution bundle (D5) — consent-gated, local-only.
+    # Adoption stands regardless: a bundle failure is audited, never raised. ---
+    try:
+        from job_finder.web.autoheal import upstream_reporter
+
+        bundle = upstream_reporter.build_bundle(conn, source, surface, recipe_to_dict(candidate))
+        upstream_reporter.write_bundle(bundle)
+    except Exception as exc:
+        logger.exception("autoheal: contribution bundle for %s failed", source)
+        record_audit(conn, source, surface, "contrib_failed", str(exc))
+
     conn.execute(
         "UPDATE source_health SET status = 'healthy', consecutive_breaks = 0, "
         "heal_attempts = heal_attempts + 1, shadow_legacy_wins = 0, last_heal_at = ? "
