@@ -131,8 +131,8 @@ def test_recipe_for_ats(tmp_path, monkeypatch):
     assert override_loader.recipe_for("ats:lever") is not None
 
 
-def test_recipe_for_careers_is_none_until_d4(tmp_path, monkeypatch):
-    """No careers cache surface exists yet — careers sources resolve to None."""
+def test_recipe_for_careers_absent_is_none(tmp_path, monkeypatch):
+    """No careers override file → careers sources resolve to None."""
     _isolated_loader(tmp_path, monkeypatch)
     assert override_loader.recipe_for("careers:acme.com") is None
     assert override_loader.recipe_for("careers") is None

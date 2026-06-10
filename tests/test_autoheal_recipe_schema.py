@@ -186,15 +186,50 @@ def test_validate_ats_recipe_unknown_top_level_key_raises():
 
 
 # ---------------------------------------------------------------------------
+# Careers surface (D4) — treated exactly like email → HtmlRecipe
+# ---------------------------------------------------------------------------
+
+CAREERS_RECIPE = {
+    "source": "careers:acme.com",
+    "container_selector": "li.opening",
+    "fields": {
+        "title": {"selector": "h3", "attr": "text"},
+        "url": {"selector": "a", "attr": "href"},
+    },
+}
+
+
+def test_validate_careers_recipe_returns_html_recipe():
+    result = validate_recipe("careers", CAREERS_RECIPE)
+    assert isinstance(result, HtmlRecipe)
+    assert result.source == "careers:acme.com"
+    assert result.container_selector == "li.opening"
+
+
+def test_validate_careers_recipe_round_trips():
+    from job_finder.web.autoheal.recipe_schema import recipe_to_dict
+
+    result = validate_recipe("careers", CAREERS_RECIPE)
+    assert validate_recipe("careers", recipe_to_dict(result)) == result
+
+
+def test_validate_careers_recipe_same_strictness_as_email():
+    bad = dict(CAREERS_RECIPE)
+    bad["bogus_key"] = "x"
+    with pytest.raises(ValueError, match="Unknown top-level key"):
+        validate_recipe("careers", bad)
+
+
+# ---------------------------------------------------------------------------
 # Unknown surface
 # ---------------------------------------------------------------------------
 
 
 def test_validate_recipe_unknown_surface_raises():
     with pytest.raises(ValueError, match="surface"):
-        validate_recipe("careers", GOOD_HTML_RECIPE)
-
-
-def test_validate_recipe_unknown_surface_other_raises():
-    with pytest.raises(ValueError, match="surface"):
         validate_recipe("sms", GOOD_ATS_RECIPE)
+
+
+def test_validate_recipe_unknown_surface_message_lists_careers():
+    with pytest.raises(ValueError, match="careers"):
+        validate_recipe("sms", GOOD_HTML_RECIPE)

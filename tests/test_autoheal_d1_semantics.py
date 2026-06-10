@@ -1,7 +1,6 @@
 """Phase D / D1 heal-pipeline semantics.
 
-Covers the four D1 behavior changes to ``run_heal``:
-- careers surface guard (bare + prefixed keys audit ``skipped:careers_unsupported``)
+Covers the D1 behavior changes to ``run_heal``:
 - ``no_provider`` starts the backoff window without consuming an attempt
 - ``cap_exhausted`` audited exactly once per break episode
 - re-break rollback (a degraded source with an adopted override rolls it back
@@ -100,39 +99,6 @@ def _reset_backoff(conn, source: str, *, status: str | None = None) -> None:
 
 def _model(data) -> SimpleNamespace:
     return SimpleNamespace(data=data, schema_valid=True)
-
-
-# ---------------------------------------------------------------------------
-# Careers surface guard
-# ---------------------------------------------------------------------------
-
-
-def test_careers_bare_source_skipped(tmp_path):
-    conn = _conn(tmp_path)
-    _seed_degraded(conn, "careers", "careers")
-
-    with patch.object(heal_pipeline.codegen, "generate_recipe") as mock_gen:
-        result = heal_pipeline.run_heal(conn, _FLAG_ON, "careers")
-
-    assert result == "skipped:careers_unsupported"
-    mock_gen.assert_not_called()
-    assert _audit_outcomes(conn, "careers") == ["skipped:careers_unsupported"]
-    attempts = conn.execute(
-        "SELECT heal_attempts FROM source_health WHERE source='careers'"
-    ).fetchone()[0]
-    assert attempts == 0  # no attempt consumed
-
-
-def test_careers_prefixed_source_skipped(tmp_path):
-    conn = _conn(tmp_path)
-    _seed_degraded(conn, "careers:acme.com", "careers")
-
-    with patch.object(heal_pipeline.codegen, "generate_recipe") as mock_gen:
-        result = heal_pipeline.run_heal(conn, _FLAG_ON, "careers:acme.com")
-
-    assert result == "skipped:careers_unsupported"
-    mock_gen.assert_not_called()
-    assert "skipped:careers_unsupported" in _audit_outcomes(conn, "careers:acme.com")
 
 
 # ---------------------------------------------------------------------------

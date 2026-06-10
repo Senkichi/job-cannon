@@ -148,6 +148,70 @@ def test_ats_wrong_alias_rejected_target_unfixed():
 
 
 # ---------------------------------------------------------------------------
+# Careers surface (D4) — structural extraction gate (I4)
+# ---------------------------------------------------------------------------
+
+_CAREERS_WORKING = """
+<ul><li class="opening"><h3>Platform Engineer</h3><a href="/jobs/1">Apply</a></li></ul>
+"""
+
+_CAREERS_FAILING = """
+<ul><li class="posting"><h3>Platform Engineer</h3><a href="/jobs/2">Apply</a></li></ul>
+"""
+
+
+def _careers_recipe(container_selector: str) -> HtmlRecipe:
+    return HtmlRecipe(
+        source="careers:acme.com",
+        container_selector=container_selector,
+        fields={
+            "title": FieldRule(selector="h3", attr="text"),
+            "url": FieldRule(selector="a", attr="href"),
+        },
+    )
+
+
+def test_careers_good_candidate_passes():
+    verdict = validator.validate(
+        _careers_recipe("li.opening, li.posting"),
+        "careers",
+        corpus_samples=[_CAREERS_WORKING],
+        failing_samples=[_CAREERS_FAILING],
+        timeout_s=30,
+    )
+    assert verdict.ok
+
+
+def test_careers_regressing_candidate_rejected():
+    verdict = validator.validate(
+        _careers_recipe("li.posting"),
+        "careers",
+        corpus_samples=[_CAREERS_WORKING],
+        failing_samples=[_CAREERS_FAILING],
+        timeout_s=30,
+    )
+    assert not verdict.ok
+    assert verdict.reason == "regression"
+
+
+def test_careers_under_fixing_candidate_rejected():
+    verdict = validator.validate(
+        _careers_recipe("li.opening"),
+        "careers",
+        corpus_samples=[_CAREERS_WORKING],
+        failing_samples=[_CAREERS_FAILING],
+        timeout_s=30,
+    )
+    assert not verdict.ok
+    assert verdict.reason == "target_unfixed"
+
+
+def test_pytest_gate_skips_cleanly_for_hostname_token():
+    """careers:acme.com → token 'acmecom' matches no test file → clean skip."""
+    assert validator._pytest_gate("careers:acme.com", timeout_s=5) is None
+
+
+# ---------------------------------------------------------------------------
 # Optional pytest gate (c) — skip cleanly when no matching test exists
 # ---------------------------------------------------------------------------
 

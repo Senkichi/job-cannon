@@ -8,8 +8,10 @@ backoff window.
 
 Phase D adds: re-break rollback (a degraded source with an adopted override
 rolls it back before re-healing), episodic attempt semantics (one generate =
-one attempt; reset only at episode boundaries — see health_monitor), the
-careers surface guard (careers heal lands in D4), and ``no_provider`` backoff.
+one attempt; reset only at episode boundaries — see health_monitor),
+``no_provider`` backoff, and (D4) the careers surface — per-company
+``careers:<hostname>`` sources heal through the same pipeline into
+``heal_overrides/careers/``.
 """
 
 from __future__ import annotations
@@ -69,10 +71,6 @@ def run_heal(conn: sqlite3.Connection, config: dict, source: str) -> str | None:
         return None
 
     surface = surface_for_source(source)
-    if surface == "careers":
-        # Careers heal lands in D4; never route careers sources into the email healer.
-        record_audit(conn, source, surface, "skipped:careers_unsupported")
-        return "skipped:careers_unsupported"
 
     # --- ASSEMBLE → GENERATE ---
     inputs = codegen.assemble_inputs(conn, source, surface)
@@ -129,8 +127,10 @@ def _adopt_stage(
     """Write the validated recipe as an override, hot-swap the cache, reset health.
 
     Override files are keyed by the loader's file layout: email uses the
-    label verbatim; ATS strips the ``ats:`` prefix (the loader re-adds it
-    when scanning the ats/ directory).
+    label verbatim; prefixed sources (``ats:<platform>``,
+    ``careers:<hostname>``) strip the prefix — the loader re-adds it when
+    scanning the surface directory. Careers file keys are NTFS-safe by
+    construction (I5: hostname only, no port, no colon).
 
     Attempt semantics (plan invariant I1): one generate = one consumed attempt,
     success or failure — adopting does NOT reset ``heal_attempts`` (a
@@ -139,7 +139,7 @@ def _adopt_stage(
     with no override active — see health_monitor) or the 30-day hygiene sweep.
     ``shadow_legacy_wins`` is zeroed for the newborn override (I2).
     """
-    file_key = source.split(":", 1)[1] if surface == "ats" else source
+    file_key = source.split(":", 1)[1] if ":" in source else source
     try:
         override_loader.write_override(surface, file_key, recipe_to_dict(candidate))
         override_loader.reload()
