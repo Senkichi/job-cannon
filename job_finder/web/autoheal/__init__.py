@@ -19,3 +19,16 @@ def surface_for_source(source: str) -> str:
     if source == "careers" or source.startswith("careers:"):
         return "careers"
     return "email"
+
+
+def careers_source_key(url: str) -> str:
+    """Per-company careers source key: ``careers:{hostname}``.
+
+    Hostname only — lowercase, port stripped (invariant I5: ``:`` is illegal
+    in NTFS filenames, and the key doubles as the override file key in D4).
+    Falls back to ``careers:unknown`` for garbage/empty URLs.
+    """
+    from urllib.parse import urlparse
+
+    host = (urlparse(url or "").hostname or "").lower()
+    return f"careers:{host}" if host else "careers:unknown"
