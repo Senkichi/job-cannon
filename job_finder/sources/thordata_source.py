@@ -1,13 +1,19 @@
 """Thordata source - fetches jobs from Google Jobs via Thordata SERP API.
 
 POST-based API, cheaper than SerpAPI (~$3-5/1K vs $15/1K).
-Returns jobs_results[] with title, company_name, location, share_link,
-extensions[] (flat array with salary, posting date, schedule type), via, rank.
+Uses engine=google_jobs (SerpApi-compatible) which returns a top-level
+jobs_results[] array. Each item has: title, company_name, location,
+share_link, extensions[] (flat array with salary, posting date, schedule
+type), via, rank.
 Does NOT return description or job_highlights — enrichment pipeline fills those.
+
+Pagination: uses the `start` offset param (same as SerpAPI google_jobs).
+Each page returns up to _PAGE_SIZE results; a short page signals last page.
 """
 
 import logging
 import re
+import time
 
 import requests
 
@@ -34,9 +40,12 @@ _AGE_RE = re.compile(
 class ThordataSource:
     """Fetch jobs from Google Jobs via Thordata SERP API."""
 
-    def __init__(self, api_key: str, max_age_days: int = 3):
+    _PAGE_SIZE = 10  # google_jobs returns up to 10 results per page
+
+    def __init__(self, api_key: str, max_age_days: int = 3, max_pages: int = 3):
         self.api_key = api_key
         self.max_age_days = max_age_days
+        self.max_pages = max_pages
 
     def fetch_jobs(self, queries: list[dict]) -> list[Job]:
         """Run multiple search queries and return combined results.
@@ -54,52 +63,81 @@ class ThordataSource:
         return all_jobs
 
     def _search(self, query: str, location: str = "") -> list[Job]:
-        """Execute a single Google Jobs search via Thordata."""
+        """Execute a Google Jobs search via Thordata with bounded pagination.
+
+        Uses engine=google_jobs (SerpApi-compatible) and reads the top-level
+        jobs_results[] key. Paginates via the `start` offset parameter until
+        the page is shorter than _PAGE_SIZE or max_pages is reached.
+        """
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/x-www-form-urlencoded",
         }
-        # Thordata does not support engine=google_jobs or a location parameter.
-        # Embed location in the query string; append "jobs" to trigger Google Jobs results.
-        q = " ".join(filter(None, [query, location, "jobs"]))
-        payload = {
-            "engine": "google",
-            "q": q,
-            "json": "1",
-            "hl": "en",
-            "gl": "us",
-        }
 
-        try:
-            resp = requests.post(_BASE_URL, headers=headers, data=payload, timeout=30)
-            resp.raise_for_status()
-            data = resp.json()
-        except Exception as e:
-            logger.warning("Thordata search failed for '%s': %s", query, e)
-            return []
+        all_jobs: list[Job] = []
 
-        raw_results = data.get("job_results", {}).get("jobs", [])
-        logger.info(
-            "Thordata '%s' @ '%s': %d raw results from API",
-            query,
-            location,
-            len(raw_results),
-        )
+        for page in range(self.max_pages):
+            payload = {
+                "engine": "google_jobs",
+                "q": query,
+                "json": "1",
+                "hl": "en",
+                "gl": "us",
+                "start": page * self._PAGE_SIZE,
+            }
+            if location:
+                payload["location"] = location
 
-        jobs = []
-        for result in raw_results:
-            job = self._parse_result(result)
-            if job:
-                jobs.append(job)
+            try:
+                resp = requests.post(_BASE_URL, headers=headers, data=payload, timeout=30)
+                resp.raise_for_status()
+                data = resp.json()
+            except Exception as e:
+                logger.warning("Thordata search failed for '%s' (page %d): %s", query, page, e)
+                break
+
+            # B: Distinguish "engine returned no jobs key" from "empty jobs list"
+            if "jobs_results" not in data:
+                logger.warning(
+                    "Thordata '%s' @ '%s' (page %d): 200 response missing 'jobs_results'"
+                    " key — engine mismatch or expired account (keys: %s)",
+                    query,
+                    location,
+                    page,
+                    sorted(data.keys()),
+                )
+                break
+
+            raw_results: list[dict] = data["jobs_results"]
+            logger.info(
+                "Thordata '%s' @ '%s' (page %d): %d raw results from API",
+                query,
+                location,
+                page,
+                len(raw_results),
+            )
+
+            for result in raw_results:
+                job = self._parse_result(result)
+                if job:
+                    all_jobs.append(job)
+
+            # Short page → last page of results
+            if len(raw_results) < self._PAGE_SIZE:
+                break
+
+            # Small delay between pages
+            if page < self.max_pages - 1:
+                time.sleep(0.5)
 
         logger.info(
             "Thordata '%s' @ '%s': %d jobs after age filter (max_age_days=%d)",
             query,
             location,
-            len(jobs),
+            len(all_jobs),
             self.max_age_days,
         )
-        return jobs
+        return all_jobs
 
     def _parse_result(self, result: dict) -> Job | None:
         """Parse a single Thordata Google Jobs result into a Job.
