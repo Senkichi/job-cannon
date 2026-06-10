@@ -70,8 +70,10 @@ this project follows [Semantic Versioning](https://semver.org/).
   pygrep block on template-placeholder markers (the safety net for
   README/metadata templates).
 - `main` is the default branch (renamed from `master`).
-- `.planning/` and `.reviews/` working directories are gitignored;
-  100+ tracked planning artifacts removed in S1.
+- `.planning/` and `.reviews/` working directories are gitignored.
+  Tracked planning artifacts (59 `.planning/` files, 3 root-level session
+  notes, 24 verbatim JD corpus files) removed from the index in #305;
+  working copies remain on disk.
 
 ## [3.0.0] — 2026-04-21
 
