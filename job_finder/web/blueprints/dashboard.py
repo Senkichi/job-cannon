@@ -127,6 +127,84 @@ def _get_degraded_sources_context(conn) -> dict:
     return {"degraded": degraded_sources(conn)}
 
 
+# GitHub truncates very long GET URLs; keep the prefilled-issue link bounded.
+_MAX_ISSUE_BODY_CHARS = 5_500
+_MAX_ISSUE_URL_CHARS = 8_000
+
+
+def _bundle_issue_url(repo: str, bundle: dict) -> str:
+    """Pre-filled new-issue URL for a contribution bundle, capped at 8 000 chars.
+
+    The body carries the recipe + a clipped scrubbed sample; the full bundle
+    is pasted by the user from the dashboard textarea ("full bundle below").
+    """
+    import json as _json
+    from urllib.parse import quote
+
+    source = str(bundle.get("source") or "unknown")
+    title = quote(f"heal({bundle.get('surface')}): contribution for {source}")
+    recipe_json = _json.dumps(bundle.get("recipe") or {}, indent=2)
+    sample = str(bundle.get("failing_sample") or "")
+
+    def _build(sample_clip: int) -> str:
+        body = (
+            f"Automated heal contribution for `{source}`.\n\n"
+            f"Drift: `{_json.dumps(bundle.get('drift') or {})}`\n"
+            f"App version: {bundle.get('app_version')}\n\n"
+            f"Recipe:\n````json\n{recipe_json}\n````\n\n"
+            f"PII-scrubbed failing sample (clipped — full bundle below):\n\n"
+            f"````\n{sample[:sample_clip]}\n````\n"
+        )[:_MAX_ISSUE_BODY_CHARS]
+        return f"https://github.com/{repo}/issues/new?title={title}&body={quote(body)}"
+
+    clip = 2_000
+    url = _build(clip)
+    while len(url) > _MAX_ISSUE_URL_CHARS and clip > 0:
+        clip = clip // 2
+        url = _build(clip)
+    return url
+
+
+def _get_heal_activity_context(conn, config) -> dict:
+    """Heal-audit trail + pending contribution bundles (Phase D / D5 panel).
+
+    ``no_provider`` rows are excluded — keyless instances retry every backoff
+    window and would drown the panel in noise.
+    """
+    import json as _json
+
+    from job_finder.web.autoheal import upstream_reporter
+
+    autoheal_cfg = (config or {}).get("autoheal", {}) or {}
+    repo = str(autoheal_cfg.get("upstream_repo") or "Senkichi/job-cannon")
+
+    try:
+        audit_rows = [
+            dict(r)
+            for r in conn.execute(
+                "SELECT source, surface, outcome, created_at FROM heal_audit "
+                "WHERE outcome != 'no_provider' ORDER BY id DESC LIMIT 10"
+            ).fetchall()
+        ]
+    except Exception:
+        audit_rows = []
+
+    bundles = []
+    for b in upstream_reporter.pending_bundles():
+        payload = {k: v for k, v in b.items() if k != "filename"}
+        bundles.append(
+            {
+                "source": b.get("source"),
+                "created_at": b.get("created_at"),
+                "filename": b.get("filename"),
+                "issue_url": _bundle_issue_url(repo, b),
+                "bundle_json": _json.dumps(payload, indent=2),
+            }
+        )
+
+    return {"heal_audit": audit_rows, "heal_bundles": bundles}
+
+
 def _get_quick_actions_context(conn, config):
     """Build template context for quick actions section.
 
@@ -194,6 +272,7 @@ def index():
         **stats_ctx,
         **qa_ctx,
         **_get_degraded_sources_context(conn),
+        **_get_heal_activity_context(conn, config),
         recent_runs=recent_runs,
         user_activity=user_activity,
         pipeline_summary=pipeline_summary,

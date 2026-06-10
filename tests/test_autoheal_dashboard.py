@@ -61,3 +61,88 @@ def test_healthy_system_shows_empty_state(client):
     resp = client.get("/dashboard/degraded-sources", headers={"HX-Request": "true"})
     assert resp.status_code == 200
     assert "All sources healthy" in resp.data.decode()
+
+
+# ---------------------------------------------------------------------------
+# Heal Activity panel (Phase D / D5)
+# ---------------------------------------------------------------------------
+
+
+def _audit(conn, source, outcome):
+    from job_finder.web.autoheal.audit import record_audit
+
+    record_audit(conn, source, "email", outcome)
+
+
+def test_dashboard_renders_heal_panel_empty(client):
+    resp = client.get("/dashboard/")
+    assert resp.status_code == 200
+    body = resp.data.decode()
+    assert "Heal Activity" in body
+    assert "No heal activity yet" in body
+
+
+def test_heal_panel_shows_audit_rows_excluding_no_provider(client, app):
+    from job_finder.web.db_helpers import get_db
+
+    with app.app_context():
+        conn = get_db(app.config["DB_PATH"])
+        _audit(conn, "linkedin", "adopted")
+        _audit(conn, "glassdoor", "no_provider")
+
+    resp = client.get("/dashboard/")
+    body = resp.data.decode()
+    assert "adopted" in body
+    assert "no_provider" not in body
+
+
+def test_heal_panel_renders_pending_bundle(client, app, tmp_path, monkeypatch):
+    from job_finder.web.autoheal import upstream_reporter as ur
+
+    # The conftest autouse fixture isolates JOB_CANNON_USER_DATA_DIR; write a
+    # bundle into THAT root so pending_bundles (production path) finds it.
+    ur.write_bundle(
+        {
+            "schema_version": 1,
+            "source": "careers:acme.com",
+            "surface": "careers",
+            "recipe": {"container_selector": "li"},
+            "failing_sample": "<html>" + "x" * 3000 + "</html>",
+            "drift": {"consecutive_breaks": 3},
+            "created_at": "2026-06-10T21:30:00",
+            "app_version": "v5.0.0",
+        }
+    )
+
+    resp = client.get("/dashboard/")
+    assert resp.status_code == 200
+    body = resp.data.decode()
+    assert "Pending contributions" in body
+    assert "careers:acme.com" in body
+    assert "PII-scrubbed sample" in body  # consent text
+    assert "Copy bundle" in body
+
+    # Issue link: present, urlencoded, bounded.
+    import re as _re
+
+    m = _re.search(r'href="(https://github\.com/[^"]+/issues/new\?[^"]+)"', body)
+    assert m, "issue link missing"
+    url = m.group(1).replace("&amp;", "&")
+    assert "title=" in url and "body=" in url
+    assert len(url) <= 8_000
+    assert " " not in url  # urlencoded
+
+
+def test_bundle_issue_url_caps_total_length():
+    from job_finder.web.blueprints.dashboard import _bundle_issue_url
+
+    bundle = {
+        "source": "careers:acme.com",
+        "surface": "careers",
+        "recipe": {"container_selector": "li.opening"},
+        "failing_sample": "<div class='x'>&" * 5_000,  # quote-expansion-heavy
+        "drift": {},
+        "app_version": "v5.0.0",
+    }
+    url = _bundle_issue_url("Senkichi/job-cannon", bundle)
+    assert len(url) <= 8_000

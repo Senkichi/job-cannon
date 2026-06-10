@@ -151,6 +151,13 @@
     </div>
   </section>
 
+  {# ── Heal Activity panel (autoheal Phase D / D5) ── #}
+  {# Server-rendered on full page load only: heal events are post-ingestion / #}
+  {# daily-sweep cadence, so a live refetch hook would be noise. #}
+  <section aria-label="Heal activity">
+    {% include "dashboard/_heal_activity.html" %}
+  </section>
+
   <!-- ── Pipeline Review Queue ── -->
   {# The container refetches on sse:detections-changed so detections surfaced  #}
   {# by the background pipeline-detection job appear live. It deliberately     #}
