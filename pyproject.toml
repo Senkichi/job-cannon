@@ -15,7 +15,7 @@ packages = ["job_finder"]
 name = "job-cannon"
 version = "5.0.0"
 description = "Personal job search command center — Flask, Gmail ingestion, AI scoring, pipeline tracking"
-requires-python = ">=3.13"
+requires-python = ">=3.12"
 authors = [{ name = "Senkichi", email = "Senkichi@users.noreply.github.com" }]
 readme = "README.md"
 license = "AGPL-3.0-only"
@@ -200,7 +200,7 @@ Issues = "https://github.com/Senkichi/job-cannon/issues"
 
 # ── Ruff (Linting + Formatting) ──────────────────────────────
 [tool.ruff]
-target-version = "py313"
+target-version = "py312"
 line-length = 99
 extend-exclude = [
     "logs",
@@ -303,7 +303,7 @@ exclude_lines = [
 # pre-commit hook and CI signal use mypy. Baseline error counts are
 # documented in docs/architecture/typecheck.md (Session 5).
 [tool.mypy]
-python_version = "3.13"
+python_version = "3.12"
 ignore_missing_imports = true
 # Start gentle — these are tightened progressively in Session 8 once
 # Settings caller migration lands and untyped-call surface shrinks.
