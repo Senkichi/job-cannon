@@ -1,6 +1,31 @@
-{# Compact job row. Click to expand inline accordion below. #}
+{# ===========================================================================
+   jobs/_row.html  —  compact (collapsed) job row
+   ===========================================================================
 
-{# Salary formatting #}
+   PORT NOTE (load-bearing — the expand/collapse interaction depends on ALL of
+   these EXACTLY; keep attribute names + the placeholder-row pattern intact):
+     • data-dedup-key, data-expand-url, data-collapse-url
+     • hx-push-url="false"
+     • the inline onclick that runs htmx.ajax(GET, expand|collapse url,
+       {target: nextElementSibling, swap:'outerHTML'}) and flips
+       this.dataset.expanded.
+     • The hidden placeholder <tr data-expand-slot="..."> that FOLLOWS this row
+       is emitted by jobs/_table.html and restored by jobs/_row_collapse_response.html.
+   The compact row is rendered for both the full page and the /jobs/table partial.
+
+   DESIGN DECISION #4 — "dense table, no card conversion":
+     This stays a real <table> row. No card/list reflow. We only re-weighted the
+     hierarchy WITHIN the row so a triager's eye lands Score → Title → meta:
+       · Title  = secondary anchor: slate-100 medium, now preceded by a chevron
+                  that rotates 90° when the row is expanded (the affordance the
+                  old row lacked).
+       · Company/Location/Salary/Posted = de-emphasised meta (slate-400/500, 13px).
+       · Row hover = slate-800/40; expanded row = slate-800/60 (via data-expanded).
+     Row vertical padding bumped (py-1.5 → py-2.5) ONLY because the score chip is
+     44px tall and sets the row height; text density is otherwise unchanged.
+#}
+
+{# Salary formatting — UNCHANGED from original. #}
 {% if job.salary_min and job.salary_max %}
   {% set salary = "$%dk–$%dk" | format((job.salary_min // 1000), (job.salary_max // 1000)) %}
 {% elif job.salary_max %}
@@ -11,12 +36,9 @@
   {% set salary = "N/A" %}
 {% endif %}
 
-{# Posted date: use posted_date if available, else fall back to first_seen #}
 {% set posted = job.posted_date if job.posted_date else job.first_seen %}
 
-{# Phase 47.06: review-needed flag — non-empty unresolved_reasons OR a location
-   flagged unresolved. from_json returns [] on NULL/malformed so this never
-   raises. #}
+{# Review-needed flag — UNCHANGED logic from original (Phase 47.06). #}
 {% set _review_reasons = job.unresolved_reasons | from_json %}
 {% set _review_locs = job.locations_structured | from_json %}
 {% set _loc_unresolved = false %}
@@ -26,7 +48,7 @@
 {% set _needs_review = (_review_reasons | length > 0) or _loc_unresolved %}
 {% set _review_labels = _review_reasons + (['unresolved location'] if _loc_unresolved else []) %}
 
-<tr class="border-b border-slate-800 hover:bg-slate-800/60 cursor-pointer transition-colors {% if job.is_stale %}opacity-50{% endif %}"
+<tr class="border-b border-slate-700/60 hover:bg-slate-800/40 data-[expanded=true]:bg-slate-800/60 cursor-pointer transition-colors {% if job.is_stale %}opacity-50{% endif %}"
     data-dedup-key="{{ job.dedup_key }}"
     data-expand-url="{{ url_for('jobs.expand', dedup_key=job.dedup_key) }}"
     data-collapse-url="{{ url_for('jobs.collapse', dedup_key=job.dedup_key) }}"
@@ -46,24 +68,54 @@
             }
           }, 100);
         }
-        // Collapse-side scroll-back is handled by the global 'job-collapsed'
-        // listener in jobs/index.html, fired by the collapse route's
-        // HX-Trigger-After-Settle header. Keeps both compact-row-click and
-        // bottom-Collapse-button paths bulletproof and uniform.
       });
     ">
+
+  {# SCORE — the grade chip. Primary anchor. #}
   {% with oob=false %}{% include "jobs/_score_cell.html" %}{% endwith %}
-  <td class="px-2 py-1.5 text-slate-100 font-medium truncate">
-    {{ job.title }}{% if job.is_stale %} <span class="text-xs text-amber-500 border border-amber-500/50 rounded px-1">Stale</span>{% endif %}{% if _needs_review %} <a href="{{ url_for('admin.review') }}#job-{{ job.dedup_key | urlencode | replace('%', '') }}" hx-on:click="event.stopPropagation()" title="Flagged for review: {{ _review_labels | join(', ') }}" class="text-xs text-amber-400 border border-amber-500/60 bg-amber-500/10 rounded px-1 hover:bg-amber-500/20">review</a>{% endif %}
+
+  {# TITLE — secondary anchor, with the expand chevron. #}
+  <td class="px-2 py-2.5">
+    <div class="flex items-center gap-2 min-w-0">
+      {# Chevron rotates via the [data-expanded=true] rule on the <tr> (see the
+         <style> block in jobs/index.html). aria-hidden — it's decorative. #}
+      <svg class="jc-row-chevron w-3.5 h-3.5 flex-none text-slate-500 transition-transform" viewBox="0 0 24 24"
+           fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M9 5l7 7-7 7" />
+      </svg>
+      <span class="text-[15px] font-medium text-slate-100 truncate">{{ job.title }}</span>
+      {% if job.is_stale %}
+        <span class="flex-none text-[11px] text-amber-500 border border-amber-500/50 rounded px-1">Stale</span>
+      {% endif %}
+      {% if _needs_review %}
+        <a href="{{ url_for('admin.review') }}#job-{{ job.dedup_key | urlencode | replace('%', '') }}"
+           hx-on:click="event.stopPropagation()"
+           title="Flagged for review: {{ _review_labels | join(', ') }}"
+           class="flex-none text-[11px] text-amber-400 border border-amber-500/60 bg-amber-500/10 rounded px-1 hover:bg-amber-500/20">review</a>
+      {% endif %}
+    </div>
   </td>
-  <td class="px-2 py-1.5 text-slate-300 truncate">{{ job.company }}</td>
+
+  {# COMPANY — meta. #}
+  <td class="px-2 py-2.5 text-[13px] text-slate-400 truncate">{{ job.company }}</td>
+
+  {# LOCATION — meta (canonical preferred). #}
   {% set canonical = job.locations_structured | format_canonical_location %}
-  <td class="px-2 py-1.5 text-slate-400 truncate" title="{{ job.location }}">
+  <td class="px-2 py-2.5 text-[13px] text-slate-500 truncate" title="{{ job.location }}">
     {{ canonical if canonical else job.location }}
   </td>
-  <td class="px-1 py-1.5 text-slate-300 whitespace-nowrap">{{ salary }}</td>
-  <td class="px-2 py-1.5 text-slate-500 whitespace-nowrap text-xs overflow-hidden" title="{{ posted | local_date }}">{{ posted | relative_date }}</td>
-  <td class="px-1 py-1.5" id="status-cell-{{ job.dedup_key | urlencode | replace('%', '') }}">
+
+  {# SALARY — meta, tabular; "N/A" goes faint (slate-600). #}
+  <td class="px-1 py-2.5 text-[13px] tabular-nums whitespace-nowrap {{ 'text-slate-600' if salary == 'N/A' else 'text-slate-400' }}">{{ salary }}</td>
+
+  {# POSTED — meta. NOTE: design mockup shows a dual "Jun 7 · 1d ago" format;
+     we keep the existing `relative_date` filter as the visible value (and
+     `local_date` in the title tooltip) because the combined format would need a
+     new/extended date filter. ⚑ See PORT-MANIFEST: optional date-format follow-up. #}
+  <td class="px-2 py-2.5 text-[13px] text-slate-500 whitespace-nowrap overflow-hidden" title="{{ posted | local_date }}">{{ posted | relative_date }}</td>
+
+  {# STATUS — inline select. id kept for the archive OOB target. #}
+  <td class="px-1 py-2.5" id="status-cell-{{ job.dedup_key | urlencode | replace('%', '') }}">
     {% include "jobs/_status_cell.html" %}
   </td>
 </tr>

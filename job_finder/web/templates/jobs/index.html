@@ -2,198 +2,285 @@
 
 {% block title %}Job Board — Job Cannon{% endblock %}
 
+{#
+   ============================================================================
+   jobs/index.html  —  Job Board page (redesign)
+   ============================================================================
+   DESIGN DECISION #2 — "filter bar streamlined, NOTHING deleted":
+     The old bar exposed every control at once (a full-width row of ~14 status
+     pills + a second row of 9 more controls). The redesign TIERS it:
+       TIER 1 (always visible): Status multiselect dropdown · Posted-within ·
+                                Sort + direction · a "Filters" disclosure button.
+       TIER 2 (inside the Filters popover): Location, Country, Workplace,
+                                Review-needed, the two Biz-day freshness toggles,
+                                Hide stale, Show hidden, and the From/To date range.
+     EVERY input is still present, with its ORIGINAL `name` attribute and HTMX
+     wiring — they just moved into popovers. The status pills + their toggle JS
+     (status-pill-cb / status-pill-label / toggleAllStatus) are kept VERBATIM,
+     only relocated into the Status dropdown. localStorage persistence + all the
+     filter-form contracts below are unchanged.
+
+   PRESERVED contracts (load-bearing — keep exact):
+     • #filter-form: hx-get jobs.table, hx-target #job-table-body,
+       hx-trigger "change from:select, change from:input, input from:#filter-date-from,
+       input from:#filter-date-to", hx-swap innerHTML.
+     • tbody#job-table-body: jobs-updated / sse:jobs-changed live refresh,
+       hx-include #filter-form.
+     • All filter input `name`s: status, location, country, workplace_type,
+       unresolved, posted_within, freshness, sort_by, sort_dir, hide_stale,
+       show_hidden, date_from, date_to.
+     • The whole {% block extra_scripts %} (re-sort, archive, freshness, persistence,
+       collapse scroll-back) is carried over unchanged except for two added
+       popover toggles.
+#}
+
 {% block content %}
+{# Computed server-side: how many active statuses, and how many TIER-2 advanced
+   filters are set (drives the two count badges). DESIGN DECISION: counts live in
+   the template, not JS, so they're correct on first paint. #}
+{% set active_statuses = filters.getlist('status') if filters.getlist is defined else ([filters.get('status')] if filters.get('status') else []) %}
+{% set adv_active_count = (
+     (1 if filters.get('location') else 0)
+   + (1 if filters.get('country') else 0)
+   + (1 if filters.get('workplace_type') else 0)
+   + (1 if filters.get('unresolved', 'hide') != 'hide' else 0)
+   + (1 if filters.get('freshness') else 0)
+   + (1 if filters.get('hide_stale', 'on') == 'on' else 0)
+   + (1 if filters.get('show_hidden') == 'on' else 0)
+   + (1 if filters.get('date_from') else 0)
+   + (1 if filters.get('date_to') else 0)
+) %}
+
 <div class="overflow-hidden">
 
-  <!-- Page header -->
-  <div class="flex items-center justify-between mb-4">
-    <h1 class="text-xl font-bold text-slate-100">Job Board</h1>
-    <span class="text-xs text-slate-500">{{ jobs | length }} jobs shown</span>
+  <!-- Page header — DESIGN: title + triage-oriented subtitle, count on the right -->
+  <div class="flex items-start justify-between mb-5">
+    <div>
+      <h1 class="text-xl font-bold tracking-tight text-slate-100">Job Board</h1>
+      <p class="text-[13px] text-slate-500 mt-0.5">Triage by fit — expand a row to decide, open full detail to dig in.</p>
+    </div>
+    <span class="text-[13px] text-slate-500 whitespace-nowrap pt-1">{{ jobs | length }} shown</span>
   </div>
 
-  <!-- Filter bar -->
+  <!-- Filter bar (single row, tiered) -->
   <form id="filter-form"
         hx-get="{{ url_for('jobs.table') }}"
         hx-target="#job-table-body"
         hx-trigger="change from:select, change from:input, input from:#filter-date-from, input from:#filter-date-to"
         hx-swap="innerHTML"
-        class="flex flex-col gap-2 mb-4 p-3 bg-slate-800/50 rounded-lg border border-slate-700">
+        class="flex flex-wrap items-center gap-2 mb-5">
 
-    <!-- Row 1: Status pills (full width) -->
-    <div class="flex flex-wrap items-center gap-1 w-full">
-      <button type="button" id="status-all-btn"
-              onclick="toggleAllStatus(this)"
-              title="Select or deselect all statuses"
-              aria-label="Select or deselect all statuses"
-              class="px-2 py-1 text-xs rounded border border-slate-600 bg-slate-700 text-slate-200 hover:bg-slate-600 transition-colors cursor-pointer">
-        All
+    <!-- TIER 1 · Status multiselect (was the full-width pill row) -->
+    <div class="relative" id="status-dd">
+      <button type="button" onclick="toggleStatusDropdown(event)" aria-haspopup="true"
+              class="inline-flex items-center gap-2 rounded-md border px-3 py-1.5 text-[13px] font-medium transition-colors
+                     {% if active_statuses %}border-indigo-500/40 bg-indigo-500/15 text-indigo-300{% else %}border-slate-600 bg-slate-800 text-slate-300 hover:text-slate-100{% endif %}">
+        <span class="text-[11px] uppercase tracking-wider text-slate-500">Status</span>
+        <span id="status-dd-label">{{ ((active_statuses | length) ~ ' selected') if active_statuses else 'All statuses' }}</span>
+        {% if active_statuses %}<span class="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-indigo-600 text-white text-[11px] font-semibold tabular-nums">{{ active_statuses | length }}</span>{% endif %}
+        <svg class="w-3.5 h-3.5 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
       </button>
-      {% set active_statuses = filters.getlist('status') if filters.getlist is defined else ([filters.get('status')] if filters.get('status') else []) %}
-      {# Phase 49.05: surface the unified computed_status values — pipeline states
-         plus the computed-only states (active/stale/expired) the /jobs filter
-         now resolves against the computed_status VIRTUAL column. #}
-      {% for s in pipeline_statuses + ('active', 'stale', 'expired') %}
-        <label class="flex items-center gap-1 cursor-pointer">
-          <input type="checkbox" name="status" value="{{ s }}"
-                 {% if s in active_statuses %}checked{% endif %}
-                 class="hidden status-pill-cb">
-          <span class="px-2 py-1 text-xs rounded border transition-colors cursor-pointer
-                        {% if s in active_statuses %}bg-indigo-600 border-indigo-500 text-white{% else %}bg-slate-700 border-slate-600 text-slate-300 hover:bg-slate-600{% endif %}
-                        status-pill-label">
-            {{ s | replace('_', ' ') | title }}
-          </span>
-        </label>
-      {% endfor %}
+      <div id="status-dd-menu" class="hidden absolute left-0 top-full mt-1.5 w-[min(92vw,420px)] rounded-lg border border-slate-700 bg-slate-800 shadow-[0_12px_32px_-8px_rgba(0,0,0,0.55)] p-3 z-40">
+        <div class="flex items-center justify-between mb-2 pb-2 border-b border-slate-700/60">
+          <span class="text-[11px] uppercase tracking-wider text-slate-500">Filter by status</span>
+          {# "All" button — KEPT VERBATIM (toggleAllStatus). #}
+          <button type="button" id="status-all-btn" onclick="toggleAllStatus(this)"
+                  title="Select or deselect all statuses" aria-label="Select or deselect all statuses"
+                  class="px-2 py-0.5 text-[12px] rounded border border-slate-600 bg-slate-750 text-slate-200 hover:bg-slate-700 transition-colors cursor-pointer">All</button>
+        </div>
+        {# Status pills — KEPT VERBATIM (status-pill-cb / status-pill-label). Only
+           relocated here from the old always-open row. #}
+        <div class="flex flex-wrap items-center gap-1">
+          {% for s in pipeline_statuses + ('active', 'stale', 'expired') %}
+            <label class="flex items-center gap-1 cursor-pointer">
+              <input type="checkbox" name="status" value="{{ s }}" {% if s in active_statuses %}checked{% endif %} class="hidden status-pill-cb">
+              <span class="px-2 py-1 text-xs rounded border transition-colors cursor-pointer
+                           {% if s in active_statuses %}bg-indigo-600 border-indigo-500 text-white{% else %}bg-slate-700 border-slate-600 text-slate-300 hover:bg-slate-600{% endif %}
+                           status-pill-label">{{ s | replace('_', ' ') | title }}</span>
+            </label>
+          {% endfor %}
+        </div>
+      </div>
     </div>
 
-    <!-- Row 2: Remaining filters -->
-    <div class="flex flex-wrap items-center gap-2 w-full">
-
-      <!-- Location -->
-      <label for="filter-location" class="sr-only">Location</label>
-      <select name="location" id="filter-location"
-              class="appearance-auto bg-slate-700 text-slate-200 text-xs rounded px-2 py-1.5 border border-slate-600 focus:outline-none focus:border-indigo-500 max-w-[180px] truncate">
-        <option value="">All Locations</option>
-        {% for loc in locations %}
-          <option value="{{ loc }}" {% if filters.get('location') == loc %}selected{% endif %}>{{ loc }}</option>
-        {% endfor %}
-      </select>
-
-      <!-- Country (m066 primary_country_code) -->
-      <label for="filter-country" class="sr-only">Country</label>
-      <select name="country" id="filter-country"
-              class="appearance-auto bg-slate-700 text-slate-200 text-xs rounded px-2 py-1.5 border border-slate-600 focus:outline-none focus:border-indigo-500">
-        <option value="">All Countries</option>
-        {% for cc in countries %}
-          <option value="{{ cc }}" {% if filters.get('country') == cc %}selected{% endif %}>{{ cc }}</option>
-        {% endfor %}
-      </select>
-
-      <!-- Workplace type (m066 workplace_type) -->
-      <label for="filter-workplace-type" class="sr-only">Workplace type</label>
-      <select name="workplace_type" id="filter-workplace-type"
-              class="appearance-auto bg-slate-700 text-slate-200 text-xs rounded px-2 py-1.5 border border-slate-600 focus:outline-none focus:border-indigo-500">
-        <option value="">Any Workplace</option>
-        {% for wt in workplace_types %}
-          <option value="{{ wt }}" {% if filters.get('workplace_type') == wt %}selected{% endif %}>{{ wt | title }}</option>
-        {% endfor %}
-      </select>
-
-      <!-- Unresolved review filter (Phase 47.06) -->
-      <label for="filter-unresolved" class="sr-only">Review status</label>
-      <select name="unresolved" id="filter-unresolved"
-              title="Show rows flagged for manual review (non-empty unresolved_reasons or an unresolved location)"
-              class="appearance-auto bg-slate-700 text-slate-200 text-xs rounded px-2 py-1.5 border border-slate-600 focus:outline-none focus:border-indigo-500">
-        {% set _unresolved = filters.get('unresolved', 'hide') %}
-        <option value="hide" {% if _unresolved == 'hide' %}selected{% endif %}>Hide review-needed</option>
-        <option value="only" {% if _unresolved == 'only' %}selected{% endif %}>Review-needed only</option>
-        <option value="all" {% if _unresolved == 'all' %}selected{% endif %}>Show all</option>
-      </select>
-
-      <!-- Posted within dropdown -->
-      <label for="filter-posted-within" class="sr-only">Posted within</label>
+    <!-- TIER 1 · Posted within (highest-value filter — always visible) -->
+    <label class="inline-flex items-center gap-1.5 rounded-md border border-slate-600 bg-slate-800 pl-2.5 pr-1.5 py-1">
+      <svg class="w-4 h-4 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 7V3m8 4V3M3 11h18M5 5h14a2 2 0 012 2v12a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2z"/></svg>
+      <span class="text-[11px] uppercase tracking-wider text-slate-500">Posted</span>
+      {# Option VALUES kept exactly (today/3d/1w/1m) — they round-trip to the backend. #}
       <select name="posted_within" id="filter-posted-within"
-              class="appearance-auto bg-slate-700 text-slate-200 text-xs rounded px-2 py-1.5 border border-slate-600 focus:outline-none focus:border-indigo-500">
+              class="appearance-none bg-transparent text-slate-100 text-[13px] font-medium py-0.5 pl-1 pr-1 focus:outline-none cursor-pointer">
         <option value="">Any time</option>
         <option value="today" {% if filters.get('posted_within') == 'today' %}selected{% endif %}>Today</option>
         <option value="3d" {% if filters.get('posted_within') == '3d' %}selected{% endif %}>Last 3 days</option>
         <option value="1w" {% if filters.get('posted_within') == '1w' %}selected{% endif %}>Last week</option>
         <option value="1m" {% if filters.get('posted_within') == '1m' %}selected{% endif %}>Last month</option>
       </select>
+    </label>
 
-      <!-- Freshness toggle buttons -->
-      <button type="button" id="filter-biz-1"
-              class="px-2 py-1 text-xs rounded border border-slate-600 bg-slate-700 text-slate-200 hover:bg-slate-600 transition-colors cursor-pointer freshness-toggle"
-              onclick="toggleFreshness(this, 'biz1')">Last Biz Day</button>
-      <button type="button" id="filter-biz-3"
-              class="px-2 py-1 text-xs rounded border border-slate-600 bg-slate-700 text-slate-200 hover:bg-slate-600 transition-colors cursor-pointer freshness-toggle"
-              onclick="toggleFreshness(this, 'biz3')">Last 3 Biz Days</button>
-      <input type="hidden" name="freshness" id="filter-freshness" value="{{ filters.get('freshness', '') }}">
-
-      <!-- Sort -->
+    <!-- TIER 1 · Sort + direction (pushed to the right) -->
+    <div class="flex items-center gap-1.5 ml-auto">
+      <span class="text-[11px] uppercase tracking-wider text-slate-500 hidden sm:inline">Sort</span>
       <label for="filter-sort-by" class="sr-only">Sort by</label>
       <select name="sort_by" id="filter-sort-by"
-              class="appearance-auto bg-slate-700 text-slate-200 text-xs rounded px-2 py-1.5 border border-slate-600 focus:outline-none focus:border-indigo-500">
+              class="appearance-none rounded-md border border-slate-600 bg-slate-950 text-slate-200 text-[13px] py-1.5 pl-3 pr-7 focus:outline-none focus:border-indigo-500 cursor-pointer">
         <option value="score" {% if filters.get('sort_by', 'score') == 'score' %}selected{% endif %}>Score</option>
         <option value="first_seen" {% if filters.get('sort_by') == 'first_seen' %}selected{% endif %}>Date</option>
         <option value="salary_max" {% if filters.get('sort_by') == 'salary_max' %}selected{% endif %}>Salary</option>
         <option value="company" {% if filters.get('sort_by') == 'company' %}selected{% endif %}>Company</option>
       </select>
-
       <label for="filter-sort-dir" class="sr-only">Sort direction</label>
       <select name="sort_dir" id="filter-sort-dir"
-              class="appearance-auto bg-slate-700 text-slate-200 text-xs rounded px-2 py-1.5 border border-slate-600 focus:outline-none focus:border-indigo-500">
+              class="appearance-none rounded-md border border-slate-600 bg-slate-800 text-slate-300 text-[13px] py-1.5 pl-3 pr-7 focus:outline-none focus:border-indigo-500 cursor-pointer hover:text-slate-100">
         <option value="DESC" {% if filters.get('sort_dir', 'DESC') == 'DESC' %}selected{% endif %}>Desc</option>
         <option value="ASC" {% if filters.get('sort_dir') == 'ASC' %}selected{% endif %}>Asc</option>
       </select>
-
-      <!-- Hide stale (default ON) -->
-      <label class="flex items-center gap-2 text-xs text-slate-400 cursor-pointer">
-        <input type="checkbox" name="hide_stale" value="on"
-               {% if filters.get('hide_stale', 'on') == 'on' %}checked{% endif %}
-               hx-get="{{ url_for('jobs.table') }}" hx-trigger="change" hx-target="#job-table-body"
-           hx-include="[name='status'],[name='location'],[name='country'],[name='workplace_type'],[name='unresolved'],[name='posted_within'],[name='freshness'],[name='sort_by'],[name='sort_dir'],[name='hide_stale'],[name='show_hidden'],[name='date_from'],[name='date_to']"
-               class="w-3.5 h-3.5 accent-violet-500">
-        Hide stale
-        {% if stale_count > 0 %}
-          <span class="px-1 py-0.5 rounded text-xs bg-amber-900/50 text-amber-400 border border-amber-700/50 font-mono">{{ stale_count }}</span>
-        {% endif %}
-      </label>
-
-      <!-- Show hidden (dismissed/rejected/archived/withdrawn) -->
-      <label class="flex items-center gap-2 text-xs text-slate-400 cursor-pointer">
-        <input type="checkbox" name="show_hidden" value="on"
-               {% if filters.get('show_hidden') == 'on' %}checked{% endif %}
-               class="w-3.5 h-3.5 accent-violet-500">
-        Show hidden
-        {% if hidden_count > 0 %}
-          <span class="px-1 py-0.5 rounded text-xs bg-slate-700 text-slate-400 border border-slate-600 font-mono">{{ hidden_count }}</span>
-        {% endif %}
-      </label>
-
-      <!-- Date range filters -->
-      <input type="date" name="date_from" id="filter-date-from"
-             value="{{ filters.get('date_from', '') }}"
-             class="bg-slate-700 text-slate-200 text-xs rounded px-2 py-1.5 border border-slate-600 focus:outline-none focus:border-indigo-500"
-             placeholder="From">
-      <input type="date" name="date_to" id="filter-date-to"
-             value="{{ filters.get('date_to', '') }}"
-             class="bg-slate-700 text-slate-200 text-xs rounded px-2 py-1.5 border border-slate-600 focus:outline-none focus:border-indigo-500"
-             placeholder="To">
-
     </div>
 
+    <!-- TIER 1 · Filters disclosure → TIER 2 popover -->
+    <div class="relative" id="filters-dd">
+      <button type="button" onclick="toggleFiltersPopover(event)"
+              class="inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-[13px] font-medium transition-colors
+                     {% if adv_active_count %}border-indigo-500/40 bg-indigo-500/15 text-indigo-300{% else %}border-slate-600 bg-slate-800 text-slate-300 hover:text-slate-100{% endif %}">
+        <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h11M4 12h7M4 18h13M17 4v4M11 10v4M19 16v4"/></svg>
+        Filters
+        {% if adv_active_count %}<span class="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-indigo-600 text-white text-[11px] font-semibold tabular-nums">{{ adv_active_count }}</span>{% endif %}
+      </button>
+
+      <div id="filters-dd-menu" class="hidden absolute right-0 top-full mt-1.5 w-[min(94vw,640px)] rounded-lg border border-slate-700 bg-slate-800 shadow-[0_12px_32px_-8px_rgba(0,0,0,0.55)] p-4 z-40">
+        <div class="grid grid-cols-2 sm:grid-cols-3 gap-x-5 gap-y-4">
+
+          <!-- Location -->
+          <label class="flex flex-col gap-1.5">
+            <span class="text-[11px] uppercase tracking-wider text-slate-500">Location</span>
+            <select name="location" id="filter-location"
+                    class="appearance-none bg-slate-950 text-slate-200 text-[13px] rounded-md px-2.5 py-1.5 border border-slate-600 focus:outline-none focus:border-indigo-500 truncate">
+              <option value="">All Locations</option>
+              {% for loc in locations %}<option value="{{ loc }}" {% if filters.get('location') == loc %}selected{% endif %}>{{ loc }}</option>{% endfor %}
+            </select>
+          </label>
+
+          <!-- Country -->
+          <label class="flex flex-col gap-1.5">
+            <span class="text-[11px] uppercase tracking-wider text-slate-500">Country</span>
+            <select name="country" id="filter-country"
+                    class="appearance-none bg-slate-950 text-slate-200 text-[13px] rounded-md px-2.5 py-1.5 border border-slate-600 focus:outline-none focus:border-indigo-500">
+              <option value="">All Countries</option>
+              {% for cc in countries %}<option value="{{ cc }}" {% if filters.get('country') == cc %}selected{% endif %}>{{ cc }}</option>{% endfor %}
+            </select>
+          </label>
+
+          <!-- Workplace -->
+          <label class="flex flex-col gap-1.5">
+            <span class="text-[11px] uppercase tracking-wider text-slate-500">Workplace</span>
+            <select name="workplace_type" id="filter-workplace-type"
+                    class="appearance-none bg-slate-950 text-slate-200 text-[13px] rounded-md px-2.5 py-1.5 border border-slate-600 focus:outline-none focus:border-indigo-500">
+              <option value="">Any Workplace</option>
+              {% for wt in workplace_types %}<option value="{{ wt }}" {% if filters.get('workplace_type') == wt %}selected{% endif %}>{{ wt | title }}</option>{% endfor %}
+            </select>
+          </label>
+
+          <!-- Review-needed (unresolved) -->
+          <label class="flex flex-col gap-1.5">
+            <span class="text-[11px] uppercase tracking-wider text-slate-500">Review</span>
+            {% set _unresolved = filters.get('unresolved', 'hide') %}
+            <select name="unresolved" id="filter-unresolved"
+                    title="Show rows flagged for manual review"
+                    class="appearance-none bg-slate-950 text-slate-200 text-[13px] rounded-md px-2.5 py-1.5 border border-slate-600 focus:outline-none focus:border-indigo-500">
+              <option value="hide" {% if _unresolved == 'hide' %}selected{% endif %}>Hide review-needed</option>
+              <option value="only" {% if _unresolved == 'only' %}selected{% endif %}>Review-needed only</option>
+              <option value="all" {% if _unresolved == 'all' %}selected{% endif %}>Show all</option>
+            </select>
+          </label>
+
+          <!-- Custom date range -->
+          <label class="flex flex-col gap-1.5">
+            <span class="text-[11px] uppercase tracking-wider text-slate-500">From</span>
+            <input type="date" name="date_from" id="filter-date-from" value="{{ filters.get('date_from', '') }}"
+                   class="bg-slate-950 text-slate-200 text-[13px] rounded-md px-2.5 py-1.5 border border-slate-600 focus:outline-none focus:border-indigo-500 [color-scheme:dark]">
+          </label>
+          <label class="flex flex-col gap-1.5">
+            <span class="text-[11px] uppercase tracking-wider text-slate-500">To</span>
+            <input type="date" name="date_to" id="filter-date-to" value="{{ filters.get('date_to', '') }}"
+                   class="bg-slate-950 text-slate-200 text-[13px] rounded-md px-2.5 py-1.5 border border-slate-600 focus:outline-none focus:border-indigo-500 [color-scheme:dark]">
+          </label>
+        </div>
+
+        <div class="flex flex-wrap items-center gap-x-5 gap-y-3 mt-4 pt-4 border-t border-slate-700/60">
+          <!-- Biz-day freshness toggles — KEPT (alt recency filter; toggleFreshness JS). -->
+          <div class="flex items-center gap-2">
+            <button type="button" id="filter-biz-1" onclick="toggleFreshness(this, 'biz1')"
+                    class="px-2 py-1 text-xs rounded border border-slate-600 bg-slate-700 text-slate-200 hover:bg-slate-600 transition-colors cursor-pointer freshness-toggle">Last Biz Day</button>
+            <button type="button" id="filter-biz-3" onclick="toggleFreshness(this, 'biz3')"
+                    class="px-2 py-1 text-xs rounded border border-slate-600 bg-slate-700 text-slate-200 hover:bg-slate-600 transition-colors cursor-pointer freshness-toggle">Last 3 Biz Days</button>
+            <input type="hidden" name="freshness" id="filter-freshness" value="{{ filters.get('freshness', '') }}">
+          </div>
+
+          <!-- Hide stale (default ON) — KEEPS its own hx-get + hx-include. -->
+          <label class="flex items-center gap-2 text-[13px] text-slate-300 cursor-pointer">
+            <input type="checkbox" name="hide_stale" value="on" {% if filters.get('hide_stale', 'on') == 'on' %}checked{% endif %}
+                   hx-get="{{ url_for('jobs.table') }}" hx-trigger="change" hx-target="#job-table-body"
+                   hx-include="[name='status'],[name='location'],[name='country'],[name='workplace_type'],[name='unresolved'],[name='posted_within'],[name='freshness'],[name='sort_by'],[name='sort_dir'],[name='hide_stale'],[name='show_hidden'],[name='date_from'],[name='date_to']"
+                   class="w-4 h-4 rounded border-slate-600 bg-slate-950 accent-indigo-600">
+            Hide stale
+            {% if stale_count > 0 %}<span class="px-1 py-0.5 rounded text-[11px] bg-amber-900/50 text-amber-400 border border-amber-700/50 font-mono">{{ stale_count }}</span>{% endif %}
+          </label>
+
+          <!-- Show hidden -->
+          <label class="flex items-center gap-2 text-[13px] text-slate-300 cursor-pointer">
+            <input type="checkbox" name="show_hidden" value="on" {% if filters.get('show_hidden') == 'on' %}checked{% endif %}
+                   class="w-4 h-4 rounded border-slate-600 bg-slate-950 accent-indigo-600">
+            Show hidden
+            {% if hidden_count > 0 %}<span class="px-1 py-0.5 rounded text-[11px] bg-slate-700 text-slate-400 border border-slate-600 font-mono">{{ hidden_count }}</span>{% endif %}
+          </label>
+        </div>
+      </div>
+    </div>
   </form>
 
-  <!-- Job table -->
-  <div class="overflow-x-auto">
+  <!-- Job table — DESIGN DECISION #4: stays a dense <table>, wrapped + rounded. -->
+  <div class="overflow-x-auto rounded-xl border border-slate-700 bg-slate-800">
     <table class="text-xs text-left border-collapse w-full" style="table-layout: fixed;">
       <colgroup>
-        <col style="width: 7%;">
-        <col style="width: 24%;">
+        <col style="width: 8%;">
+        <col style="width: 26%;">
         <col style="width: 15%;">
         <col style="width: 13%;">
-        <col style="width: 13%;">
-        <col style="width: 12%;">
+        <col style="width: 11%;">
+        <col style="width: 11%;">
         <col style="width: 16%;">
       </colgroup>
       <thead>
-        <tr class="border-b border-slate-700 text-slate-400 uppercase tracking-wide">
-          <th class="px-2 py-2">Score</th>
-          <th class="px-2 py-2">Title</th>
-          <th class="px-2 py-2">Company</th>
-          <th class="px-2 py-2">Location</th>
-          <th class="px-2 py-2">Salary</th>
-          <th class="px-2 py-2">Posted</th>
-          <th class="px-2 py-2">Status</th>
+        {# DESIGN: header labels 11px uppercase tracking-wider slate-500. The
+           "what is 6–30?" legend now lives on this Score (i) tooltip instead of
+           re-explaining on every row. #}
+        <tr class="border-b border-slate-700 text-[11px] uppercase tracking-wider text-slate-500">
+          <th class="px-2 py-2.5 text-center">
+            <span class="relative inline-flex items-center gap-1 group">
+              Score
+              <svg class="w-3 h-3 text-slate-500 cursor-help" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 16v-4M12 8h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+              <span class="invisible group-hover:visible opacity-0 group-hover:opacity-100 transition-opacity duration-100
+                           absolute z-30 left-1/2 -translate-x-1/2 top-full mt-2 w-60 p-2.5 rounded-lg border border-slate-700 bg-slate-850
+                           shadow-[0_12px_32px_-8px_rgba(0,0,0,0.55)] text-[11px] normal-case tracking-normal text-slate-300 text-left pointer-events-none font-normal">
+                Fit score, 6 (poor) to 30 (excellent).
+                <span class="block mt-1 space-x-2 font-medium">
+                  <span class="text-emerald-400">&ge;24 strong</span>
+                  <span class="text-amber-400">17–23 moderate</span>
+                  <span class="text-red-400">&le;16 weak</span>
+                </span>
+              </span>
+            </span>
+          </th>
+          <th class="px-2 py-2.5">Title</th>
+          <th class="px-2 py-2.5">Company</th>
+          <th class="px-2 py-2.5">Location</th>
+          <th class="px-2 py-2.5">Salary</th>
+          <th class="px-2 py-2.5">Posted</th>
+          <th class="px-2 py-2.5">Status</th>
         </tr>
       </thead>
-      {# Live-refresh on jobs-updated (this tab's own status/dismiss actions)  #}
-      {# and on sse:jobs-changed (background ingestion / enrichment / scoring  #}
-      {# / staleness). The current filter is re-applied via hx-include, so new #}
-      {# and rescored rows appear in place. Note: an innerHTML swap collapses  #}
-      {# any open accordion row — acceptable given background events are       #}
-      {# infrequent; revisit with a "new jobs" banner if it proves intrusive.  #}
+      {# Live-refresh — UNCHANGED. innerHTML swap collapses any open accordion;
+         acceptable given background events are infrequent (see original note). #}
       <tbody id="job-table-body"
              hx-get="{{ url_for('jobs.table') }}"
              hx-trigger="jobs-updated from:body, sse:jobs-changed"
@@ -205,38 +292,26 @@
   </div>
 
   {% if archived_count > 0 %}
+  <!-- Archived section — UNCHANGED behavior (lazy-load on first expand). -->
   <div id="archived-section" class="mt-6">
     <button type="button" onclick="toggleArchived()"
-            aria-label="Toggle archived jobs section"
-            aria-expanded="false"
-            aria-controls="archived-body"
-            id="archived-toggle-btn"
+            aria-label="Toggle archived jobs section" aria-expanded="false" aria-controls="archived-body" id="archived-toggle-btn"
             class="w-full flex items-center gap-3 px-4 py-3 bg-slate-800/70 hover:bg-slate-800 border border-slate-700 rounded-lg transition-colors cursor-pointer">
       <span id="archived-arrow" class="text-slate-400 text-sm" style="display: inline-block; transition: transform 0.2s;">&#9654;</span>
       <span class="text-sm font-medium text-slate-300">Archived Jobs</span>
       <span id="archived-count" class="px-2 py-0.5 rounded text-xs bg-slate-600 text-slate-300">{{ archived_count }}</span>
     </button>
     <div id="archived-body" class="hidden mt-2">
-      <div class="overflow-x-auto">
+      <div class="overflow-x-auto rounded-xl border border-slate-700 bg-slate-800">
         <table class="text-xs text-left border-collapse w-full" style="table-layout: fixed;">
           <colgroup>
-            <col style="width: 5%;">
-            <col style="width: 25%;">
-            <col style="width: 16%;">
-            <col style="width: 14%;">
-            <col style="width: 13%;">
-            <col style="width: 12%;">
-            <col style="width: 15%;">
+            <col style="width: 8%;"><col style="width: 26%;"><col style="width: 15%;">
+            <col style="width: 13%;"><col style="width: 11%;"><col style="width: 11%;"><col style="width: 16%;">
           </colgroup>
           <thead>
-            <tr class="border-b border-slate-700 text-slate-400 uppercase tracking-wide">
-              <th class="px-1 py-2">Score</th>
-              <th class="px-2 py-2">Title</th>
-              <th class="px-2 py-2">Company</th>
-              <th class="px-2 py-2">Location</th>
-              <th class="px-1 py-2">Salary</th>
-              <th class="px-2 py-2">Posted</th>
-              <th class="px-1 py-2">Status</th>
+            <tr class="border-b border-slate-700 text-[11px] uppercase tracking-wider text-slate-500">
+              <th class="px-2 py-2.5 text-center">Score</th><th class="px-2 py-2.5">Title</th><th class="px-2 py-2.5">Company</th>
+              <th class="px-2 py-2.5">Location</th><th class="px-2 py-2.5">Salary</th><th class="px-2 py-2.5">Posted</th><th class="px-2 py-2.5">Status</th>
             </tr>
           </thead>
           <tbody id="archived-table-body">
@@ -255,11 +330,57 @@
 {% endblock %}
 
 {% block extra_scripts %}
+<style>
+  /* Compact-row chevron rotates when its row is expanded (data-expanded flips in
+     the row onclick). */
+  tr[data-expanded="true"] .jc-row-chevron { transform: rotate(90deg); }
+  /* Hide the native <details> disclosure triangle on the overflow menu. */
+  details.jc-menu > summary { list-style: none; }
+  details.jc-menu > summary::-webkit-details-marker { display: none; }
+</style>
 <script>
-/**
- * Toggle visual state of status pills when clicked (checked ↔ unchecked).
- * Wires up all status pill checkboxes to update their label's visual state.
- */
+/* ====================================================================
+   ADDED FOR THE REDESIGN — two popover toggles (status + filters).
+   Vanilla, matching the repo's existing inline-handler style. Outside-click
+   closes; opening one closes the other.
+   ==================================================================== */
+function _closeAllPopovers(except) {
+  ['status-dd-menu', 'filters-dd-menu'].forEach(function(id) {
+    if (id !== except) { var el = document.getElementById(id); if (el) el.classList.add('hidden'); }
+  });
+}
+function toggleStatusDropdown(e) {
+  e.stopPropagation();
+  var m = document.getElementById('status-dd-menu');
+  var willOpen = m.classList.contains('hidden');
+  _closeAllPopovers('status-dd-menu');
+  m.classList.toggle('hidden', !willOpen);
+}
+function toggleFiltersPopover(e) {
+  e.stopPropagation();
+  var m = document.getElementById('filters-dd-menu');
+  var willOpen = m.classList.contains('hidden');
+  _closeAllPopovers('filters-dd-menu');
+  m.classList.toggle('hidden', !willOpen);
+}
+document.addEventListener('click', function(e) {
+  if (!e.target.closest('#status-dd') && !e.target.closest('#filters-dd')) _closeAllPopovers(null);
+});
+// Keep the Status dropdown's button label in sync as pills are toggled.
+document.addEventListener('DOMContentLoaded', function() {
+  var lbl = document.getElementById('status-dd-label');
+  function syncStatusLabel() {
+    var n = document.querySelectorAll('.status-pill-cb:checked').length;
+    if (lbl) lbl.textContent = n ? (n + ' selected') : 'All statuses';
+  }
+  document.querySelectorAll('.status-pill-cb').forEach(function(cb) { cb.addEventListener('change', syncStatusLabel); });
+});
+
+/* ====================================================================
+   BELOW: carried over UNCHANGED from the original jobs/index.html.
+   ==================================================================== */
+
+/* Toggle visual state of status pills when clicked (checked ↔ unchecked). */
 document.addEventListener('DOMContentLoaded', function() {
   document.querySelectorAll('.status-pill-cb').forEach(function(cb) {
     cb.addEventListener('change', function() {
@@ -275,31 +396,19 @@ document.addEventListener('DOMContentLoaded', function() {
   });
 });
 
-/**
- * "All" button: check all status pills if any are unchecked, otherwise uncheck all.
- * After toggling, manually trigger the HTMX form submit.
- */
+/* "All" button: check all status pills if any unchecked, else uncheck all. */
 function toggleAllStatus(btn) {
   var checkboxes = document.querySelectorAll('.status-pill-cb');
   var allChecked = Array.from(checkboxes).every(function(cb) { return cb.checked; });
-
   checkboxes.forEach(function(cb) {
     var wasChecked = cb.checked;
     cb.checked = !allChecked;
-    // Fire change event to update visual state if state actually changed
-    if (wasChecked !== cb.checked) {
-      cb.dispatchEvent(new Event('change'));
-    }
+    if (wasChecked !== cb.checked) { cb.dispatchEvent(new Event('change')); }
   });
-
-  // Trigger HTMX request with updated filter state
   htmx.trigger(document.getElementById('filter-form'), 'change');
 }
 
-/**
- * Fade out and remove both compact and expanded rows after archiving a job.
- * Called via hx-on::after-request on the archive button in _row_expanded.html.
- */
+/* Fade out + remove both compact and expanded rows after archiving. */
 function archiveRow(el) {
   var expandedRow = el.closest('tr');
   if (!expandedRow) return;
@@ -312,21 +421,17 @@ function archiveRow(el) {
   }, 800);
 }
 
-/**
- * Toggle collapsible archived jobs section with lazy-load on first expand.
- */
+/* Toggle collapsible archived jobs section with lazy-load on first expand. */
 function toggleArchived() {
   var body = document.getElementById('archived-body');
   var arrow = document.getElementById('archived-arrow');
   var btn = document.getElementById('archived-toggle-btn');
   if (!body || !arrow) return;
-
   var isHidden = body.classList.contains('hidden');
   if (isHidden) {
     body.classList.remove('hidden');
     arrow.style.transform = 'rotate(90deg)';
     if (btn) btn.setAttribute('aria-expanded', 'true');
-    // Lazy-load: only fetch on first expand
     if (!body.dataset.loaded) {
       htmx.ajax('GET', '{{ url_for("jobs.archived_table") }}', {target: '#archived-table-body', swap: 'innerHTML'});
       body.dataset.loaded = 'true';
@@ -338,122 +443,66 @@ function toggleArchived() {
   }
 }
 
-/**
- * Client-side re-sort after OOB score cell swap.
- *
- * When a rescore/paste-jd response updates a score cell via OOB swap,
- * the row stays in its original DOM position. This listener detects
- * the OOB swap and re-sorts rows if currently sorting by score.
- *
- * Rows in the tbody come in pairs: compact <tr> + expand-slot/expanded <tr>.
- * Both must move together to preserve the accordion structure.
- */
+/* Client-side re-sort after OOB score cell swap (rescore / paste-jd).
+   Reads td[data-sort-score]; moves compact+slot row pairs together. UNCHANGED. */
 (function() {
   var tbody = document.getElementById('job-table-body');
   if (!tbody) return;
-
-  function getActiveSortColumn() {
-    var sel = document.querySelector('#filter-form select[name="sort_by"]');
-    return sel ? sel.value : 'score';
-  }
-
-  function getActiveSortDir() {
-    var sel = document.querySelector('#filter-form select[name="sort_dir"]');
-    return sel ? sel.value : 'DESC';
-  }
-
-  function getScoreFromTd(td) {
-    var val = td ? td.getAttribute('data-sort-score') : '';
-    return val !== '' && val !== null ? parseInt(val, 10) : -1;
-  }
-
+  function getActiveSortColumn() { var sel = document.querySelector('#filter-form select[name="sort_by"]'); return sel ? sel.value : 'score'; }
+  function getActiveSortDir() { var sel = document.querySelector('#filter-form select[name="sort_dir"]'); return sel ? sel.value : 'DESC'; }
+  function getScoreFromTd(td) { var val = td ? td.getAttribute('data-sort-score') : ''; return val !== '' && val !== null ? parseInt(val, 10) : -1; }
   function resortByScore() {
-    // Only re-sort when sorting by score
     if (getActiveSortColumn() !== 'score') return;
-
     var isDesc = getActiveSortDir() === 'DESC';
-
-    // Collect row pairs: [compactTr, slotTr, score]
     var pairs = [];
     var rows = Array.from(tbody.children);
     for (var i = 0; i < rows.length; i++) {
       var row = rows[i];
-      // Compact rows have data-expand-url; expanded/slot rows do not
       if (row.hasAttribute('data-expand-url')) {
         var scoreTd = row.querySelector('td[data-sort-score]');
         var score = getScoreFromTd(scoreTd);
         var nextRow = rows[i + 1] || null;
         pairs.push({ compact: row, slot: nextRow, score: score });
-        i++; // skip the slot/expanded row
+        i++;
       }
     }
-
-    // Sort pairs by score
-    pairs.sort(function(a, b) {
-      if (isDesc) return b.score - a.score;
-      return a.score - b.score;
-    });
-
-    // Re-insert in sorted order (DocumentFragment avoids repeated reflows)
+    pairs.sort(function(a, b) { return isDesc ? b.score - a.score : a.score - b.score; });
     var frag = document.createDocumentFragment();
-    for (var j = 0; j < pairs.length; j++) {
-      frag.appendChild(pairs[j].compact);
-      if (pairs[j].slot) frag.appendChild(pairs[j].slot);
-    }
+    for (var j = 0; j < pairs.length; j++) { frag.appendChild(pairs[j].compact); if (pairs[j].slot) frag.appendChild(pairs[j].slot); }
     tbody.appendChild(frag);
   }
-
-  // Listen for htmx:afterSettle to detect OOB score cell swaps.
-  // This fires after the main swap AND OOB swaps have settled.
   document.body.addEventListener('htmx:afterSettle', function(evt) {
-    // Check if this settle involved an OOB score cell update.
-    // The OOB swap targets a <td id="score-..."> inside the tbody.
-    // We detect this by checking if the settled element is inside a rescore/paste-jd response.
     var detail = evt.detail;
     if (!detail || !detail.xhr) return;
     var url = detail.pathInfo ? detail.pathInfo.requestPath : '';
-    if (url.indexOf('/rescore') !== -1 || url.indexOf('/paste-jd') !== -1) {
-      // Small delay to ensure OOB swap has fully settled
-      setTimeout(resortByScore, 50);
-    }
+    if (url.indexOf('/rescore') !== -1 || url.indexOf('/paste-jd') !== -1) { setTimeout(resortByScore, 50); }
   });
 })();
 
-/* --- Freshness toggle buttons --- */
+/* Freshness toggle buttons — UNCHANGED. */
 function toggleFreshness(btn, value) {
   var hidden = document.getElementById('filter-freshness');
   var allToggles = document.querySelectorAll('.freshness-toggle');
   if (hidden.value === value) {
     hidden.value = '';
-    allToggles.forEach(function(b) {
-      b.classList.remove('bg-indigo-600', 'border-indigo-500', 'text-white');
-      b.classList.add('bg-slate-700', 'border-slate-600', 'text-slate-200');
-    });
+    allToggles.forEach(function(b) { b.classList.remove('bg-indigo-600', 'border-indigo-500', 'text-white'); b.classList.add('bg-slate-700', 'border-slate-600', 'text-slate-200'); });
   } else {
     hidden.value = value;
-    allToggles.forEach(function(b) {
-      b.classList.remove('bg-indigo-600', 'border-indigo-500', 'text-white');
-      b.classList.add('bg-slate-700', 'border-slate-600', 'text-slate-200');
-    });
+    allToggles.forEach(function(b) { b.classList.remove('bg-indigo-600', 'border-indigo-500', 'text-white'); b.classList.add('bg-slate-700', 'border-slate-600', 'text-slate-200'); });
     btn.classList.remove('bg-slate-700', 'border-slate-600', 'text-slate-200');
     btn.classList.add('bg-indigo-600', 'border-indigo-500', 'text-white');
   }
   document.getElementById('filter-posted-within').value = '';
   htmx.trigger(document.getElementById('filter-form'), 'change');
 }
-
 document.getElementById('filter-posted-within').addEventListener('change', function() {
   document.getElementById('filter-freshness').value = '';
-  document.querySelectorAll('.freshness-toggle').forEach(function(b) {
-    b.classList.remove('bg-indigo-600', 'border-indigo-500', 'text-white');
-    b.classList.add('bg-slate-700', 'border-slate-600', 'text-slate-200');
-  });
+  document.querySelectorAll('.freshness-toggle').forEach(function(b) { b.classList.remove('bg-indigo-600', 'border-indigo-500', 'text-white'); b.classList.add('bg-slate-700', 'border-slate-600', 'text-slate-200'); });
 });
 
-/* --- Filter persistence in localStorage --- */
+/* Filter persistence in localStorage — UNCHANGED. */
 var FILTER_STORAGE_KEY = 'jc-job-filters';
 var PERSISTED_FILTERS = ['hide_stale', 'show_hidden', 'sort_by', 'sort_dir', 'posted_within'];
-
 function saveFilters() {
   var form = document.getElementById('filter-form');
   var state = {};
@@ -464,7 +513,6 @@ function saveFilters() {
   });
   localStorage.setItem(FILTER_STORAGE_KEY, JSON.stringify(state));
 }
-
 function restoreFilters() {
   var raw = localStorage.getItem(FILTER_STORAGE_KEY);
   if (!raw) return;
@@ -479,22 +527,13 @@ function restoreFilters() {
       else { el.value = state[name]; }
       if (!firstRestored) firstRestored = el;
     });
-    // Fire change on a restored element (not the form) so the form's
-    // `change from:select, change from:input` hx-trigger picks it up.
-    // Dispatching on the form directly does not match the `from:` filter.
     if (firstRestored) htmx.trigger(firstRestored, 'change');
   } catch (e) { /* ignore corrupt storage */ }
 }
-
 document.getElementById('filter-form').addEventListener('change', saveFilters);
 document.addEventListener('DOMContentLoaded', restoreFilters);
 
-// Smooth-scroll back to a compact row when its expanded view collapses.
-// The collapse route emits HX-Trigger-After-Settle: {"job-collapsed":
-// {"dedup_key": "..."}}; this listener finds the compact row by its
-// data-dedup-key attribute and scrolls it into view. Works uniformly
-// for both collapse paths (clicking the compact row to toggle, OR
-// clicking the bottom Collapse button inside the expanded row).
+/* Smooth-scroll back to the compact row when its expanded view collapses. UNCHANGED. */
 document.body.addEventListener('job-collapsed', function (evt) {
   var key = evt.detail && evt.detail.dedup_key;
   if (!key) return;

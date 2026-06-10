@@ -1,56 +1,87 @@
-{# Score cell partial. Renders the score column as a colored composite number
-   plus a Tailwind hover-tooltip showing sub-scores + top strength + top gap.
+{# ===========================================================================
+   jobs/_score_cell.html  —  REDESIGN: fit-score "grade chip"
+   ===========================================================================
 
-   Variables expected in scope:
-     job              — job object with sub_scores_json, fit_analysis,
-                        dedup_key, first_seen (classification still on the row
-                        for back-compat but no longer drives the display)
-   Optional:
-     oob              — when truthy, adds hx-swap-oob="outerHTML"
-     freshness_cutoff — ISO date string; jobs with first_seen >= this get a star
+   PORT NOTE (load-bearing — DO NOT change these, the client-side re-sort in
+   jobs/index.html depends on them exactly):
+     • <td id="score-{{ job.dedup_key | urlencode }}">  — OOB-swap target id.
+     • data-sort-score="{{ sort_score }}"                — read by resortByScore().
+     • {% if oob %}hx-swap-oob="outerHTML"{% endif %}     — the rescore / paste-jd
+       OOB hook. This partial is returned standalone by those routes with oob=true.
+     • The composite value + its scale are UNCHANGED: still the 6–30 integer sum
+       of the six sub-scores, still from components/_score_macros.html.
 
-   Color and sort key are driven purely by the composite (sum of the 6
-   sub-scores, range 6-30). Classification is preserved in the DB but not
-   displayed — see job_finder.db._classification_score_order for the legacy
-   bucketed sort, still reachable via sort_by='classification'.
+   DESIGN DECISION #3 — "score stays 6–30 + tooltip, restyle only":
+     The number was a bare colored digit; it now reads as a 44×44 colour-banded
+     grade CHIP (the primary visual anchor of every row, per the redesign). We did
+     NOT convert to a percentage and did NOT change the 6–30 scale. The per-row
+     hover tooltip (sub-scores + top strength + top gap) is KEPT, only restyled.
+     The "what does 6–30 mean" legend moved to an (i) tooltip on the column header
+     in jobs/index.html (so every row no longer has to re-explain the scale).
+
+   ⚑ DECISION + FLAG — band thresholds (porter must reconcile, see PORT-MANIFEST):
+     The chip uses the APPROVED DESIGN's 3-band split:
+         composite >= 24            -> strong   (emerald)
+         composite 17–23            -> moderate (amber)
+         composite <= 16            -> weak     (red)
+     This is COARSER than components/_score_macros.html `bucket()` (4 buckets:
+     >=24 great / >=18 good / >=12 ok / >0 poor). We did NOT edit _score_macros.html.
+     We still call sm.composite() for the NUMBER (single source of truth); only the
+     CHIP COLOUR uses the 3-band map below. Porter: decide (a) keep this local
+     3-band for the chip, or (b) add a parallel `chip_band()` macro to
+     _score_macros.html and import it here. Until then the number and the chip
+     colour are sourced from two different threshold sets — intentional, flagged.
 #}
 
 {% set sub_scores = job.sub_scores_json | from_json if job.sub_scores_json else {} %}
 {% set fit = job.fit_analysis | from_json if job.fit_analysis else {} %}
 {% set is_fresh = job.first_seen is not none and freshness_cutoff is defined and job.first_seen >= freshness_cutoff %}
 
-{# Composite (sum of 6 sub-scores, 6-30) and its color come from the shared fit
-   macro — the single source of truth so the job board, pipeline card, and detail
-   page can't diverge on the number or the thresholds (≥24/≥18/≥12, >0 red). #}
+{# Composite + scored flag — unchanged source of truth. #}
 {% import "components/_score_macros.html" as sm %}
 {% set composite = sm.composite(job.sub_scores_json) | int %}
-{% set color_class = sm.text_class(composite) %}
-
 {% set sort_score = composite %}
 {% set scored = job.sub_scores_json is not none and job.sub_scores_json != '' %}
 
-{# Tooltip text fragments. Truncate strength/gap at 120 chars (spec). #}
+{# Local 3-band map (see ⚑FLAG above). Class strings are written out literally so
+   the Tailwind browser build's DOM scanner emits them; a COMPILED build must
+   safelist these six utilities (same caveat the old colored digit already had). #}
+{% set band = 'success' if composite >= 24 else ('warning' if composite >= 17 else 'error') %}
+{% set chip_text = {'success':'text-emerald-400','warning':'text-amber-400','error':'text-red-400'}[band] %}
+{% set chip_bg   = {'success':'bg-emerald-400/15','warning':'bg-amber-400/15','error':'bg-red-400/15'}[band] %}
+{% set chip_bd   = {'success':'border-emerald-400/40','warning':'border-amber-400/40','error':'border-red-400/40'}[band] %}
+
+{# Tooltip fragments — KEPT from the original cell, truncate at 120 chars. #}
 {% set strengths = fit.get('strengths', []) if fit else [] %}
 {% set gaps = fit.get('gaps', []) if fit else [] %}
 {% set top_strength = strengths[0] if strengths else '' %}
 {% set top_gap = gaps[0] if gaps else '' %}
-{% if top_strength and top_strength | length > 120 %}
-  {% set top_strength = top_strength[:120] ~ '…' %}
-{% endif %}
-{% if top_gap and top_gap | length > 120 %}
-  {% set top_gap = top_gap[:120] ~ '…' %}
-{% endif %}
+{% if top_strength and top_strength | length > 120 %}{% set top_strength = top_strength[:120] ~ '…' %}{% endif %}
+{% if top_gap and top_gap | length > 120 %}{% set top_gap = top_gap[:120] ~ '…' %}{% endif %}
 
+{# DESIGN DECISION: score column is CENTER-aligned now (chip is a centered block),
+   was text-right. `relative group` retained — it scopes the hover tooltip. #}
 <td id="score-{{ job.dedup_key | urlencode }}"
-    class="px-1 py-1.5 whitespace-nowrap text-right relative group"
+    class="px-1 py-2 whitespace-nowrap text-center relative group"
     data-sort-score="{{ sort_score }}"
     {% if oob is defined and oob %}hx-swap-oob="outerHTML"{% endif %}>
   {% if scored %}
-    <span class="font-semibold {{ color_class }} cursor-help">{{ composite }}</span>{% if is_fresh %}<span class="text-amber-400 text-xs ml-0.5" title="Surfaced in last 3 days">*</span>{% endif %}
-    {# Tooltip: hidden by default, revealed on parent <td>.group hover. #}
+    {# The grade chip. cursor-help signals the hover tooltip. #}
+    <div class="relative grid place-items-center w-11 h-11 rounded-md border {{ chip_bg }} {{ chip_bd }} mx-auto cursor-help">
+      <span class="text-xl font-bold leading-none tabular-nums {{ chip_text }}">{{ composite }}</span>
+      {# Freshness star KEPT (surfaced in last 3 days) — moved onto the chip as a
+         small corner dot so it no longer competes with the digit. #}
+      {% if is_fresh %}
+      <span class="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-amber-400 ring-2 ring-slate-800"
+            title="Surfaced in last 3 days"></span>
+      {% endif %}
+    </div>
+
+    {# Per-row hover tooltip — KEPT (sub-scores + top strength/gap), restyled to
+       the redesign surface (slate-850 panel, soft border, deeper shadow). #}
     <div class="invisible group-hover:visible opacity-0 group-hover:opacity-100 transition-opacity duration-100
                 absolute z-30 left-full ml-2 top-1/2 -translate-y-1/2
-                w-64 p-2.5 rounded border border-slate-700 bg-slate-900 shadow-lg
+                w-64 p-3 rounded-lg border border-slate-700 bg-slate-850 shadow-[0_12px_32px_-8px_rgba(0,0,0,0.55)]
                 text-xs text-slate-200 text-left whitespace-normal pointer-events-none">
       <div class="grid grid-cols-[1fr_auto] gap-x-3 gap-y-0.5 font-mono">
         <span class="text-slate-400">Title</span><span class="text-slate-100 text-right tabular-nums">{{ sub_scores.get('title_fit', 0) }}</span>
@@ -61,13 +92,18 @@
         <span class="text-slate-400">Skills</span><span class="text-slate-100 text-right tabular-nums">{{ sub_scores.get('skills_match', 0) }}</span>
       </div>
       {% if top_strength %}
-        <div class="mt-2 pt-2 border-t border-slate-700"><span class="text-green-400 font-semibold">Strength:</span> {{ top_strength }}</div>
+        <div class="mt-2 pt-2 border-t border-slate-700"><span class="text-emerald-400 font-semibold">Strength:</span> {{ top_strength }}</div>
       {% endif %}
       {% if top_gap %}
         <div class="mt-1"><span class="text-red-400 font-semibold">Gap:</span> {{ top_gap }}</div>
       {% endif %}
     </div>
   {% else %}
-    <span class="{{ color_class }}">&mdash;</span>
+    {# DESIGN DECISION: unscored renders an empty, neutral chip outline (keeps the
+       column rhythm / row height constant) instead of a bare em-dash. #}
+    <div class="grid place-items-center w-11 h-11 rounded-md border border-slate-700 bg-slate-800/40 mx-auto"
+         title="Not scored yet">
+      <span class="text-slate-600 text-lg leading-none">&mdash;</span>
+    </div>
   {% endif %}
 </td>

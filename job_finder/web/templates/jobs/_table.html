@@ -1,13 +1,27 @@
-{# HTMX partial: table body rows. Rendered for both full page and /jobs/table partial. #}
+{# ===========================================================================
+   jobs/_table.html  —  table-body rows partial
+   ===========================================================================
+   Returned by GET /jobs/table (the filter/sort/live-refresh target) AND included
+   by the full page. STRUCTURE IS UNCHANGED from the original — only the empty
+   state copy/styling is touched.
+
+   PORT NOTE (load-bearing): the hidden placeholder <tr data-expand-slot="..."> that
+   trails every compact row is the slot the expand swap replaces and the collapse
+   response restores. Keep it. colspan is 7 (Score, Title, Company, Location,
+   Salary, Posted, Status).
+#}
 {% if jobs %}
   {% for job in jobs %}
     {% include "jobs/_row.html" %}
     <tr data-expand-slot="{{ job.dedup_key | urlencode }}" class="hidden"><td></td></tr>
   {% endfor %}
 {% else %}
+  {# DESIGN DECISION: empty state given a little more breathing room + a muted
+     two-line read instead of a single terse line. No behavior change. #}
   <tr>
-    <td colspan="7" class="px-4 py-8 text-center text-slate-500 text-sm">
-      No jobs match the current filters.
+    <td colspan="7" class="px-4 py-16 text-center">
+      <p class="text-sm text-slate-400">No jobs match the current filters.</p>
+      <p class="text-[13px] text-slate-500 mt-1">Loosen the status, date, or advanced filters to see more.</p>
     </td>
   </tr>
 {% endif %}

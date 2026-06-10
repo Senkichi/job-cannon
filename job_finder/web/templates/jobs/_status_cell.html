@@ -1,12 +1,33 @@
-{# Inline status dropdown. hx-post to /jobs/<key>/status on change. #}
-{# This fragment is also returned by POST /jobs/<key>/status for HTMX swap. #}
+{# ===========================================================================
+   jobs/_status_cell.html  —  inline pipeline-status <select>
+   ===========================================================================
+
+   PORT NOTE (load-bearing — keep EXACTLY, this fragment is BOTH the in-row
+   control AND the response POST /jobs/<key>/status returns for the OOB-style
+   self-swap):
+     • name="pipeline_status"
+     • hx-post="{{ url_for('jobs.update_status', dedup_key=job.dedup_key) }}"
+     • hx-trigger="change"  hx-target="this"  hx-swap="outerHTML"
+     • hx-on:click="event.stopPropagation()"  — REQUIRED: without it, clicking
+       the select bubbles to the compact row's onclick and toggles the accordion.
+     • Options still come from `pipeline_statuses`, value = the raw enum, label =
+       `s | replace('_',' ') | title`.
+
+   DESIGN DECISION: restyle only — the control now sits on the inset field colour
+   (slate-950) with a slate-600 border + indigo focus ring, matching every other
+   <select> in the redesign. Native appearance kept (appearance-auto) so the OS
+   draws the caret; no JS dropdown introduced. Width contract unchanged
+   (w-full min-w-[7rem]) so the Status column and the decision-rail both fit it.
+#}
 <select name="pipeline_status"
         hx-post="{{ url_for('jobs.update_status', dedup_key=job.dedup_key) }}"
         hx-trigger="change"
         hx-target="this"
         hx-swap="outerHTML"
         hx-on:click="event.stopPropagation()"
-        class="appearance-auto bg-slate-700 text-slate-200 text-xs rounded px-2 py-1 border border-slate-500 ring-1 ring-slate-600 focus:outline-none focus:border-indigo-500 cursor-pointer w-full min-w-[7rem]">
+        class="appearance-auto w-full min-w-[7rem] rounded-md border border-slate-600 bg-slate-950 text-slate-200
+               text-xs font-medium px-2.5 py-1.5 cursor-pointer
+               focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20">
   {% for s in pipeline_statuses %}
     <option value="{{ s }}" {% if job.pipeline_status == s %}selected{% endif %}>
       {{ s | replace('_', ' ') | title }}

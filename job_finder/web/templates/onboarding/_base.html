@@ -32,7 +32,7 @@
       <div class="mb-6">
         <p class="text-sm text-slate-400">Step {{ step_num }} of {{ step_total }} &bull; {{ step_label }}</p>
         <div class="mt-2 h-1 bg-slate-700 rounded overflow-hidden">
-          <div class="h-1 bg-blue-500" style="width: {{ (step_num * 100 / step_total) | round(0, 'floor') }}%"></div>
+          <div class="h-1 bg-indigo-500" style="width: {{ (step_num * 100 / step_total) | round(0, 'floor') }}%"></div>
         </div>
       </div>
     {% endif %}
