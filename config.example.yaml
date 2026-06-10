@@ -120,7 +120,9 @@ sources:
     #   2.  Site: SERP queries via DataForSEO for remaining portals — cheap, batched.
     # SerpAPI/Thordata are NOT used for portal_search (too expensive for site: queries).
     # If DataForSEO is not enabled, only Tier 1 portals are searched.
-    enabled: false
+    # Default true: the onboarding wizard enables this by default so fresh installs
+    # get RemoteOK/Remotive/Himalayas results on the first sync without any credentials.
+    enabled: true
     keywords:
       - Staff Engineer
       - ML Platform

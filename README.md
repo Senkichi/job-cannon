@@ -216,9 +216,9 @@ uv sync --extra dev --extra eval
 uv run job-cannon
 ```
 
-Open http://localhost:5000 (the app auto-opens it for you). On first launch the **onboarding wizard** auto-detects AI providers, helps you connect Gmail via IMAP app-password, and writes secrets to your OS keyring — no manual config editing required.
+Open http://localhost:5000 (the app auto-opens it for you). On first launch the **onboarding wizard** auto-detects AI providers, enables free job portals (RemoteOK / Remotive / Himalayas — no credentials, jobs arrive on the first sync), helps you connect Gmail via IMAP app-password, and writes secrets to your OS keyring — no manual config editing required.
 
-**Works with zero API keys via Ollama.** Prefer to edit YAML directly? Copy the templates instead and skip the wizard:
+**Works with zero API keys.** Free portals (RemoteOK, Remotive, Himalayas) are enabled by default so the first ingest returns real results even before you set up Gmail alerts. Add Ollama for $0 local AI scoring, or the wizard auto-detects Gemini CLI and Claude Code CLI as free-cloud fallbacks. Prefer to edit YAML directly? Copy the templates instead and skip the wizard:
 
 ```bash
 cp config.example.yaml config.yaml

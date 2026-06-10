@@ -96,6 +96,12 @@ The cascade audit harness lives at `evals/cascade_audit/` if you want to compare
 
 ## 4. Job Sources
 
+### Free portals — no credentials needed
+
+Three job boards (RemoteOK, Remotive, Himalayas) are queried using your target job titles as keywords. They return full job descriptions, so jobs are **AI-scored on the same sync they arrive** — unlike email-based sources which require a separate enrichment pass to fill the job description.
+
+The wizard enables this by default (`sources.portal_search.enabled: true`). To disable: uncheck the "Free job portals" toggle on the wizard's IMAP step, or set `sources.portal_search.enabled: false` in `config.yaml` after setup.
+
 ### Gmail via IMAP (default — no OAuth)
 
 Wizard step 5 ("Connect Gmail") walks you through the Google App Password setup with two in-page links (to [2-Step Verification](https://myaccount.google.com/security) and [App Passwords](https://myaccount.google.com/apppasswords)) plus a 4-step list for the Google UI. For most users that's all you need; come back here only if you want the manual path.
