@@ -88,7 +88,37 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Force terminal mode (no system tray). Default is tray mode. "
         "Equivalent to setting JOB_CANNON_NO_TRAY=1.",
     )
+    parser.add_argument(
+        "--print-example-config",
+        action="store_true",
+        help="Print the bundled example config to stdout and exit. "
+        "Redirect to a file to bootstrap: job-cannon --print-example-config > config.yaml",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=None,
+        metavar="PORT",
+        help="Port to listen on. Overrides config.yaml > server.port and "
+        "the JOB_CANNON_PORT env var (precedence: --port > JOB_CANNON_PORT > config > default 5000).",
+    )
     return parser
+
+
+def _print_example_config() -> None:
+    """Print the bundled config.example.yaml to stdout and exit 0.
+
+    The file is shipped inside the wheel under job_finder/assets/ so that
+    pipx users who have no repo checkout can still bootstrap a config.yaml.
+    """
+    import importlib.resources
+
+    # importlib.resources.files() is the modern (3.9+) traversal API; it works
+    # for both editable installs and installed wheels without __file__ tricks.
+    pkg_assets = importlib.resources.files("job_finder.assets")
+    example = pkg_assets.joinpath("config.example.yaml")
+    print(example.read_text(encoding="utf-8"), end="")
+    sys.exit(0)
 
 
 def _get_version() -> str:
@@ -464,19 +494,56 @@ def main() -> None:
     # `pipx install job-cannon && job-cannon --help` work without config.yaml.
     args = _build_parser().parse_args()
 
+    # SHORT-CIRCUIT: --print-example-config also needs no config or Flask.
+    if args.print_example_config:
+        _print_example_config()  # prints + sys.exit(0)
+
     # Lazy imports so a --help invocation doesn't pay the Flask import cost.
     from job_finder.config import (
         DEFAULT_SERVER_DEBUG,
         DEFAULT_SERVER_HOST,
         DEFAULT_SERVER_PORT,
+        ConfigError,
         load_config,
     )
     from job_finder.web.user_data_dirs import user_data_root
 
-    cfg = load_config(allow_missing=True)
+    try:
+        cfg = load_config(allow_missing=True)
+    except (ConfigError, ValueError) as exc:
+        # Partial or malformed config — print a friendly, actionable message
+        # instead of a raw traceback.  The docstring at config.py:259-262
+        # promises this: "the onboarding wizard handles ConfigError by routing
+        # to the migration UI" — that path is load_config(allow_missing=True)
+        # returning {}; if validation raises we land here instead.
+        print(
+            f"job-cannon: config error\n\n"
+            f"  {exc}\n\n"
+            f"To see the full expected structure, run:\n"
+            f"  job-cannon --print-example-config\n",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
     server = cfg.get("server", {})
     bind_host = server.get("host", DEFAULT_SERVER_HOST)
-    port = server.get("port", DEFAULT_SERVER_PORT)
+
+    # Port resolution — precedence: --port CLI > JOB_CANNON_PORT env > config > default
+    _port_env = os.environ.get("JOB_CANNON_PORT")
+    if args.port is not None:
+        port = args.port
+    elif _port_env is not None:
+        try:
+            port = int(_port_env)
+        except ValueError:
+            print(
+                f"job-cannon: JOB_CANNON_PORT={_port_env!r} is not a valid integer port number.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+    else:
+        port = server.get("port", DEFAULT_SERVER_PORT)
+
     debug = server.get("debug", DEFAULT_SERVER_DEBUG)
 
     # Bind-host / client-host split (§7.3): wildcard binds must not leak
@@ -507,8 +574,11 @@ def main() -> None:
             cmdline if cmdline else (f"PID {listener_pid}" if listener_pid else "unknown process")
         )
         print(
-            f"Job Cannon: port {port} is occupied by `{listener_desc}`. "
-            f"Configure a different port in config.yaml > server.port, or stop the other process.",
+            f"Job Cannon: port {port} is occupied by `{listener_desc}`.\n"
+            f"  Use a different port:  job-cannon --port 5001\n"
+            f"  Or set env var:        JOB_CANNON_PORT=5001 job-cannon\n"
+            f"  Or edit config.yaml:   server.port: 5001\n"
+            f"  Or stop the other process.",
             file=sys.stderr,
         )
         sys.exit(1)
