@@ -397,6 +397,55 @@ def register_company_linkage(scheduler, app) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Primary-source resolution (daily 5:45 AM). Company-batched direct_url
+# resolver — runs after ats_promote (4:45) and careers_crawl /
+# company_linkage (5:00) so freshly promoted ATS slugs are picked up
+# same-day, and clear of the 2:00-4:00 staleness window (the 3:30→4:15
+# agentic-backfill DB-lock precedent).
+# ---------------------------------------------------------------------------
+
+
+def register_primary_source_resolution(scheduler, app) -> None:
+    """Register the daily primary-source resolution job (5:45 AM)."""
+
+    def _import_primary_source():
+        from job_finder.web.primary_source_resolver import run_primary_source_resolution
+
+        return run_primary_source_resolution
+
+    def _import_primary_source_action():
+        from job_finder.web.activity_tracker import ACTION_SCHEDULED_PRIMARY_SOURCE
+
+        return ACTION_SCHEDULED_PRIMARY_SOURCE
+
+    scheduler.add_job(
+        _make_tracked_job(
+            app,
+            "Primary-source resolution",
+            import_func=_import_primary_source,
+            import_action=_import_primary_source_action,
+            extract_metadata=lambda r: {
+                "companies_scanned": r.get("companies_scanned", 0),
+                "jobs_checked": r.get("jobs_checked", 0),
+                "promoted": r.get("promoted", 0),
+                "resolved_strict": r.get("strict", 0),
+                "resolved_loose": r.get("loose", 0),
+                "merged": r.get("merged", 0),
+            },
+            guard=lambda config: ((config.get("direct_link") or {}).get("resolver") or {}).get(
+                "enabled", True
+            ),
+            publish_events=(JOBS_CHANGED,),
+        ),
+        trigger=CronTrigger(hour=5, minute=45),
+        id="primary_source_resolution",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Orphan cleanup (1st of month, 3:00 AM)
 # ---------------------------------------------------------------------------
 
@@ -597,7 +646,7 @@ def register_health_heartbeat(scheduler, app) -> None:
 
 
 def register_all_jobs(scheduler, app) -> None:
-    """Register all 14 scheduled jobs on the given scheduler instance.
+    """Register all 15 scheduled jobs on the given scheduler instance.
 
     Order matches the legacy inline shape so any future re-introduction of
     cross-job ordering invariants (e.g., agentic_backfill must register
@@ -612,6 +661,7 @@ def register_all_jobs(scheduler, app) -> None:
     register_ats_promote(scheduler, app)
     register_careers_crawl(scheduler, app)
     register_company_linkage(scheduler, app)
+    register_primary_source_resolution(scheduler, app)
     register_orphan_cleanup(scheduler, app)
     register_homepage_discovery(scheduler, app)
     register_registry_hygiene(scheduler, app)

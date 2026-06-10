@@ -1,12 +1,16 @@
-"""Sanctioned direct_url write path with no-downgrade precedence.
+"""Sanctioned direct_url write paths.
 
-set_direct_url is the ONLY writer for jobs.direct_url / direct_url_confidence.
-Confidence precedence (highest wins, ties do not overwrite):
+set_direct_url is the ONLY writer for jobs.direct_url / direct_url_confidence,
+with no-downgrade precedence (highest wins, ties do not overwrite):
     strict  — overwrites a NULL or an existing 'loose' link (upgrade); never
               overwrites an existing 'strict' link (stable).
     loose   — fills a NULL slot only; never overwrites any existing link.
 
 Empty URL or a confidence outside {'strict','loose'} is a no-op.
+
+stamp_direct_url_checks is the ONLY writer for the m092 resolution-state
+columns (direct_url_checked_at / direct_url_attempts). Attempts are owned
+exclusively by the scheduled resolver — one increment per board-match attempt.
 """
 
 from __future__ import annotations
@@ -53,3 +57,27 @@ def set_direct_url(
     )
     conn.commit()
     return True
+
+
+def stamp_direct_url_checks(
+    conn: sqlite3.Connection,
+    dedup_keys: list[str],
+    now_iso: str,
+) -> None:
+    """Record one resolution attempt for each given job (single writer, m092).
+
+    Sets direct_url_checked_at and increments direct_url_attempts. Called by
+    the primary-source resolver after a board-match attempt — whether or not
+    the job resolved (a resolved row leaves the candidate pool via its
+    non-NULL direct_url, so the attempt count is only consulted for misses).
+    Commits once for the batch.
+    """
+    if not dedup_keys:
+        return
+    conn.executemany(
+        "UPDATE jobs SET direct_url_checked_at = ?, "
+        "direct_url_attempts = COALESCE(direct_url_attempts, 0) + 1 "
+        "WHERE dedup_key = ?",
+        [(now_iso, key) for key in dedup_keys],
+    )
+    conn.commit()
