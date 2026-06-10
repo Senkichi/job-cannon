@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from job_finder.web.direct_link import (
+    apply_url_for,
     is_ats_or_careers_url,
     pick_direct_link,
     promote_existing_direct_url,
     resolve_direct_link,
+    resolve_primary_posting,
 )
 
 
@@ -144,3 +146,117 @@ def test_pick_falls_back_to_careers():
 def test_pick_returns_none_when_nothing_resolves():
     assert pick_direct_link(["https://www.linkedin.com/jobs/view/1"], {}, {}) is None
     assert pick_direct_link([], {}, {}) is None
+
+
+# ── resolve_primary_posting (strict-gated data merge) ─────────────────────────
+
+
+def test_primary_posting_strict_returns_matched_posting():
+    postings = [
+        _posting("Senior Data Scientist", src="https://jobs.lever.co/acme/1"),
+        _posting("Product Manager", src="https://jobs.lever.co/acme/2"),
+    ]
+    posting, url, confidence = resolve_primary_posting(postings, "Senior Data Scientist")
+    assert posting is postings[0]
+    assert url == "https://jobs.lever.co/acme/1"
+    assert confidence == "strict"
+
+
+def test_primary_posting_ambiguous_returns_no_posting():
+    """Contamination guard: ambiguous title match must not expose a posting."""
+    postings = [
+        _posting("Data Scientist", src="https://jobs.lever.co/acme/1"),
+        _posting("Data Scientist", src="https://jobs.lever.co/acme/2"),
+    ]
+    posting, url, confidence = resolve_primary_posting(postings, "Data Scientist")
+    assert posting is None
+    assert url == "https://jobs.lever.co/acme/1"
+    assert confidence == "loose"
+
+
+def test_primary_posting_no_exact_match_returns_no_posting():
+    postings = [_posting("Staff Data Scientist", src="https://jobs.lever.co/acme/9")]
+    posting, url, confidence = resolve_primary_posting(postings, "Data Scientist")
+    assert posting is None
+    assert url == "https://jobs.lever.co/acme/9"
+    assert confidence == "loose"
+
+
+def test_primary_posting_location_disambiguates_multi_location_board():
+    """Same title in N locations: the job's location picks the strict match."""
+    nyc = dict(_posting("Data Scientist", src="https://jobs.lever.co/acme/1"), location="New York")
+    lon = dict(_posting("Data Scientist", src="https://jobs.lever.co/acme/2"), location="London, UK")
+    posting, url, confidence = resolve_primary_posting([nyc, lon], "Data Scientist", "New York, NY")
+    assert posting is nyc
+    assert url == "https://jobs.lever.co/acme/1"
+    assert confidence == "strict"
+
+
+def test_primary_posting_location_still_ambiguous_stays_loose():
+    """Two postings sharing the job's location token: no strict promotion."""
+    a = dict(_posting("Data Scientist", src="https://jobs.lever.co/acme/1"), location="Remote, US")
+    b = dict(_posting("Data Scientist", src="https://jobs.lever.co/acme/2"), location="Remote, EU")
+    posting, _url, confidence = resolve_primary_posting([a, b], "Data Scientist", "Remote")
+    assert posting is None
+    assert confidence == "loose"
+
+
+def test_primary_posting_no_job_location_stays_loose():
+    a = dict(_posting("Data Scientist", src="https://jobs.lever.co/acme/1"), location="New York")
+    b = dict(_posting("Data Scientist", src="https://jobs.lever.co/acme/2"), location="London")
+    posting, _url, confidence = resolve_primary_posting([a, b], "Data Scientist", "")
+    assert posting is None
+    assert confidence == "loose"
+
+
+def test_primary_posting_none_when_no_links():
+    assert resolve_primary_posting([_posting("Data Scientist")], "Data Scientist") is None
+    assert resolve_primary_posting([], "Data Scientist") is None
+
+
+# ── apply_url_for (Apply-button precedence) ───────────────────────────────────
+
+_AGG = '["https://www.linkedin.com/jobs/view/1", "https://jooble.org/x"]'
+
+
+def test_apply_strict_direct_url_wins():
+    job = {
+        "direct_url": "https://jobs.lever.co/acme/1",
+        "direct_url_confidence": "strict",
+        "source_urls": _AGG,
+    }
+    assert apply_url_for(job) == "https://jobs.lever.co/acme/1"
+
+
+def test_apply_loose_falls_back_by_default():
+    job = {
+        "direct_url": "https://jobs.lever.co/acme/1",
+        "direct_url_confidence": "loose",
+        "source_urls": _AGG,
+    }
+    assert apply_url_for(job) == "https://www.linkedin.com/jobs/view/1"
+
+
+def test_apply_loose_wins_when_flag_enabled():
+    job = {
+        "direct_url": "https://jobs.lever.co/acme/1",
+        "direct_url_confidence": "loose",
+        "source_urls": _AGG,
+    }
+    assert apply_url_for(job, loose_apply_default=True) == "https://jobs.lever.co/acme/1"
+
+
+def test_apply_no_direct_url_uses_first_source_url():
+    assert apply_url_for({"source_urls": _AGG}) == "https://www.linkedin.com/jobs/view/1"
+
+
+def test_apply_accepts_parsed_list_and_missing_keys():
+    assert apply_url_for({"source_urls": ["https://a.example/1"]}) == "https://a.example/1"
+    assert apply_url_for({}) is None
+    assert apply_url_for({"source_urls": None}) is None
+    assert apply_url_for({"source_urls": "not-json"}) is None
+
+
+def test_apply_direct_url_without_confidence_is_ignored():
+    job = {"direct_url": "https://jobs.lever.co/acme/1", "source_urls": _AGG}
+    assert apply_url_for(job) == "https://www.linkedin.com/jobs/view/1"

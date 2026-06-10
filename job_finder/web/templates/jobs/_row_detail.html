@@ -26,7 +26,9 @@
 {% set sub_scores = job.sub_scores_json | from_json if job.sub_scores_json else {} %}
 {% set sources_list = job.sources | from_json if job.sources else [] %}
 {% set urls_list = job.source_urls | from_json if job.source_urls else [] %}
-{% set apply_url = urls_list[0] if urls_list else None %}
+{# Apply target — apply_url_for() (Jinja global) enforces the precedence:
+   strict direct_url (verified company posting) > first source_url (aggregator). #}
+{% set apply_url = apply_url_for(job) %}
 
 {# Score band (same 3-band split as the chip). #}
 {% set band = 'success' if composite >= 24 else ('warning' if composite >= 17 else 'error') %}

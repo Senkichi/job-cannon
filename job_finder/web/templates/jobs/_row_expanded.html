@@ -39,11 +39,9 @@
 {# Band — same 3-band split as the score chip (⚑ see _score_cell.html FLAG). #}
 {% set band = 'success' if composite >= 24 else ('warning' if composite >= 17 else 'error') %}
 
-{# Apply target. ⚑ GUESS — the schema has no single `apply_url`; we use the FIRST
-   entry of job.source_urls (the primary listing). PORTER: confirm this is the
-   right "apply" destination, or substitute your real field. #}
-{% set urls_list = job.source_urls | from_json if job.source_urls else [] %}
-{% set apply_url = urls_list[0] if urls_list else None %}
+{# Apply target — apply_url_for() (Jinja global) enforces the precedence:
+   strict direct_url (verified company posting) > first source_url (aggregator). #}
+{% set apply_url = apply_url_for(job) %}
 
 {% set first_seen_date = (job.first_seen | local_date) if job.first_seen else "—" %}
 {% set last_seen_date  = (job.last_seen  | local_date) if job.last_seen  else "—" %}
@@ -162,7 +160,7 @@
         <div class="flex items-center gap-2">
           <div class="flex-1 min-w-0">{% include "jobs/_status_cell.html" %}</div>
 
-          {# Apply — opens the listing in a new tab. ⚑ apply_url = first source URL (GUESS). #}
+          {# Apply — opens the listing in a new tab (target chosen by apply_url_for). #}
           {% if apply_url %}
           <a href="{{ apply_url }}" target="_blank" rel="noopener noreferrer"
              class="inline-flex h-9 flex-none items-center gap-1.5 rounded-md bg-indigo-600 px-3.5 text-sm font-medium text-white hover:bg-indigo-500 transition-colors">
