@@ -18,6 +18,8 @@ correct position — do not append to the end.
 
 from __future__ import annotations
 
+from job_finder.web.autoheal import override_loader as _override_loader
+
 # ---------------------------------------------------------------------------
 # Canonical key lists (shared across surfaces)
 # ---------------------------------------------------------------------------
@@ -122,4 +124,55 @@ def find_job_array(data) -> list | None:
                     if key in inner and isinstance(inner[key], list):
                         return inner[key]
 
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Override-aware resolvers (Phase C / C2 — dormant without an override file)
+# ---------------------------------------------------------------------------
+#
+# Each resolver consults the autoheal override loader for `ats:{platform}`.
+# Override extras are appended AFTER the canonical list so first-match-wins
+# on un-renamed data is preserved. With no override file present these are
+# byte-identical to the canonical extract_field / find_job_array calls.
+
+
+def _with_extras(canonical: list[str], platform: str, attr: str) -> list[str]:
+    """Return canonical key list extended with override extras (canonical first)."""
+    recipe = _override_loader.ats_alias(f"ats:{platform}")
+    if recipe is None:
+        return canonical
+    extras = [k for k in getattr(recipe, attr) if k not in canonical]
+    return canonical + extras if extras else canonical
+
+
+def resolve_title(posting: dict, platform: str):
+    """Override-aware job-title resolution for an ATS *platform* posting."""
+    return extract_field(posting, _with_extras(JOB_TITLE_FIELDS, platform, "title_fields"))
+
+
+def resolve_url(posting: dict, platform: str):
+    """Override-aware job-URL resolution for an ATS *platform* posting."""
+    return extract_field(posting, _with_extras(JOB_URL_FIELDS, platform, "url_fields"))
+
+
+def resolve_job_array(data, platform: str) -> list | None:
+    """Override-aware job-array location: canonical find_job_array first, then extras."""
+    found = find_job_array(data)
+    if found is not None:
+        return found
+    recipe = _override_loader.ats_alias(f"ats:{platform}")
+    if recipe is None or not recipe.array_keys:
+        return None
+    if not isinstance(data, dict):
+        return None
+    for key in recipe.array_keys:
+        if key in data and isinstance(data[key], list):
+            return data[key]
+    for outer_key in ("data", "results", "response", "body"):
+        inner = data.get(outer_key)
+        if isinstance(inner, dict):
+            for key in recipe.array_keys:
+                if key in inner and isinstance(inner[key], list):
+                    return inner[key]
     return None
