@@ -111,6 +111,8 @@ def _record_email_extractions(source, conn, config: dict) -> None:
             rec["job_count"],
             scrub_identifiers=idents,
             detect=True,
+            legacy_count=rec.get("legacy_count"),
+            extractor=rec.get("extractor", "legacy"),
         )
 
 

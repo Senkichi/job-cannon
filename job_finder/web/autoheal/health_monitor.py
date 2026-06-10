@@ -13,7 +13,12 @@ import logging
 import sqlite3
 
 from job_finder.json_utils import utc_now_iso
-from job_finder.web.autoheal import BREAK_THRESHOLD, MIN_MEANINGFUL_LEN, corpus_store
+from job_finder.web.autoheal import (
+    BREAK_THRESHOLD,
+    MIN_MEANINGFUL_LEN,
+    SHADOW_ROLLBACK_WINS,
+    corpus_store,
+)
 from job_finder.web.db_helpers import standalone_connection
 
 logger = logging.getLogger(__name__)
@@ -28,6 +33,8 @@ def record_extraction(
     *,
     scrub_identifiers=None,
     detect: bool = True,
+    legacy_count: int | None = None,
+    extractor: str = "legacy",
 ) -> None:
     """Append a corpus sample and (when detect) update the break counter. Never raises.
 
@@ -35,6 +42,13 @@ def record_extraction(
     but the break counter is frozen. ATS/careers use this in Phase A because only
     their post-filter output is reachable at the hook site — the raw API/HTML
     artifact needed for honest break detection is a Phase-B addition.
+
+    Phase D shadow guard: *extractor* records which path produced *job_count*
+    (``override`` vs ``legacy``/``generic``/``canonical``) — corpus provenance,
+    invariant I3. *legacy_count* is non-None only when an override produced the
+    result AND the legacy primary parser also ran: legacy outperforming the
+    override ``SHADOW_ROLLBACK_WINS`` times consecutively auto-rolls the
+    override back (status → healthy, legacy resumes).
     """
     try:
         baseline = corpus_store.baseline_yield(conn, source)
@@ -43,7 +57,7 @@ def record_extraction(
             source,
             surface,
             raw_text,
-            {"job_count": int(job_count)},
+            {"job_count": int(job_count), "extractor": extractor},
             scrub_identifiers=scrub_identifiers,
         )
 
@@ -53,9 +67,11 @@ def record_extraction(
         now = utc_now_iso()
 
         row = conn.execute(
-            "SELECT consecutive_breaks FROM source_health WHERE source = ?", (source,)
+            "SELECT consecutive_breaks, shadow_legacy_wins FROM source_health WHERE source = ?",
+            (source,),
         ).fetchone()
         prior = row[0] if row else 0
+        prior_wins = row[1] if row else 0
 
         if not detect:
             consecutive = prior  # capture-only: baseline tracked, counter frozen
@@ -96,6 +112,23 @@ def record_extraction(
             (source, surface, consecutive, new_baseline, now),
         )
         conn.commit()
+
+        if legacy_count is not None:
+            wins = (prior_wins or 0) + 1 if int(legacy_count) > int(job_count) else 0
+            conn.execute(
+                "UPDATE source_health SET shadow_legacy_wins = ? WHERE source = ?",
+                (wins, source),
+            )
+            conn.commit()
+            if wins >= SHADOW_ROLLBACK_WINS:
+                from job_finder.web.autoheal.rollback import rollback_override
+
+                # new_status='healthy': the legacy parser demonstrably works,
+                # so the source is not degraded; if it breaks again later,
+                # normal detection re-fires. A mid-batch double trigger is
+                # safe: the second call finds no file, zeroes the counter
+                # (I2), and returns False without auditing.
+                rollback_override(conn, source, "legacy_outperformed", new_status="healthy")
     except Exception:  # observability must never break ingestion
         logger.exception("autoheal record_extraction failed for source=%s", source)
 
