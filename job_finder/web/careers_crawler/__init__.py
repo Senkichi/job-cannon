@@ -20,7 +20,6 @@ import time
 from typing import Any
 
 import requests  # noqa: F401  — bound here so test_careers_crawler patches resolve
-from playwright.sync_api import sync_playwright
 
 from job_finder.json_utils import utc_now_iso
 
@@ -134,7 +133,34 @@ __all__ = [
     "_update_timestamp_on_error",
     "_upsert_and_log",
     "crawl_careers_batch",
+    "sync_playwright",
 ]
+
+
+def __getattr__(name: str):
+    """Lazy-load playwright symbols on first access (PEP 562).
+
+    ``playwright`` is an optional heavy dependency (multi-hundred-MB browser
+    download). It must not be imported at module load time so that
+    ``job-cannon --help`` and ``job-cannon --version`` work in environments
+    where playwright is not installed (e.g. a clean ``pipx install`` before
+    the user has run ``playwright install``).
+
+    The name is stored in ``globals()`` after the first import so subsequent
+    accesses and ``unittest.mock.patch`` restore both work without re-triggering
+    this hook.
+    """
+    if name == "sync_playwright":
+        try:
+            from playwright.sync_api import sync_playwright as _sp
+        except ImportError as exc:
+            raise ImportError(
+                "Playwright is not installed. "
+                "Install it with: pipx inject job-cannon playwright && playwright install chromium"
+            ) from exc
+        globals()["sync_playwright"] = _sp
+        return _sp
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 # ---------------------------------------------------------------------------
@@ -342,7 +368,15 @@ def _crawl_companies(
         local_summary: dict[str, Any] = _new_summary()
         local_new_keys: list[str] = []
 
-        with sync_playwright() as pw:
+        # Lazy import: playwright is optional (not in base dependencies).
+        # Accessing the package attribute triggers __getattr__ which imports
+        # playwright and stores it in module globals for subsequent lookups.
+        # If playwright is absent this raises ImportError with install instructions.
+        import job_finder.web.careers_crawler as _cc
+
+        _sp = _cc.sync_playwright
+
+        with _sp() as pw:
             browser = pw.chromium.launch(headless=True)
             try:
                 for company in company_batch:
