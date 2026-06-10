@@ -165,7 +165,7 @@ When verifying phase completion or running `/gsd:verify-work`, self-check everyt
 
 - Always use Context7 MCP when working with library APIs, especially for: APScheduler, HTMX, Anthropic SDK, Flask, jinja2-fragments
 - Snake_case everywhere (files, functions, variables). PascalCase for classes only.
-- No formatter or linter configured. PEP 8 followed implicitly.
+- Ruff enforced in CI (`uvx ruff check .` + `ruff format --check` via the Lint & Format job and pre-commit). Run `uvx ruff format <changed files>` before pushing.
 - Absolute imports from `job_finder` package root.
 - No barrel files; `__init__.py` files are mostly empty.
 - Blueprint routes use `strict_slashes=False`.
