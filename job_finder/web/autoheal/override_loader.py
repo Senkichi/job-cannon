@@ -69,6 +69,35 @@ class OverrideLoader:
         """
         return self._cache["ats"].get(source)  # type: ignore[return-value]
 
+    def recipe_for(self, source: str) -> HtmlRecipe | AtsAliasRecipe | None:
+        """Return the cached recipe for *source* on any surface, or None.
+
+        Until D4 adds the ``careers`` cache surface, careers sources resolve
+        against an empty dict → None, which is correct (no careers overrides
+        can exist yet).
+        """
+        from job_finder.web.autoheal import surface_for_source
+
+        surface = surface_for_source(source)
+        return self._cache.get(surface, {}).get(source)
+
+    def delete_override(self, surface: str, file_key: str) -> bool:
+        """Suppress the user override file if present. Returns True when removed.
+
+        Never raises: missing file → False; OSError → logged, False. (D5
+        extends this contract: when a SHIPPED default exists for the key,
+        suppression writes a user-root tombstone and still returns True.)
+        """
+        path = self._override_dir(surface) / f"{file_key}.json"
+        if not path.is_file():
+            return False
+        try:
+            path.unlink()
+            return True
+        except OSError:
+            logger.exception("override_loader: failed to delete %s", path)
+            return False
+
     def reload(self) -> None:
         """Re-scan the overrides directory and swap the cache atomically."""
         new_cache: _Cache = {"email": {}, "ats": {}}
@@ -195,3 +224,13 @@ def reload() -> None:
 def write_override(surface: str, source: str, recipe_dict: dict) -> None:
     """Write an override file atomically via the singleton loader."""
     _get_loader().write_override(surface, source, recipe_dict)
+
+
+def recipe_for(source: str) -> HtmlRecipe | AtsAliasRecipe | None:
+    """Return the cached recipe for *source* on any surface, or None."""
+    return _get_loader().recipe_for(source)
+
+
+def delete_override(surface: str, file_key: str) -> bool:
+    """Suppress the override file for *file_key* via the singleton loader."""
+    return _get_loader().delete_override(surface, file_key)

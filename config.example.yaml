@@ -381,5 +381,8 @@ autoheal:
   heal_max_attempts: 3
   # Hours to wait between heal attempts for the same source.
   heal_backoff_hours: 24
+  # Days a source must stay healthy before its heal-attempt budget resets
+  # (hygiene backstop; the budget also resets when the legacy parser recovers).
+  heal_attempt_reset_days: 30
   # Wall-clock timeout (seconds) for the subprocess corpus-replay validator.
   validate_timeout_s: 30

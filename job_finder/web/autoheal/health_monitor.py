@@ -61,6 +61,22 @@ def record_extraction(
             consecutive = prior  # capture-only: baseline tracked, counter frozen
         elif int(job_count) > 0:
             consecutive = 0
+            # Episode boundary (plan invariant I1): a positive yield with NO
+            # override active means the legacy/canonical path proved itself —
+            # the break episode is over, so the heal-attempt budget resets.
+            # Positive yields THROUGH an override never reset (a bad-but-
+            # yielding override must not grant itself an unbounded budget).
+            try:
+                from job_finder.web.autoheal import override_loader as _ol
+
+                if _ol.recipe_for(source) is None:
+                    conn.execute(
+                        "UPDATE source_health SET heal_attempts = 0 "
+                        "WHERE source = ? AND heal_attempts > 0",
+                        (source,),
+                    )
+            except Exception:
+                pass  # observability must never break ingestion
         elif is_break:
             consecutive = prior + 1
         else:
