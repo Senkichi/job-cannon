@@ -66,8 +66,14 @@ class SerpAPISource:
 
             try:
                 resp = requests.get(self.BASE_URL, params=params, timeout=30)
+                if resp.status_code in (401, 403):
+                    raise RuntimeError(
+                        f"SerpAPI key rejected (HTTP {resp.status_code}) — check your API key"
+                    )
                 resp.raise_for_status()
                 data = resp.json()
+            except RuntimeError:
+                raise
             except Exception as e:
                 logger.warning(
                     "SerpAPI search failed for '%s' (page %d): %s",

@@ -40,6 +40,8 @@ def run_sync_now(app) -> dict:
         return {
             "gmail_fetched": 0,
             "gmail_errors": [str(e)],
+            "imap_fetched": 0,
+            "imap_errors": [],
             "serpapi_fetched": 0,
             "serpapi_errors": [],
             "thordata_fetched": 0,

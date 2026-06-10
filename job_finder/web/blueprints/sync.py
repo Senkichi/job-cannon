@@ -1,5 +1,6 @@
 """Sync blueprint -- Gmail sync start, status, dismiss routes."""
 
+import json
 import logging
 import threading
 
@@ -45,6 +46,7 @@ def sync_start():
                 total=0,
                 scored=0,
                 skipped=0,
+                error_details=[],
             )
 
         now = utc_now_iso()
@@ -75,12 +77,20 @@ _SYNC_PHASE_LABELS = {"running": "Starting...", "gmail": "Syncing..."}
 
 
 def _sync_done_ctx(session, status: str, error_msg: str | None) -> dict:
+    raw = session["error_details"] if "error_details" in session.keys() else None  # noqa: SIM118
+    error_details: list[str] = []
+    if raw:
+        try:
+            error_details = json.loads(raw)
+        except (ValueError, TypeError):
+            pass
     return {
         "status": status,
         "error_msg": error_msg,
         "total": session["total"],
         "scored": session["scored"],
         "skipped": session["skipped"],
+        "error_details": error_details,
     }
 
 
@@ -112,6 +122,7 @@ def sync_status(session_id):
                 "total": 0,
                 "scored": 0,
                 "skipped": 0,
+                "error_details": [],
             },
             session_label="Sync",
         ),
@@ -162,20 +173,36 @@ def _run_sync_bg(db_path: str, session_id: int, app) -> None:
         jobs_new = summary.get("jobs_new", 0)
         total_fetched = (
             summary.get("gmail_fetched", 0)
+            + summary.get("imap_fetched", 0)
             + summary.get("serpapi_fetched", 0)
             + summary.get("thordata_fetched", 0)
+            + summary.get("dataforseo_fetched", 0)
+            + summary.get("portal_search_fetched", 0)
         )
-        error_count = (
-            len(summary.get("gmail_errors", []))
-            + len(summary.get("serpapi_errors", []))
-            + len(summary.get("thordata_errors", []))
-        )
+        # Aggregate error count across ALL sources dynamically so a new source
+        # can never silently drop out of the error tally.
+        all_error_messages: list[str] = []
+        for key, val in summary.items():
+            if key.endswith("_errors") and isinstance(val, list):
+                source_label = key[: -len("_errors")]
+                for msg in val:
+                    all_error_messages.append(f"{source_label}: {msg}")
+        error_count = len(all_error_messages)
+        error_details_json = json.dumps(all_error_messages) if all_error_messages else None
 
         with standalone_connection(db_path) as conn:
             conn.execute(
-                "UPDATE batch_score_sessions SET status='done', scored=?, total=?, skipped=?, finished_at=? "
+                "UPDATE batch_score_sessions "
+                "SET status='done', scored=?, total=?, skipped=?, error_details=?, finished_at=? "
                 "WHERE id=?",
-                (jobs_new, total_fetched, error_count, utc_now_iso(), session_id),
+                (
+                    jobs_new,
+                    total_fetched,
+                    error_count,
+                    error_details_json,
+                    utc_now_iso(),
+                    session_id,
+                ),
             )
             conn.commit()
 
