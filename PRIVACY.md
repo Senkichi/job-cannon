@@ -26,8 +26,8 @@ There is no server-side component. There is no telemetry.
 
 ## What Is Stored Where (secret-level detail)
 
-Since v5.1 (2026-05-21) the **primary** store for IMAP app passwords
-and provider API keys is the **OS keyring** — Windows Credential
+Since v5.0.0 the **primary** store for IMAP app passwords and provider
+API keys is the **OS keyring** — Windows Credential
 Manager, macOS Keychain, or Linux Secret Service via D-Bus. The
 service name is `"job-cannon"`. The keyring isolates these values at
 the OS-account level, so they're not just sitting at rest in a YAML
@@ -40,7 +40,7 @@ file readable by any process running as your user.
   OS's normal credential-export tooling, not by `bash backup_userdata.sh`.
 - **`<user_data_dir>/config.yaml`**: configuration (profile, source
   toggles, scoring weights, scheduler cadence). If your install was
-  created before v5.1 or you skipped the keyring migration, secrets
+  created before v5.0.0 or you skipped the keyring migration, secrets
   may still sit here in plaintext as a fallback — run
   `python -m job_finder.migrate_secrets` to move them. On Linux and
   macOS the wizard sets file permissions to `0600` so only your user
@@ -65,7 +65,7 @@ file readable by any process running as your user.
 If `config.yaml` has been seen by anyone other than you (sent it to support,
 committed it accidentally, uploaded to a paste site, etc.):
 
-- **Check whether the file actually had your secrets.** On a v5.1+ install
+- **Check whether the file actually had your secrets.** On a v5.0.0+ install
   with the keyring migration completed, the `imap.app_password` and
   `providers.api_keys.*` fields are empty strings in `config.yaml` —
   the real values live in your OS keyring. If those fields were empty
