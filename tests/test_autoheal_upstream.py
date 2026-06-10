@@ -229,3 +229,164 @@ def test_bundle_failure_never_unadopts(tmp_path, monkeypatch):
     outcomes = _audit_outcomes(conn, "linkedin")
     assert "adopted" in outcomes
     assert "contrib_failed" in outcomes
+
+
+# ---------------------------------------------------------------------------
+# Maintainer auto-PR — idempotent remote-only gh sequence
+# ---------------------------------------------------------------------------
+
+_BUNDLE = {
+    "schema_version": 1,
+    "source": "careers:acme.com",
+    "surface": "careers",
+    "recipe": _RECIPE_DICT,
+    "failing_sample": "<html>broken</html>",
+    "drift": {"consecutive_breaks": 3},
+    "created_at": "2026-06-10T21:30:00",
+    "app_version": "v5.0.0",
+}
+
+_PR_CFG = {"maintainer_auto_pr": True, "upstream_repo": "Senkichi/job-cannon"}
+
+
+class _FakeGh:
+    """Scripted gh responses, popped in call order; records every arg list."""
+
+    def __init__(self, responses: list[tuple[int, str]]):
+        self.calls: list[list[str]] = []
+        self._responses = list(responses)
+
+    def __call__(self, args: list[str], timeout_s: float):
+        self.calls.append(list(args))
+        rc, out = self._responses.pop(0)
+        return SimpleNamespace(returncode=rc, stdout=out, stderr="boom" if rc else "")
+
+
+def _with_gh(monkeypatch, responses) -> _FakeGh:
+    fake = _FakeGh(responses)
+    monkeypatch.setattr(ur, "_gh", fake)
+    monkeypatch.setattr(ur.shutil, "which", lambda _name: "C:/gh.exe")
+    return fake
+
+
+def test_maintainer_pr_fresh_source_full_sequence(tmp_path, monkeypatch):
+    fake = _with_gh(
+        monkeypatch,
+        [
+            (1, ""),  # heal branch ref → missing
+            (0, '{"object": {"sha": "BASESHA"}}'),  # main ref
+            (0, "{}"),  # ref create
+            (0, "{}"),  # graphql commit
+            (0, "[]"),  # pr list → none open
+            (0, "https://github.com/x/pull/1"),  # pr create
+        ],
+    )
+
+    assert ur.maintainer_pr(_BUNDLE, _PR_CFG) == "contrib_pr_opened"
+
+    branch_ref, base_ref, ref_create, commit, pr_list, pr_create = fake.calls
+    assert branch_ref[1].endswith("git/ref/heads/heal/careers-acme.com")
+    assert base_ref[1].endswith("git/ref/heads/main")
+    assert "ref=refs/heads/heal/careers-acme.com" in ref_create
+    assert "sha=BASESHA" in ref_create
+    assert commit[1] == "graphql"
+    assert "input[expectedHeadOid]=BASESHA" in commit
+    assert any(
+        a == "input[fileChanges][additions][][path]="
+        "job_finder/data/default_overrides/careers/acme.com.json"
+        for a in commit
+    )
+    assert pr_list[:2] == ["pr", "list"]
+    assert pr_create[:2] == ["pr", "create"]
+    assert "--head" in pr_create and "heal/careers-acme.com" in pr_create
+
+
+def test_maintainer_pr_second_adoption_updates_same_branch(tmp_path, monkeypatch):
+    fake = _with_gh(
+        monkeypatch,
+        [
+            (0, '{"object": {"sha": "HEADSHA"}}'),  # heal branch exists
+            (0, "{}"),  # graphql commit onto it
+            (0, '[{"number": 7}]'),  # open PR already exists
+        ],
+    )
+
+    assert ur.maintainer_pr(_BUNDLE, _PR_CFG) == "contrib_pr_updated"
+    # No base-ref lookup, no ref create, no duplicate pr create.
+    assert len(fake.calls) == 3
+    assert "input[expectedHeadOid]=HEADSHA" in fake.calls[1]
+
+
+def test_maintainer_pr_failure_mid_sequence(tmp_path, monkeypatch):
+    fake = _with_gh(
+        monkeypatch,
+        [
+            (1, ""),  # heal branch missing
+            (0, '{"object": {"sha": "BASESHA"}}'),  # main ref
+            (1, ""),  # ref create FAILS
+        ],
+    )
+
+    assert ur.maintainer_pr(_BUNDLE, _PR_CFG) == "contrib_pr_failed"
+    assert len(fake.calls) == 3  # sequence stopped, never raised
+
+
+def test_maintainer_pr_flag_off_makes_zero_calls(tmp_path, monkeypatch):
+    fake = _with_gh(monkeypatch, [])
+    assert ur.maintainer_pr(_BUNDLE, {"maintainer_auto_pr": False}) is None
+    assert ur.maintainer_pr(_BUNDLE, {}) is None
+    assert fake.calls == []
+
+
+def test_maintainer_pr_gh_missing_silent_skip(tmp_path, monkeypatch):
+    fake = _FakeGh([])
+    monkeypatch.setattr(ur, "_gh", fake)
+    monkeypatch.setattr(ur.shutil, "which", lambda _name: None)
+    assert ur.maintainer_pr(_BUNDLE, _PR_CFG) is None
+    assert fake.calls == []
+
+
+def test_maintainer_pr_no_repo_silent_skip(tmp_path, monkeypatch):
+    fake = _with_gh(monkeypatch, [])
+    assert ur.maintainer_pr(_BUNDLE, {"maintainer_auto_pr": True}) is None
+    assert fake.calls == []
+
+
+def test_adopt_with_flag_on_audits_pr_outcome(tmp_path, monkeypatch):
+    conn = _conn(tmp_path)
+    _seed_degraded(conn, "linkedin", "email")
+    _with_gh(
+        monkeypatch,
+        [
+            (1, ""),
+            (0, '{"object": {"sha": "S"}}'),
+            (0, "{}"),
+            (0, "{}"),
+            (0, "[]"),
+            (0, "url"),
+        ],
+    )
+
+    loader = OverrideLoader(overrides_root=tmp_path / "overrides")
+    monkeypatch.setattr(override_loader, "_LOADER", loader)
+    cfg = {
+        "autoheal": {
+            "heal_enabled": True,
+            "maintainer_auto_pr": True,
+            "upstream_repo": "Senkichi/job-cannon",
+        }
+    }
+    model_result = SimpleNamespace(data=_HEAL_RECIPE, schema_valid=True)
+    with patch.object(codegen, "call_model", return_value=model_result):
+        assert heal_pipeline.run_heal(conn, cfg, "linkedin") == "adopted"
+
+    assert "contrib_pr_opened" in _audit_outcomes(conn, "linkedin")
+
+
+def test_adopt_default_config_never_invokes_gh(tmp_path, monkeypatch):
+    conn = _conn(tmp_path)
+    _seed_degraded(conn, "linkedin", "email")
+    fake = _with_gh(monkeypatch, [])
+
+    assert _run_adopting_heal(conn, tmp_path, monkeypatch) == "adopted"
+    assert fake.calls == []  # maintainer_auto_pr defaults off
