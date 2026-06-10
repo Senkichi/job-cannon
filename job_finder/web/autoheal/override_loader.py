@@ -11,6 +11,13 @@ Source-key → file layout:
   - Careers: ``heal_overrides/careers/<hostname>.json`` (hostname = source key without
     "careers:" prefix; filesystem-safe by construction — I5: no port, no colon)
 
+Shipped defaults (D5): the same layout under the packaged
+``job_finder/data/default_overrides/`` is scanned FIRST; user files override
+defaults on key collision. A user-root tombstone ``<file_key>.disabled``
+suppresses the shipped default for that key — this keeps rollback fully
+effective against a garbage-yielding default (which cannot be unlinked from
+site-packages). The tombstone only masks the DEFAULT, never a user file.
+
 ``reload()`` atomically swaps the in-memory cache by replacing the dict reference;
 snapshot semantics guarantee that a reference captured before reload remains valid.
 """
@@ -43,16 +50,25 @@ class OverrideLoader:
     """Load, validate, and cache declarative recipe overrides from disk.
 
     Args:
-        overrides_root: Root directory for override files.  In production this
-            is ``<userdata>/heal_overrides``; in tests use ``tmp_path``.
+        overrides_root: Root directory for user override files.  In production
+            this is ``<userdata>/heal_overrides``; in tests use ``tmp_path``.
+        defaults_root: Root directory for shipped default recipes.  In
+            production this is the packaged ``job_finder/data/default_overrides``.
     """
 
-    def __init__(self, overrides_root: Path | None = None) -> None:
+    def __init__(
+        self, overrides_root: Path | None = None, defaults_root: Path | None = None
+    ) -> None:
         if overrides_root is None:
             from job_finder.web.user_data_dirs import user_data_root
 
             overrides_root = user_data_root() / "heal_overrides"
+        if defaults_root is None:
+            import job_finder.data as _data
+
+            defaults_root = Path(_data.__file__).parent / "default_overrides"
         self._root = Path(overrides_root)
+        self._defaults_root = Path(defaults_root)
         self._cache: _Cache = {"email": {}, "ats": {}, "careers": {}}
         self._load_all()
 
@@ -86,28 +102,40 @@ class OverrideLoader:
         return self._cache.get(surface, {}).get(source)
 
     def delete_override(self, surface: str, file_key: str) -> bool:
-        """Suppress the user override file if present. Returns True when removed.
+        """Suppress the effective override for *file_key*. True when anything was suppressed.
 
-        Never raises: missing file → False; OSError → logged, False. (D5
-        extends this contract: when a SHIPPED default exists for the key,
-        suppression writes a user-root tombstone and still returns True.)
+        Deletes the user ``.json`` if present; if a shipped default would
+        still be effective afterwards (default file exists, not already
+        tombstoned), writes the ``<file_key>.disabled`` tombstone. Never
+        raises: missing files → False; OSError → logged, False.
         """
+        suppressed = False
         path = self._override_dir(surface) / f"{file_key}.json"
-        if not path.is_file():
-            return False
-        try:
-            path.unlink()
-            return True
-        except OSError:
-            logger.exception("override_loader: failed to delete %s", path)
-            return False
+        if path.is_file():
+            try:
+                path.unlink()
+                suppressed = True
+            except OSError:
+                logger.exception("override_loader: failed to delete %s", path)
+                return False
+
+        default_path = self._defaults_root / surface / f"{file_key}.json"
+        tombstone = self._override_dir(surface) / f"{file_key}.disabled"
+        if default_path.is_file() and not tombstone.exists():
+            try:
+                tombstone.parent.mkdir(parents=True, exist_ok=True)
+                tombstone.write_text("", encoding="utf-8")
+                suppressed = True
+            except OSError:
+                logger.exception("override_loader: failed to write tombstone %s", tombstone)
+                return False
+        return suppressed
 
     def reload(self) -> None:
-        """Re-scan the overrides directory and swap the cache atomically."""
+        """Re-scan defaults + overrides directories and swap the cache atomically."""
         new_cache: _Cache = {"email": {}, "ats": {}, "careers": {}}
-        self._scan_surface(new_cache, "email")
-        self._scan_surface_ats(new_cache)
-        self._scan_surface_careers(new_cache)
+        for surface in ("email", "ats", "careers"):
+            self._scan_surface(new_cache, surface)
         # Atomic swap — no mutation of the old dict
         self._cache = new_cache
 
@@ -144,43 +172,41 @@ class OverrideLoader:
     # ------------------------------------------------------------------
 
     def _load_all(self) -> None:
-        self._scan_surface(self._cache, "email")
-        self._scan_surface_ats(self._cache)
-        self._scan_surface_careers(self._cache)
+        for surface in ("email", "ats", "careers"):
+            self._scan_surface(self._cache, surface)
+
+    @staticmethod
+    def _source_key(surface: str, file_key: str) -> str:
+        """File stem → cache key: prefixed surfaces re-add their prefix."""
+        if surface == "ats":
+            return f"ats:{file_key}"
+        if surface == "careers":
+            return f"careers:{file_key}"
+        return file_key
 
     def _scan_surface(self, cache: _Cache, surface: str) -> None:
-        surface_dir = self._override_dir(surface)
-        if not surface_dir.is_dir():
-            return
-        for json_file in surface_dir.glob("*.json"):
-            source_key = json_file.stem
-            recipe = self._load_file(json_file, surface, source_key)
-            if recipe is not None:
-                cache[surface][source_key] = recipe
+        """Scan one surface: shipped defaults first, user files over the top.
 
-    def _scan_surface_ats(self, cache: _Cache) -> None:
-        """Scan the ats/ directory; source keys use the ``ats:`` prefix convention."""
-        surface_dir = self._override_dir("ats")
-        if not surface_dir.is_dir():
-            return
-        for json_file in surface_dir.glob("*.json"):
-            platform = json_file.stem
-            source_key = f"ats:{platform}"
-            recipe = self._load_file(json_file, "ats", source_key)
-            if recipe is not None:
-                cache["ats"][source_key] = recipe
-
-    def _scan_surface_careers(self, cache: _Cache) -> None:
-        """Scan the careers/ directory; source keys use the ``careers:`` prefix (I5)."""
-        surface_dir = self._override_dir("careers")
-        if not surface_dir.is_dir():
-            return
-        for json_file in surface_dir.glob("*.json"):
-            hostname = json_file.stem
-            source_key = f"careers:{hostname}"
-            recipe = self._load_file(json_file, "careers", source_key)
-            if recipe is not None:
-                cache["careers"][source_key] = recipe
+        A user-root ``<file_key>.disabled`` tombstone suppresses the shipped
+        default for that key; user ``.json`` files load regardless (a user
+        override outranks both the default and the tombstone).
+        """
+        user_dir = self._override_dir(surface)
+        defaults_dir = self._defaults_root / surface
+        if defaults_dir.is_dir():
+            for json_file in defaults_dir.glob("*.json"):
+                if (user_dir / f"{json_file.stem}.disabled").exists():
+                    continue  # tombstoned default
+                source_key = self._source_key(surface, json_file.stem)
+                recipe = self._load_file(json_file, surface, source_key)
+                if recipe is not None:
+                    cache[surface][source_key] = recipe
+        if user_dir.is_dir():
+            for json_file in user_dir.glob("*.json"):
+                source_key = self._source_key(surface, json_file.stem)
+                recipe = self._load_file(json_file, surface, source_key)
+                if recipe is not None:
+                    cache[surface][source_key] = recipe
 
     def _load_file(
         self, path: Path, surface: str, source_key: str
