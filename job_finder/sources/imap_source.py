@@ -2,12 +2,24 @@
 
 Replaces Gmail API source as the default ingest path for strangers.
 Uses IMAP LOGIN with app password (no OAuth required).
+
+Safety contract
+---------------
+- The folder is opened **readonly** so no IMAP command can implicitly set \\Seen.
+- Messages are searched with a scoped FROM OR-chain so only job-alert senders
+  are ever touched; personal mail is never fetched or examined.
+- Bodies are fetched with ``BODY.PEEK[]`` which is explicitly non-mutating even
+  on writable folders.
+- ``\\Seen`` is added only to messages from known job-alert senders after they
+  have been processed.  Messages from unknown senders are never fetched or
+  flagged.
 """
 
 import email
 import email.policy
 import logging
 from datetime import UTC, datetime
+from typing import Any
 
 from imapclient import IMAPClient
 
@@ -23,6 +35,46 @@ from job_finder.sources.gmail_source import (
 from job_finder.web.autoheal.recipe_extractor import RecipeExtractor
 
 logger = logging.getLogger(__name__)
+
+
+def _build_from_search_criteria(senders: list[str]) -> list[Any]:
+    """Build an IMAP search criteria list that matches UNSEEN messages from any
+    of the given sender addresses.
+
+    IMAP OR is binary, so N senders require N-1 nested ORs:
+
+    * 1 sender  → ["UNSEEN", "FROM", addr]
+    * 2 senders → ["UNSEEN", "OR", ["FROM", a], ["FROM", b]]
+    * 3 senders → ["UNSEEN", "OR", ["FROM", a], ["OR", ["FROM", b], ["FROM", c]]]
+    * N senders → right-fold over the list
+
+    The imapclient library serialises nested lists to parenthesised groups, which
+    is the correct IMAP syntax.
+
+    Args:
+        senders: Non-empty list of sender email address substrings (keys from
+            SENDER_PARSERS).  Must have at least one entry.
+
+    Returns:
+        Criteria list suitable for passing to ``IMAPClient.search()``.
+
+    Raises:
+        ValueError: If senders is empty.
+    """
+    if not senders:
+        raise ValueError("senders must be non-empty")
+
+    from_clauses: list[Any] = [["FROM", addr] for addr in senders]
+
+    if len(from_clauses) == 1:
+        from_tree: Any = from_clauses[0]
+    else:
+        # Right-fold: OR(a, OR(b, OR(c, d)))
+        from_tree = from_clauses[-1]
+        for clause in reversed(from_clauses[:-1]):
+            from_tree = ["OR", clause, from_tree]
+
+    return ["UNSEEN", from_tree]
 
 
 class ImapSource:
@@ -70,24 +122,35 @@ class ImapSource:
         all_jobs: list[Job] = []
         processed_uids: list[str] = []
 
+        # Build scoped sender list once — keyed identically to SENDER_PARSERS.
+        known_senders = list(SENDER_PARSERS.keys())
+        search_criteria = _build_from_search_criteria(known_senders)
+
         try:
             with IMAPClient(self.host, port=self.port, ssl=True) as client:
                 client.login(self.email_address, self.app_password)
-                client.select_folder(self.folder, readonly=False)
+                # readonly=True: the folder is never writable via this connection.
+                # BODY.PEEK[] fetches are non-mutating regardless, but this provides
+                # defence-in-depth so even a mis-issued RFC822 fetch can't set \Seen.
+                client.select_folder(self.folder, readonly=True)
 
-                # Search for unseen messages only
-                uids = client.search(["UNSEEN"])
+                # Search only for unseen messages from known job-alert senders.
+                # Personal mail is never touched.
+                uids = client.search(search_criteria)
 
                 if not uids:
-                    logger.info("No unseen messages found")
+                    logger.info("No unseen job-alert messages found")
                     return [], []
 
-                # Fetch RFC822 payloads for all unseen messages
-                messages = client.fetch(uids, ["RFC822"])
+                # BODY.PEEK[] is explicitly non-mutating — it never sets \Seen.
+                messages = client.fetch(uids, ["BODY.PEEK[]"])
+
+                # UIDs of known-sender messages to mark \Seen after processing.
+                uids_to_flag: list[int] = []
 
                 for uid, msg_data in messages.items():
-                    rfc822_bytes = msg_data[b"RFC822"]
-                    message = email.message_from_bytes(rfc822_bytes, policy=email.policy.default)
+                    raw_bytes = msg_data[b"BODY[]"]
+                    message = email.message_from_bytes(raw_bytes, policy=email.policy.default)
 
                     # Extract email components
                     sender = self._extract_sender(message)
@@ -96,8 +159,9 @@ class ImapSource:
 
                     if not sender or not body:
                         logger.warning("Skipping message with missing sender or body: UID %s", uid)
-                        # Mark seen to avoid reprocessing
-                        client.add_flags([uid], [b"\\Seen"])
+                        # Still a known-sender message (matched our FROM scope) —
+                        # flag it so we don't re-fetch it on the next run.
+                        uids_to_flag.append(uid)
                         processed_uids.append(str(uid))
                         continue
 
@@ -110,9 +174,12 @@ class ImapSource:
                             break
 
                     if parser_fn is None:
-                        logger.info("No parser found for sender: %s", sender)
-                        client.add_flags([uid], [b"\\Seen"])
-                        processed_uids.append(str(uid))
+                        # The FROM scope should have prevented this.  If the IMAP
+                        # server returned a false-positive match, do NOT flag it —
+                        # this is not a confirmed known-sender message.
+                        logger.info(
+                            "No parser found for sender: %s (skipping, not flagging)", sender
+                        )
                         continue
 
                     # Parse the email body
@@ -156,9 +223,15 @@ class ImapSource:
                             {"sender": sender, "message_id": str(uid), "error": str(e)}
                         )
 
-                    # Mark message as seen after processing
-                    client.add_flags([uid], [b"\\Seen"])
+                    # Known-sender message — flag after processing.
+                    uids_to_flag.append(uid)
                     processed_uids.append(str(uid))
+
+                # Bulk-flag all processed known-sender messages in one round-trip.
+                # Re-select writable only if there is anything to flag.
+                if uids_to_flag:
+                    client.select_folder(self.folder, readonly=False)
+                    client.add_flags(uids_to_flag, [b"\\Seen"])
 
         except Exception as e:
             logger.error("IMAP fetch error: %s", e, exc_info=True)
