@@ -13,7 +13,7 @@
 > Single-user, runs on localhost.
 
 [![CI](https://github.com/Senkichi/job-cannon/actions/workflows/ci.yml/badge.svg)](https://github.com/Senkichi/job-cannon/actions/workflows/ci.yml)
-[![Python 3.13+](https://img.shields.io/badge/python-3.13%2B-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org/downloads/)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
 
@@ -24,7 +24,7 @@ pipx install job-cannon
 job-cannon
 ```
 
-`pipx install job-cannon` is the recommended path: one command, isolated venv. Requires **Python 3.13+** — use `pipx install --python python3.13 job-cannon` if your default Python is older. The `job-cannon` command launches the Flask app on http://localhost:5000 and opens your browser. On first launch the onboarding wizard auto-detects AI providers (Ollama / Claude Code CLI / Gemini CLI), helps you connect Gmail via IMAP app password, and writes secrets to your OS keyring — no manual YAML editing required.
+`pipx install job-cannon` is the recommended path: one command, isolated venv. Requires **Python 3.12+** — use `pipx install --python python3.12 job-cannon` if your default Python is older. The `job-cannon` command launches the Flask app on http://localhost:5000 and opens your browser. On first launch the onboarding wizard auto-detects AI providers (Ollama / Claude Code CLI / Gemini CLI), helps you connect Gmail via IMAP app password, and writes secrets to your OS keyring — no manual YAML editing required.
 
 **Don't have pipx yet?** Per-OS one-liners: `scoop install pipx` (Windows), `brew install pipx` (macOS), `apt install pipx` (Ubuntu 23.04+).
 
@@ -44,7 +44,7 @@ job-cannon
   (`apply | consider | skip | reject`) is **derived in Python from
   the numeric sub-scores — never emitted by the LLM** — which
   prevents classification drift across model swaps.
-- **Schema-versioned SQLite migrations.** 88 idempotent migrations
+- **Schema-versioned SQLite migrations.** 89 idempotent migrations
   applied via `pragma user_version`. Migration 41 introduces a
   backup-recency preflight that refuses destructive schema changes
   without a recent userdata snapshot (override via
@@ -69,8 +69,8 @@ job-cannon
   a bool and lets callers decide whether to fail-open or raise — the
   orchestrator and the scheduler choose differently and that's
   intentional.
-- **5006 tests** (unit + integration + Playwright e2e) green on the CI
-  matrix (Ubuntu + Windows × Python 3.13).
+- **5,000+ tests** (unit + integration + Playwright e2e) green on the CI
+  matrix (Ubuntu × Python 3.12/3.13 + Windows × Python 3.13).
 - **In-app update notifications.** Dashboard surfaces an "Update available"
   banner when a newer GitHub release is detected; check is throttled to
   once-per-day, dismissible per-version, never blocks app startup if the
@@ -100,7 +100,7 @@ For deeper subsystem detail, see [`docs/architecture/`](docs/architecture/).
 
 | Layer | Tooling |
 |---|---|
-| Runtime | Python 3.13, Flask 3.1, APScheduler 3.x |
+| Runtime | Python 3.12+, Flask 3.1, APScheduler 3.x |
 | Storage | SQLite (WAL mode) — raw SQL, no ORM |
 | Frontend | Jinja2 + jinja2-fragments, HTMX 2.x, Tailwind (CDN), SortableJS |
 | AI | Multi-provider cascade: Ollama (qwen2.5:14b primary) → Gemini → Claude Code CLI ($0 via Claude.ai subscription, dispatched through `claude -p`) → Anthropic SDK (paid, final fallback) |
@@ -121,7 +121,7 @@ job_finder/
 |-- config.py               # YAML config loader + path discovery
 |-- __main__.py             # `uv run job-cannon` entry point
 `-- db/                     # SQLite persistence (raw SQL, no ORM); package since S7d (2026-05-06)
-tests/                      # 5006 tests, unit + integration + e2e
+tests/                      # 5,000+ tests, unit + integration + e2e
 docs/
 |-- SETUP.md                # Gmail OAuth, config reference, troubleshooting
 `-- architecture/           # Subsystem deep-dives
@@ -158,7 +158,7 @@ are all opt-in. Each has its own pricing tier — see
 
 ## Platform Compatibility
 
-- Developed on Windows 11, tested with Python 3.13.
+- Developed on Windows 11, tested with Python 3.12 and 3.13.
 - macOS / Linux supported (no Windows-only code paths). The repo's
   `.githooks/` are bash; on Windows use Git Bash.
 - SQLite ships with Python — no separate database install.
@@ -196,7 +196,7 @@ keys needed for unit / integration. The e2e tier requires
 
 Working on Job Cannon itself? Use the clone-and-sync flow — you get the test suite, the eval harness, and a writable `.venv/` you can iterate against. (End users should use `pipx install job-cannon` from the [Install](#install) section above.)
 
-**Prerequisites:** Python 3.13+, [uv](https://docs.astral.sh/uv/getting-started/installation/). For free local AI scoring install [Ollama](https://ollama.com) and run `ollama pull qwen2.5:14b`.
+**Prerequisites:** Python 3.12+, [uv](https://docs.astral.sh/uv/getting-started/installation/). For free local AI scoring install [Ollama](https://ollama.com) and run `ollama pull qwen2.5:14b`.
 
 **macOS / Linux / Git Bash**
 

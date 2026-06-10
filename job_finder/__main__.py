@@ -157,7 +157,7 @@ def _open_browser(url: str) -> None:
         logger.warning("Could not open browser at %s: %s", url, exc)
 
 
-def _print_startup_banner(url: str, *, tray_mode: bool = False) -> None:
+def _print_startup_banner(url: str, *, tray_mode: bool = False) -> threading.Timer | None:
     """Print the user-facing startup banner and (unless opted out) schedule a
     delayed browser open.
 

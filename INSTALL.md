@@ -31,7 +31,7 @@ pipx install job-cannon
 
 ### Linux (Ubuntu 23.04+)
 
-Requires **Python 3.13+**. If your distro ships an older Python, install 3.13 first (e.g. via [deadsnakes](https://launchpad.net/~deadsnakes/+archive/ubuntu/ppa)) and use `pipx install --python python3.13 job-cannon`.
+Requires **Python 3.12+**. If your distro ships an older Python, install 3.12 or newer first (e.g. via [deadsnakes](https://launchpad.net/~deadsnakes/+archive/ubuntu/ppa)) and use `pipx install --python python3.12 job-cannon`.
 
 ```bash
 apt install pipx
