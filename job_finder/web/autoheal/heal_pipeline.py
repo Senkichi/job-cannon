@@ -17,7 +17,7 @@ import sqlite3
 from datetime import datetime, timedelta
 
 from job_finder.json_utils import utc_now_iso
-from job_finder.web.autoheal import codegen
+from job_finder.web.autoheal import codegen, validator
 from job_finder.web.model_provider import ProviderCascadeExhaustedError
 
 logger = logging.getLogger(__name__)
@@ -69,29 +69,34 @@ def run_heal(conn: sqlite3.Connection, config: dict, source: str) -> str | None:
 
     _audit(conn, source, surface, "candidate_generated")
 
-    # --- VALIDATE (C4) ---
-    verdict = _validate_stage(conn, config, source, surface, candidate, inputs)
-    if verdict is None:
-        # Stub: validation not yet wired (C3 state) — stop after generation.
-        return "candidate_generated"
+    # --- VALIDATE (C4) — subprocess corpus replay + regression proof ---
+    timeout_s = float(autoheal_cfg.get("validate_timeout_s", 30))
+    verdict = validator.validate(
+        candidate,
+        surface,
+        corpus_samples=inputs["baseline_samples"],
+        failing_samples=inputs["failing_samples"],
+        timeout_s=timeout_s,
+    )
+    if not verdict.ok:
+        reason = verdict.reason or "rejected"
+        _audit(conn, source, surface, f"rejected:{reason}")
+        return f"rejected:{reason}"
+
+    _audit(conn, source, surface, "validated")
 
     # --- ADOPT (C5) ---
     return _adopt_stage(conn, config, source, surface, candidate, verdict)
 
 
 # ---------------------------------------------------------------------------
-# Stage stubs (filled by C4 / C5)
+# Stage stub (filled by C5)
 # ---------------------------------------------------------------------------
-
-
-def _validate_stage(conn, config, source, surface, candidate, inputs):
-    """VALIDATE stage — C4 wires the subprocess corpus-replay gate. Stub: None."""
-    return None
 
 
 def _adopt_stage(conn, config, source, surface, candidate, verdict):
     """ADOPT stage — C5 writes the override + hot-swaps on a passing verdict. Stub."""
-    return None
+    return "validated"
 
 
 # ---------------------------------------------------------------------------

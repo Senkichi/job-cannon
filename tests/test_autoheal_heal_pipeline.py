@@ -167,6 +167,79 @@ def test_no_provider_audited(tmp_path):
     assert status == "degraded"
 
 
+# ---------------------------------------------------------------------------
+# C4 — VALIDATE wired into run_heal (audit validated / rejected:<reason>)
+# ---------------------------------------------------------------------------
+
+_RICH_WORKING = (
+    "<div class='job'><span class='title'>Engineer</span>"
+    "<a href='https://example.com/1'>Apply</a>"
+    "<span class='company'>Acme</span></div>" + "<!-- pad -->" * 30
+)
+_RICH_BROKEN = (
+    "<div class='job'><span class='headline'>Engineer</span>"
+    "<a href='https://example.com/2'>Apply</a>"
+    "<span class='company'>Acme</span></div>" + "<!-- pad -->" * 30
+)
+
+_GOOD_CANDIDATE = HtmlRecipe(
+    source="linkedin",
+    container_selector="div.job",
+    fields={
+        "title": FieldRule(selector=".title, .headline", attr="text"),
+        "url": FieldRule(selector="a", attr="href"),
+        "company": FieldRule(selector=".company", attr="text"),
+    },
+)
+
+
+def _seed_degraded_rich(conn, source: str, surface: str) -> None:
+    for _ in range(2):
+        corpus_store.append_sample(conn, source, surface, _RICH_WORKING, {"job_count": 1})
+    for _ in range(3):
+        corpus_store.append_sample(conn, source, surface, _RICH_BROKEN, {"job_count": 0})
+    conn.execute(
+        "INSERT INTO source_health (source, surface, status, consecutive_breaks, "
+        "baseline_yield, updated_at) VALUES (?, ?, 'degraded', 3, 1.0, '2026-06-09T00:00:00')",
+        (source, surface),
+    )
+    conn.commit()
+
+
+def test_validate_pass_audits_validated(tmp_path, monkeypatch):
+    conn = _conn(tmp_path)
+    _seed_degraded_rich(conn, "linkedin", "email")
+    # Skip gate (c) — the nested pytest run is covered by validator unit tests
+    monkeypatch.setattr(heal_pipeline.validator, "_pytest_gate", lambda *a, **k: None)
+
+    with patch.object(heal_pipeline.codegen, "generate_recipe", return_value=_GOOD_CANDIDATE):
+        heal_pipeline.run_heal(conn, _FLAG_ON, "linkedin")
+
+    outcomes = _audit_outcomes(conn, "linkedin")
+    assert "candidate_generated" in outcomes
+    assert "validated" in outcomes
+
+
+def test_validate_regression_audits_rejected(tmp_path):
+    conn = _conn(tmp_path)
+    _seed_degraded_rich(conn, "linkedin", "email")
+
+    regressing = HtmlRecipe(
+        source="linkedin",
+        container_selector="div.job",
+        fields={
+            "title": FieldRule(selector=".headline", attr="text"),
+            "url": FieldRule(selector="a", attr="href"),
+            "company": FieldRule(selector=".company", attr="text"),
+        },
+    )
+    with patch.object(heal_pipeline.codegen, "generate_recipe", return_value=regressing):
+        result = heal_pipeline.run_heal(conn, _FLAG_ON, "linkedin")
+
+    assert result == "rejected:regression"
+    assert "rejected:regression" in _audit_outcomes(conn, "linkedin")
+
+
 def test_candidate_generated_writes_no_override(tmp_path, monkeypatch):
     """C3 stops at GENERATE — no override file may be written."""
     from job_finder.web.autoheal import override_loader
