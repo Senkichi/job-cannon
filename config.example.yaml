@@ -356,3 +356,21 @@ filters:
   # Additional companies to auto-exclude (merged with built-in denylist)
   # Add staffing agencies or spam companies you keep seeing
   company_denylist: []
+
+# --- Parser auto-heal (Phase C, default off) ---
+# Declarative-recipe heal: when a source goes DEGRADED, the heal pipeline
+# generates a JSON recipe and writes it to <userdata>/heal_overrides/<surface>/.
+# With heal_enabled: false (the default), no recipes are generated and email
+# dispatch is byte-for-byte identical to the pre-Phase-C behaviour.
+# All reads are defensive: config.get('autoheal', {}).get(key, default).
+autoheal:
+  # Master toggle. Set to true to enable recipe generation and adoption.
+  heal_enabled: false
+  # LLM workload tier for recipe generation calls (quick / score / triage).
+  heal_provider: quick
+  # Maximum heal attempts per source before giving up (status stays DEGRADED).
+  heal_max_attempts: 3
+  # Hours to wait between heal attempts for the same source.
+  heal_backoff_hours: 24
+  # Wall-clock timeout (seconds) for the subprocess corpus-replay validator.
+  validate_timeout_s: 30

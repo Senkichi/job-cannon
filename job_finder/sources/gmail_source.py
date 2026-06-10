@@ -11,6 +11,7 @@ from datetime import UTC, datetime, timedelta
 
 from googleapiclient.discovery import build
 
+import job_finder.web.autoheal.override_loader as _override_loader
 from job_finder.models import Job
 from job_finder.parsers import extract_with_fallback
 from job_finder.parsers.glassdoor_parser import parse_glassdoor_alert
@@ -20,6 +21,7 @@ from job_finder.parsers.linkedin_parser import parse_linkedin_alert
 from job_finder.parsers.monster_parser import parse_monster_alert
 from job_finder.parsers.trueup_parser import parse_trueup_alert
 from job_finder.parsers.ziprecruiter_parser import parse_ziprecruiter_alert
+from job_finder.web.autoheal.recipe_extractor import RecipeExtractor
 
 logger = logging.getLogger(__name__)
 
@@ -191,7 +193,18 @@ class GmailSource:
                     # body=None means the API response was malformed; allow
                     # retry on the next sync rather than permanently silencing.
                     newly_processed.append(msg_id)
-                    jobs = extract_with_fallback(parser_fn, body, email_date)
+                    # Phase C: email override pre-check (dormant when no override files present).
+                    # With no override, falls through to extract_with_fallback unchanged.
+                    _label = SENDER_LABEL.get(sender, sender)
+                    _recipe = _override_loader.html_recipe(_label)
+                    if _recipe is not None:
+                        _recipe_jobs = RecipeExtractor(_recipe, job_source="email_recipe")(body)
+                    else:
+                        _recipe_jobs = []
+                    if _recipe_jobs:
+                        jobs = _recipe_jobs
+                    else:
+                        jobs = extract_with_fallback(parser_fn, body, email_date)
                     all_jobs.extend(jobs)
                     self.extraction_records.append(
                         {
