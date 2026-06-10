@@ -35,6 +35,7 @@ def record_extraction(
     detect: bool = True,
     legacy_count: int | None = None,
     extractor: str = "legacy",
+    filtered_count: int | None = None,
 ) -> None:
     """Append a corpus sample and (when detect) update the break counter. Never raises.
 
@@ -49,15 +50,22 @@ def record_extraction(
     result AND the legacy primary parser also ran: legacy outperforming the
     override ``SHADOW_ROLLBACK_WINS`` times consecutively auto-rolls the
     override back (status → healthy, legacy resumes).
+
+    Careers (D3, invariant I4): *job_count* is the STRUCTURAL candidate count
+    (pre-title-filter — "your roles were filled" must not look like "the page
+    broke"); *filtered_count* rides along in the snapshot for yield metrics.
     """
     try:
         baseline = corpus_store.baseline_yield(conn, source)
+        snapshot: dict = {"job_count": int(job_count), "extractor": extractor}
+        if filtered_count is not None:
+            snapshot["filtered_count"] = int(filtered_count)
         corpus_store.append_sample(
             conn,
             source,
             surface,
             raw_text,
-            {"job_count": int(job_count), "extractor": extractor},
+            snapshot,
             scrub_identifiers=scrub_identifiers,
         )
 

@@ -28,7 +28,11 @@ import requests
 from bs4 import BeautifulSoup
 
 from job_finder.web._http_constants import _HEADERS, _TIMEOUT
-from job_finder.web.careers_crawler._static_tier import _extract_jobs_from_soup
+from job_finder.web.careers_crawler._static_tier import (
+    _extract_candidates,
+    _extract_jobs_from_soup,
+    _filter_candidates,
+)
 from job_finder.web.db_helpers import standalone_connection
 
 logger = logging.getLogger(__name__)
@@ -65,21 +69,25 @@ def _try_playwright_extract(
 
         html = page.content()
         soup = BeautifulSoup(html, "html.parser")
-        jobs = _extract_jobs_from_soup(soup, url, target_titles, exclusions)
+        candidates = _extract_candidates(soup, url)
+        jobs = _filter_candidates(candidates, target_titles, exclusions)
 
-        # --- Autoheal Phase B: record final rendered HTML (detect=True) ---
+        # --- Autoheal D3: per-company capture, structural counts (I4, detect=True) ---
         if db_path:
             try:
+                from job_finder.web.autoheal import careers_source_key
                 from job_finder.web.autoheal.health_monitor import record_extraction as _rec
 
                 with standalone_connection(db_path) as cap_conn:
                     _rec(
                         cap_conn,
-                        "careers",
+                        careers_source_key(url),
                         "careers",
                         html[:50000],
-                        job_count=len(jobs),
+                        job_count=len(candidates),
                         detect=True,
+                        extractor="generic",
+                        filtered_count=len(jobs),
                     )
                     cap_conn.commit()
             except Exception:
@@ -255,20 +263,31 @@ def _try_playwright_active(
                 len(all_jobs),
             )
 
-        # --- Autoheal Phase B: record final rendered HTML once at exit (detect=True) ---
+        # --- Autoheal D3: record final rendered page once at exit (detect=True).
+        # There is no single extraction call here (six interaction-driven
+        # extraction points accumulate all_jobs), so the structural count is
+        # taken from the FINAL page DOM: interactions accumulate, and the
+        # final DOM is what a heal recipe would face. filtered_count carries
+        # the accumulated matched total for yield metrics (I4). ---
         if db_path:
             try:
+                from job_finder.web.autoheal import careers_source_key
                 from job_finder.web.autoheal.health_monitor import record_extraction as _rec
 
                 final_html = page.content()
+                final_candidates = _extract_candidates(
+                    BeautifulSoup(final_html, "html.parser"), url
+                )
                 with standalone_connection(db_path) as cap_conn:
                     _rec(
                         cap_conn,
-                        "careers",
+                        careers_source_key(url),
                         "careers",
                         final_html[:50000],
-                        job_count=len(all_jobs),
+                        job_count=len(final_candidates),
                         detect=True,
+                        extractor="generic",
+                        filtered_count=len(all_jobs),
                     )
                     cap_conn.commit()
             except Exception:
