@@ -245,7 +245,7 @@ class TestZipRecruiterParserBodyGuard:
         assert not warning_records, "Empty body must NOT trigger 'no jobs found' WARNING"
 
     def test_no_jobs_warning_suppressed_for_short_body(self, caplog):
-        """Body of <= 100 stripped chars does NOT trigger the 'no jobs found' WARNING."""
+        """Body of <= 500 stripped chars does NOT trigger the 'no jobs found' WARNING."""
         from job_finder.parsers.ziprecruiter_parser import parse_ziprecruiter_alert
 
         short_body = "<html><body>Hi</body></html>"
@@ -262,19 +262,16 @@ class TestZipRecruiterParserBodyGuard:
         )
 
     def test_no_jobs_warning_fires_for_substantive_body(self, caplog):
-        """Body > 100 stripped chars with no jobs DOES trigger the WARNING (guard preserved)."""
+        """Body > 500 stripped chars with no jobs DOES trigger the WARNING (guard preserved)."""
         from job_finder.parsers.ziprecruiter_parser import parse_ziprecruiter_alert
 
-        # A substantive HTML body with no parseable job links
+        # A substantive HTML body with no parseable job links (>500 chars)
         substantive_body = (
             "<html><body>"
-            "<p>Welcome to your weekly ZipRecruiter digest.</p>"
-            "<p>We found several opportunities that might interest you.</p>"
-            "<p>Please check back later for updated listings.</p>"
-            "<p>This is a test body with enough content to exceed the guard threshold.</p>"
-            "</body></html>"
+            + "<p>No ZipRecruiter job links here, just filler text.</p>" * 12
+            + "</body></html>"
         )
-        assert len(substantive_body.strip()) > 100
+        assert len(substantive_body.strip()) > 500
 
         with caplog.at_level(logging.WARNING, logger="job_finder.parsers.ziprecruiter_parser"):
             result = parse_ziprecruiter_alert(substantive_body)
@@ -296,7 +293,7 @@ class TestZipRecruiterParserBodyGuard:
         from job_finder.parsers import ziprecruiter_parser
 
         source = inspect.getsource(ziprecruiter_parser.parse_ziprecruiter_alert)
-        assert "len(body.strip()) > 100" in source, (
+        assert "len(body.strip()) > 500" in source, (
             "ziprecruiter_parser must have body-size guard: "
-            "`if not jobs and body and len(body.strip()) > 100:`"
+            "`if not jobs and body and len(body.strip()) > 500:`"
         )

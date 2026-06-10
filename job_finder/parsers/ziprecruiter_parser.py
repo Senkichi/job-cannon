@@ -73,7 +73,7 @@ def parse_ziprecruiter_alert(body: str, email_date: datetime | None = None) -> l
             # Fallback: try generic job card approach
             jobs = _parse_with_card_strategy(soup, email_date)
 
-        if not jobs and body and len(body.strip()) > 100:
+        if not jobs and body and len(body.strip()) > 500:
             logger.warning(
                 "ZipRecruiter parser: no jobs found -- HTML structure may have changed. "
                 "Inspect a recent ZipRecruiter email and update ziprecruiter_parser.py."

@@ -93,6 +93,10 @@ def parse_greenhouse_alert(body: str, email_date: datetime | None = None) -> lis
         logger.warning(
             "Greenhouse parser: URLs found but no jobs extracted. Email format may have changed."
         )
+    elif len(body) > 500 and not jobs:
+        logger.warning(
+            "Greenhouse parser: non-empty body yielded 0 jobs — email format may have changed."
+        )
 
     return jobs
 

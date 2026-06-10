@@ -625,3 +625,53 @@ class TestFetchDdgJds:
 # Cascade dispatch tests for extract_with_haiku/extract_with_sonnet were
 # removed in Phase 2b sub-fix RC4 along with the synthesis-tier functions
 # themselves (data_enricher.TIER_ORDER no longer references haiku/sonnet).
+
+
+# ---------------------------------------------------------------------------
+# query_ats_api() and scrape_careers() — swallowed exception level (issue #259)
+# ---------------------------------------------------------------------------
+
+
+class TestQueryAtsApiWarning:
+    """query_ats_api() must log at WARNING (not debug) when an exception occurs."""
+
+    def test_exception_logs_warning(self, caplog):
+        """A raised exception in query_ats_api emits a WARNING."""
+        import logging
+
+        from job_finder.web.enrichment_tiers import query_ats_api
+
+        job_row = {"title": "Data Scientist", "company_id": 1}
+        # Make conn.execute raise so the outer except block fires.
+        mock_conn = MagicMock()
+        mock_conn.execute.side_effect = Exception("ats boom")
+
+        with caplog.at_level(logging.WARNING, logger="job_finder.web.enrichment_tiers"):
+            result = query_ats_api(job_row, conn=mock_conn, config={})
+
+        assert result == {}
+        warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+        assert len(warnings) == 1
+        assert "ATS API query failed" in warnings[0].message
+
+
+class TestScrapeCareeersWarning:
+    """scrape_careers() must log at WARNING (not debug) when an exception occurs."""
+
+    def test_exception_logs_warning(self, caplog):
+        """A raised exception in scrape_careers emits a WARNING."""
+        import logging
+
+        from job_finder.web.enrichment_tiers import scrape_careers
+
+        job_row = {"company_id": 42}
+        mock_conn = MagicMock()
+        mock_conn.execute.side_effect = Exception("db boom")
+
+        with caplog.at_level(logging.WARNING, logger="job_finder.web.enrichment_tiers"):
+            result = scrape_careers(job_row, conn=mock_conn, config={})
+
+        assert result == {}
+        warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+        assert len(warnings) == 1
+        assert "Careers scrape failed" in warnings[0].message

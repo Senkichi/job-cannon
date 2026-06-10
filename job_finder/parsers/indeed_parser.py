@@ -945,4 +945,9 @@ def parse_indeed_match_alert(body: str, email_date: datetime | None = None) -> l
     if INDEED_CTS_URL_RE.search(body):
         return _parse_single_match(body, email_date)
 
+    if len(body) > 500:
+        logger.warning(
+            "Indeed match parser: non-empty body yielded 0 jobs — email format may have changed."
+        )
+
     return []

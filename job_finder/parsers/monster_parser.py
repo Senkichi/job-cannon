@@ -84,6 +84,11 @@ def parse_monster_alert(body: str, email_date: datetime | None = None) -> list[J
         if job:
             jobs.append(job)
 
+    if len(body) > 500 and not jobs:
+        logger.warning(
+            "Monster parser: non-empty body yielded 0 jobs — email format may have changed."
+        )
+
     return jobs
 
 
