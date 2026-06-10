@@ -42,27 +42,17 @@ from __future__ import annotations
 import logging
 import sqlite3
 
+from job_finder.db._jd_full import build_jd_junk_trigger_sql as _build_jd_junk_trigger_sql
 from job_finder.web.migrations.types import Migration, MigrationContext
 
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# I-13 junk gate — shared between the trigger WHEN clause and the preflight
-# SELECT so they agree exactly. Mirrors parsed_job._is_jd_junk and
-# scripts/pre_m078_remediation.JD_JUNK_PREFIXES.
+# I-13 junk gate — constants are owned by job_finder/db/_jd_full.py (single
+# source of truth).  The SQL expression is built from those constants via
+# build_jd_junk_trigger_sql() so the trigger DDL always stays in sync with the
+# Python gate without duplicating literal values here.
 # ---------------------------------------------------------------------------
-
-_MIN_JD_LENGTH = 200
-
-_JD_JUNK_PREFIXES = (
-    "sign in",
-    "loading",
-    "open roles at",
-    "skip to content",
-    "cookie",
-    "privacy policy",
-    "404",
-)
 
 
 def _jd_junk_condition(col: str) -> str:
@@ -71,16 +61,11 @@ def _jd_junk_condition(col: str) -> str:
     ``col`` is the column reference (``NEW.jd_full`` in a trigger, ``jd_full``
     in a preflight SELECT). True when the (trimmed, lowercased) first 200 chars
     start with a shell pattern OR the trimmed length is below the floor.
+
+    Delegates to ``build_jd_junk_trigger_sql`` so the expression is generated
+    from the canonical constants in ``job_finder/db/_jd_full.py``.
     """
-    likes = "\n            OR ".join(
-        f"LOWER(SUBSTR(TRIM({col}), 1, 200)) LIKE '{p}%'" for p in _JD_JUNK_PREFIXES
-    )
-    return (
-        f"{col} IS NOT NULL AND (\n"
-        f"            {likes}\n"
-        f"            OR LENGTH(TRIM({col})) < {_MIN_JD_LENGTH}\n"
-        f"        )"
-    )
+    return _build_jd_junk_trigger_sql(col)
 
 
 _WORKPLACE_DOMAIN = "('REMOTE','HYBRID','ONSITE','UNSPECIFIED')"

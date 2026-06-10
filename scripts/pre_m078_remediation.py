@@ -43,25 +43,23 @@ import sqlite3
 import sys
 from pathlib import Path
 
+from job_finder.db._jd_full import (
+    _JD_JUNK_PREFIXES as JD_JUNK_PREFIXES,
+)
+from job_finder.db._jd_full import (
+    _MIN_JD_LENGTH as MIN_JD_LENGTH,
+)
+from job_finder.db._jd_full import (
+    _is_jd_junk,  # noqa: F401 — explicit re-export; replaces old local copy
+)
+
 logger = logging.getLogger("pre_m078_remediation")
 
 # ---------------------------------------------------------------------------
-# I-13 junk detection — kept in lockstep with the m078 ``tg_jobs_jd_full_junk``
-# trigger and ``job_finder/parsed_job.py::_is_jd_junk``.
-# TODO: dedupe with job_finder/db/_jd_full.py once #43 (Phase 46.03) merges.
+# I-13 junk detection — constants and gate imported from the single source of
+# truth: job_finder/db/_jd_full.py.  The SQL predicate is rebuilt here from
+# the same constants so audit/verify counts agree with the m078 trigger.
 # ---------------------------------------------------------------------------
-
-MIN_JD_LENGTH: int = 200  # characters, post-strip
-
-JD_JUNK_PREFIXES: tuple[str, ...] = (
-    "sign in",
-    "loading",
-    "open roles at",
-    "skip to content",
-    "cookie",
-    "privacy policy",
-    "404",
-)
 
 # SQL predicate mirroring the m078 trigger: shell-pattern prefix match on the
 # first 200 chars (lowercased, trimmed) OR a sub-floor content length. Used by
@@ -75,20 +73,6 @@ _JD_JUNK_SQL_PREDICATE: str = (
     )
     + f"\n       LENGTH(TRIM(jd_full)) < {MIN_JD_LENGTH}\n    )"
 )
-
-
-def _is_jd_junk(text: str) -> bool:
-    """Return True if ``jd_full`` content fails the I-13 density gate.
-
-    Two failure modes, identical to the DB trigger:
-      - stripped text shorter than ``MIN_JD_LENGTH``;
-      - first 200 chars (lowercased) start with a junk prefix.
-    """
-    stripped = text.strip()
-    if len(stripped) < MIN_JD_LENGTH:
-        return True
-    prefix = stripped[:200].lower()
-    return any(prefix.startswith(p) for p in JD_JUNK_PREFIXES)
 
 
 # ---------------------------------------------------------------------------
