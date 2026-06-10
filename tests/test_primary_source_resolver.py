@@ -55,7 +55,12 @@ def _resolve(conn, config=None, **kwargs):
     from job_finder.web.primary_source_resolver import resolve_primary_sources
 
     kwargs.setdefault("delay_range", (0.0, 0.0))
-    return resolve_primary_sources(conn, config or {}, **kwargs)
+    if config is None:
+        # The Phase 4 LLM tie-breaker defaults ON in production; these tests
+        # exercise the heuristic path, so keep model calls out of them
+        # (tie-break behavior is covered in test_primary_source_tiebreak.py).
+        config = {"direct_link": {"resolver": {"llm_tiebreak": False}}}
+    return resolve_primary_sources(conn, config, **kwargs)
 
 
 def _posting(title, url, **extra):

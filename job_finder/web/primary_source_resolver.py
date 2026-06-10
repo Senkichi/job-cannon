@@ -45,11 +45,21 @@ pattern). Careers-page (non-ATS) resolution intentionally stays in the free
 enrichment tier: per-job HTML scraping is exactly the N-fetches-per-company
 shape this module exists to eliminate.
 
+LLM tie-breaker (Phase 4): a loose/ambiguous heuristic match gets one
+quick-tier call_model verdict (primary_source_tiebreak module — $0 on the
+Ollama primary). Only a confident, valid verdict upgrades the job to a
+strict link + data merge; the merge is tagged with a 'primary_source_llm'
+source label for auditability (pitfall P13). The first provider failure
+disables tie-breaking for the rest of the run — a dead cascade must not
+turn into a per-job timeout storm.
+
 Config (config.yaml > direct_link.resolver, all optional):
   enabled                  gate consulted by the scheduler wrapper (default true)
   max_attempts             skip rows at this many attempts (default 3)
   recheck_days             decay window for re-eligibility (default 30)
   max_companies_per_run    board-fetch cap per run (default 50)
+  llm_tiebreak             quick-tier tie-breaker for loose matches (default true)
+  llm_tiebreak_max_board   skip the LLM above this many candidate postings (40)
 """
 
 from __future__ import annotations
@@ -64,8 +74,13 @@ from typing import Any
 
 from job_finder.db._direct_link import set_direct_url, stamp_direct_url_checks
 from job_finder.json_utils import utc_now_iso
-from job_finder.web.direct_link import promote_existing_direct_url, resolve_primary_posting
+from job_finder.web.direct_link import (
+    _posting_link,
+    promote_existing_direct_url,
+    resolve_primary_posting,
+)
 from job_finder.web.primary_source_merge import merge_primary_posting_fields
+from job_finder.web.primary_source_tiebreak import DEFAULT_MAX_BOARD, tiebreak_primary_posting
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +94,7 @@ _DEFAULT_MAX_COMPANIES_PER_RUN = 50
 # compare correctly as text.
 _CANDIDATE_SQL = """
     SELECT j.dedup_key, j.title, j.location, j.company_id,
+           COALESCE(j.description, substr(j.jd_full, 1, 400)) AS snippet,
            c.ats_platform, c.ats_slug
     FROM jobs j
     JOIN companies c ON c.id = j.company_id
@@ -104,6 +120,8 @@ def _resolver_settings(config: dict) -> dict:
         "max_companies_per_run": int(
             section.get("max_companies_per_run", _DEFAULT_MAX_COMPANIES_PER_RUN)
         ),
+        "llm_tiebreak": bool(section.get("llm_tiebreak", True)),
+        "llm_tiebreak_max_board": int(section.get("llm_tiebreak_max_board", DEFAULT_MAX_BOARD)),
     }
 
 
@@ -145,7 +163,9 @@ def resolve_primary_sources(
     Keys: scanned (NULL-direct_url rows examined for promotion), promoted,
     companies_scanned, companies_skipped (platform without a public API /
     unknown — no attempt burned), jobs_checked (board-match attempts),
-    resolved, strict, loose, merged (strict matches whose fields folded in).
+    resolved, strict, loose, merged (strict matches whose fields folded in),
+    llm_checked (loose matches sent to the quick-tier tie-breaker),
+    llm_upgraded (tie-breaker verdicts that promoted loose -> strict).
     """
     settings = _resolver_settings(config)
     if max_companies is None:
@@ -165,6 +185,8 @@ def resolve_primary_sources(
         "strict": 0,
         "loose": 0,
         "merged": 0,
+        "llm_checked": 0,
+        "llm_upgraded": 0,
     }
 
     _promote_existing(conn, stats)
@@ -184,6 +206,7 @@ def resolve_primary_sources(
     from job_finder.web.ats_platforms._registry import run_platform_scan
 
     fetched_any = False
+    tiebreak_enabled = settings["llm_tiebreak"]
     for _company_id, group in list(by_company.items())[:max_companies]:
         scanner = SCANNERS_BY_NAME.get(group["platform"])
         if scanner is None or group["platform"] in NON_SCANNABLE_PLATFORMS:
@@ -213,6 +236,40 @@ def resolve_primary_sources(
             if resolved is None:
                 continue
             posting, url, confidence = resolved
+
+            # Loose/ambiguous heuristic match: one quick-tier verdict can
+            # upgrade it to strict (Phase 4). Only confident=true with a
+            # valid index does — everything else stays loose (P13).
+            source_tag = None
+            if posting is None and tiebreak_enabled:
+                stats["llm_checked"] += 1
+                try:
+                    upgraded = tiebreak_primary_posting(
+                        postings,
+                        job["title"] or "",
+                        job["location"] or "",
+                        job["snippet"],
+                        conn,
+                        config,
+                        job_id=job["dedup_key"],
+                        max_board=settings["llm_tiebreak_max_board"],
+                    )
+                except Exception as exc:
+                    # Cascade exhausted / providers down: stop tie-breaking
+                    # for this run instead of timing out once per loose job.
+                    logger.warning(
+                        "LLM tie-break unavailable (%s) — disabled for the rest of this run",
+                        exc,
+                    )
+                    tiebreak_enabled = False
+                    upgraded = None
+                if upgraded is not None:
+                    posting = upgraded
+                    url = _posting_link(upgraded) or url
+                    confidence = "strict"
+                    source_tag = "primary_source_llm"
+                    stats["llm_upgraded"] += 1
+
             if set_direct_url(conn, job["dedup_key"], url, confidence):
                 stats["resolved"] += 1
                 stats["strict" if confidence == "strict" else "loose"] += 1
@@ -220,7 +277,7 @@ def resolve_primary_sources(
             # merge_primary_posting_fields never raises (logs and returns
             # False), so one bad posting cannot abort the run.
             if posting is not None and merge_primary_posting_fields(
-                conn, {"dedup_key": job["dedup_key"]}, posting
+                conn, {"dedup_key": job["dedup_key"]}, posting, source_tag=source_tag
             ):
                 stats["merged"] += 1
 

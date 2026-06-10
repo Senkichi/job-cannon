@@ -431,6 +431,7 @@ def register_primary_source_resolution(scheduler, app) -> None:
                 "resolved_strict": r.get("strict", 0),
                 "resolved_loose": r.get("loose", 0),
                 "merged": r.get("merged", 0),
+                "llm_upgraded": r.get("llm_upgraded", 0),
             },
             guard=lambda config: ((config.get("direct_link") or {}).get("resolver") or {}).get(
                 "enabled", True
