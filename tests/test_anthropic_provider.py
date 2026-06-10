@@ -258,6 +258,70 @@ def test_call_propagates_timeout_error(provider):
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# API-key transport cost computation (Issue 303)
+# ---------------------------------------------------------------------------
+
+
+def test_api_key_transport_returns_nonzero_cost():
+    """AnthropicProvider('anthropic_api') computes real cost_usd from token counts.
+
+    parse_oneshot_envelope always returns cost_usd=0.0 (it is shared with
+    genuinely-free CLI providers). AnthropicProvider.call must override this for
+    the 'anthropic_api' transport using compute_cost / MODEL_PRICING.
+    """
+    from job_finder.web.claude_client import compute_cost
+    from job_finder.web.providers.anthropic_provider import (
+        ANTHROPIC_API_KEY_PROVIDER,
+        AnthropicProvider,
+    )
+
+    model = "claude-haiku-4-5"
+    input_tokens = 500
+    output_tokens = 200
+    envelope = {
+        "structured_output": {"score": 80},
+        "usage": {"input_tokens": input_tokens, "output_tokens": output_tokens},
+    }
+    p = AnthropicProvider(provider_name=ANTHROPIC_API_KEY_PROVIDER)
+    with patch(
+        "job_finder.web.providers.anthropic_provider._run_oneshot",
+        return_value=envelope,
+    ):
+        result = p.call(
+            model=model,
+            system="sys",
+            messages=[{"role": "user", "content": "hi"}],
+            output_schema={"type": "object"},
+        )
+
+    expected = compute_cost(model, input_tokens, output_tokens)
+    assert result.cost_usd == pytest.approx(expected)
+    assert result.cost_usd > 0
+    assert result.provider == ANTHROPIC_API_KEY_PROVIDER
+
+
+def test_subscription_transport_keeps_zero_cost():
+    """Default (subscription) provider still returns cost_usd=0.0."""
+    envelope = {
+        "structured_output": {"score": 80},
+        "usage": {"input_tokens": 500, "output_tokens": 200},
+    }
+    with patch(
+        "job_finder.web.providers.anthropic_provider._run_oneshot",
+        return_value=envelope,
+    ):
+        result = AnthropicProvider().call(
+            model="claude-haiku-4-5",
+            system="sys",
+            messages=[{"role": "user", "content": "hi"}],
+            output_schema={"type": "object"},
+        )
+
+    assert result.cost_usd == 0.0
+    assert result.provider == "anthropic"
+
+
 def test_anthropic_provider_init_params():
     """Issue 303 (2026-06-10): AnthropicProvider accepts exactly one optional
     constructor param — ``provider_name`` — used to distinguish API-key

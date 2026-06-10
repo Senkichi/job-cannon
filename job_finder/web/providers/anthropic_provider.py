@@ -29,9 +29,10 @@ Issue 303 (2026-06-10) added transport-mode attribution.
 
 from __future__ import annotations
 
+import dataclasses
 import logging
 
-from job_finder.web.claude_client import _run_oneshot
+from job_finder.web.claude_client import _run_oneshot, compute_cost
 from job_finder.web.model_provider import BaseProvider, ModelResult
 from job_finder.web.providers._cli_envelope import parse_oneshot_envelope
 
@@ -120,6 +121,13 @@ class AnthropicProvider(BaseProvider):
             json_schema=output_schema,
             timeout=timeout or self._timeout_default,
         )
-        return parse_oneshot_envelope(
+        result = parse_oneshot_envelope(
             envelope, output_schema, model=model, provider=self._provider_name
         )
+        # For API-key transport the CLI bills per token — compute real cost here
+        # so _maybe_record_cost (in the cascade layer) records the true spend.
+        # Subscription transport ("anthropic") is $0 and stays with cost_usd=0.0.
+        if self._provider_name == ANTHROPIC_API_KEY_PROVIDER:
+            real_cost = compute_cost(model, result.input_tokens, result.output_tokens)
+            result = dataclasses.replace(result, cost_usd=real_cost)
+        return result

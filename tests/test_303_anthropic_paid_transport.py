@@ -203,8 +203,91 @@ class TestMakeAdapterTransportSelection:
 
 
 class TestApiKeyTransportRecordsCost:
+    def _paid_envelope(self, input_tokens: int = 1000, output_tokens: int = 500) -> dict:
+        return {
+            "structured_output": {"score": 75},
+            "usage": {"input_tokens": input_tokens, "output_tokens": output_tokens},
+        }
+
+    def test_adapter_computes_real_cost_for_api_key_transport(self):
+        """AnthropicProvider('anthropic_api').call() computes cost_usd > 0 from token counts.
+
+        This is the honest AC-1 path: the adapter itself must compute real cost
+        (via compute_cost / MODEL_PRICING) so that _maybe_record_cost receives a
+        non-zero cost_usd and records it.  Previously parse_oneshot_envelope hardcoded
+        cost_usd=0.0 and the adapter never overrode it.
+        """
+        from job_finder.web.claude_client import compute_cost
+        from job_finder.web.providers.anthropic_provider import (
+            ANTHROPIC_API_KEY_PROVIDER,
+            AnthropicProvider,
+        )
+
+        model = "claude-sonnet-4-6"
+        input_tokens = 1000
+        output_tokens = 500
+        expected_cost = compute_cost(model, input_tokens, output_tokens)
+        assert expected_cost > 0, "MODEL_PRICING must have entry for claude-sonnet-4-6"
+
+        p = AnthropicProvider(provider_name=ANTHROPIC_API_KEY_PROVIDER)
+        with patch(
+            "job_finder.web.providers.anthropic_provider._run_oneshot",
+            return_value=self._paid_envelope(input_tokens, output_tokens),
+        ):
+            result = p.call(
+                model=model,
+                system="sys",
+                messages=[{"role": "user", "content": "score this"}],
+                output_schema={"type": "object"},
+            )
+
+        assert result.provider == ANTHROPIC_API_KEY_PROVIDER
+        assert result.cost_usd == pytest.approx(expected_cost)
+        assert result.input_tokens == input_tokens
+        assert result.output_tokens == output_tokens
+
+    def test_adapter_api_key_result_lands_in_db_with_nonzero_cost(self, migrated_conn):
+        """End-to-end: adapter result for anthropic_api → _maybe_record_cost → cost_usd > 0 in DB.
+
+        Verifies the full path: AnthropicProvider computes real cost, then
+        _maybe_record_cost (which uses result.cost_usd for paid providers) writes it.
+        """
+        from job_finder.web.claude_client import compute_cost
+        from job_finder.web.model_provider import _maybe_record_cost
+        from job_finder.web.providers.anthropic_provider import (
+            ANTHROPIC_API_KEY_PROVIDER,
+            AnthropicProvider,
+        )
+
+        model = "claude-haiku-4-5"
+        input_tokens = 2000
+        output_tokens = 300
+        expected_cost = compute_cost(model, input_tokens, output_tokens)
+
+        p = AnthropicProvider(provider_name=ANTHROPIC_API_KEY_PROVIDER)
+        with patch(
+            "job_finder.web.providers.anthropic_provider._run_oneshot",
+            return_value=self._paid_envelope(input_tokens, output_tokens),
+        ):
+            result = p.call(
+                model=model,
+                system="sys",
+                messages=[{"role": "user", "content": "score this"}],
+                output_schema={"type": "object"},
+            )
+
+        _maybe_record_cost(result, migrated_conn, job_id="j-e2e", purpose="scoring")
+
+        row = migrated_conn.execute(
+            "SELECT provider, cost_usd FROM scoring_costs WHERE job_id = ?", ("j-e2e",)
+        ).fetchone()
+        assert row is not None
+        assert row["provider"] == ANTHROPIC_API_KEY_PROVIDER
+        assert row["cost_usd"] == pytest.approx(expected_cost)
+        assert row["cost_usd"] > 0
+
     def test_cost_recorded_for_api_key_transport(self, migrated_conn):
-        """With API key set, _maybe_record_cost writes cost_usd > 0 as 'anthropic_api'."""
+        """_maybe_record_cost uses result.cost_usd as-is for paid providers (anthropic_api)."""
         from job_finder.web.claude_client import FREE_PROVIDERS
         from job_finder.web.model_provider import ModelResult, _maybe_record_cost
         from job_finder.web.providers.anthropic_provider import ANTHROPIC_API_KEY_PROVIDER

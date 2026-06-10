@@ -81,15 +81,20 @@ FREE_PROVIDERS: frozenset[str] = frozenset(
         "local_bundled",  # NEW — LocalBundledProvider (Plan 04)
         "google_cse",  # Stage 3 — Google Programmable Search Engine ($0 up to 100/day quota)
         # NOTE: "anthropic_api" is intentionally absent — API-key transport is paid.
+        #
+        # Under-reported-spend window audit (Issue 303 / 2026-06-10):
+        # Between migration m057 (2026-05-26, F2 moved "anthropic" into FREE_PROVIDERS)
+        # and this fix, every AnthropicProvider call wrote provider='anthropic' regardless
+        # of whether the CLI was OAuth-subscription ($0) or per-token API-key (paid).
+        # Those rows have cost_usd=0 but real token counts. To estimate missing spend:
+        #   SELECT * FROM scoring_costs
+        #   WHERE provider = 'anthropic'
+        #     AND timestamp >= '2026-05-26T00:00:00Z'
+        #     AND timestamp < '<date you deployed Issue 303 fix>';
+        # Multiply input_tokens/1e6 * MODEL_PRICING[model]['input']
+        #       + output_tokens/1e6 * MODEL_PRICING[model]['output'].
     }
 )
-
-# Pricing table for Claude models used via API-key transport (per million tokens, USD).
-# Verified against https://www.anthropic.com/pricing on 2026-06-10.
-# claude-haiku-4-5:  $1.00 input / $5.00 output
-# claude-sonnet-4-6: $3.00 input / $15.00 output
-# claude-opus-4-6:   $5.00 input / $25.00 output
-# (MODEL_PRICING is defined earlier in this module at line ~51.)
 
 
 def is_anthropic_api_key_transport() -> bool:
