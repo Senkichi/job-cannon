@@ -43,9 +43,14 @@ from flask import (
 )
 
 from job_finder import secrets as jf_secrets
-from job_finder.config import ConfigError, ConfigNotFoundError, load_config
+from job_finder.config import (
+    DEFAULT_DAILY_BUDGET_USD,
+    ConfigError,
+    ConfigNotFoundError,
+    load_config,
+)
 from job_finder.web import user_data_dirs
-from job_finder.web.db_helpers import get_db
+from job_finder.web.db_helpers import get_db, refresh_jf_config
 from job_finder.web.onboarding import imap_test, resume_parser, state, system_check
 from job_finder.web.providers.detection import detect_available_providers
 from job_finder.web.scheduler import get_scheduler
@@ -293,6 +298,19 @@ def profile_edit():
     resume_profile = data.get("resume_profile") or {}
 
     if request.method == "POST":
+        target_titles_raw = request.form.get("target_titles", "").strip()
+        if not target_titles_raw:
+            # Server-side guard: empty target_titles would produce a config.yaml that
+            # fails validate_target_titles at every subsequent boot (Issue #299 fuse 2).
+            return render_template(
+                "onboarding/profile_edit.html",
+                error="At least one target job title is required.",
+                target_titles="",
+                target_locations=request.form.get("target_locations", "").strip(),
+                skills=request.form.get("skills", "").strip(),
+                min_salary=request.form.get("min_salary", "").strip(),
+                **_step("profile_edit"),
+            )
         min_salary_raw = request.form.get("min_salary", "").strip()
         try:
             min_salary = int(min_salary_raw) if min_salary_raw else None
@@ -300,7 +318,7 @@ def profile_edit():
             min_salary = None
         slice_: dict = {
             "profile_edit": {
-                "target_titles": request.form.get("target_titles", "").strip(),
+                "target_titles": target_titles_raw,
                 "target_locations": request.form.get("target_locations", "").strip(),
                 "skills": request.form.get("skills", "").strip(),
                 "min_salary": min_salary,
@@ -340,7 +358,11 @@ def imap_credentials():
         skip = bool(request.form.get("skip"))
 
         if skip:
-            # D-08 escape hatch: save credentials anyway (even if test would fail), mark not-verified
+            # D-08 escape hatch: user skipped IMAP setup — mark disabled so the
+            # first ingest doesn't attempt to connect with empty/unverified credentials
+            # and log spurious "sources.imap.email is required" errors (Issue #299 fuse 3).
+            # Credentials are preserved in case the user wants to enable IMAP later
+            # via Settings, but enabled is explicitly False until they do.
             state.write_wizard_data(
                 _db(),
                 {
@@ -350,7 +372,7 @@ def imap_credentials():
                         "email": email,
                         "app_password": app_password,
                         "folder": "INBOX",
-                        "enabled": True,
+                        "enabled": False,
                         "verified": False,
                     }
                 },
@@ -460,13 +482,48 @@ def done():
         def _split_lines(s: str) -> list[str]:
             return [line.strip() for line in (s or "").splitlines() if line.strip()]
 
+        # imap.enabled: prefer the value the IMAP step explicitly set (True on
+        # successful test, False on Skip). Fall back to False — not True — so a
+        # fresh-install wizard that never visited the IMAP step doesn't silently
+        # attempt connections with empty credentials (Issue #299 fuse 3).
+        imap_enabled = imap_block.get("enabled", False)
+
+        # --- Side effect 1: atomic config.yaml write (D-15) ---
+        # Load existing config BEFORE building the slice so we can gate the
+        # scoring/db defaults on whether those sections are already present
+        # (see Issue #299 fuse 1 below).
+        #
+        # When load_config raises ConfigError (e.g. validate_target_titles fails on
+        # an existing-but-broken file), the previous except-Exception fallback set
+        # existing_cfg = {} and the merge produced just the slice — wiping scoring,
+        # db, filters, output, etc. Now: only fall back to {} when the file is
+        # genuinely absent. If the file exists but failed validation, read raw YAML
+        # so the merge preserves user data; an unvalidated merged write is far
+        # better than a slice-only wipe.
+        config_path = user_data_dirs.config_path()
+        try:
+            existing_cfg = load_config(str(config_path), allow_missing=True) or {}
+        except ConfigNotFoundError:
+            existing_cfg = {}
+        except (ConfigError, ValueError) as e:
+            logger.warning(
+                "onboarding done: existing config failed validation (%s); "
+                "reading raw YAML to preserve user data for merge",
+                e,
+            )
+            try:
+                with open(config_path, encoding="utf-8") as f:
+                    existing_cfg = yaml.safe_load(f) or {}
+            except (OSError, yaml.YAMLError):
+                existing_cfg = {}
+
         config_slice: dict = {
             "providers": {
                 "primary": provider_block.get("name", "anthropic"),
             },
             "sources": {
                 "imap": {
-                    "enabled": imap_block.get("enabled", True),
+                    "enabled": imap_enabled,
                     "host": imap_block.get("host", "imap.gmail.com"),
                     "port": imap_block.get("port", 993),
                     "email": imap_block.get("email", ""),
@@ -483,6 +540,20 @@ def done():
                 "cadence_preset": schedule_block.get("cadence_preset", "standard"),
             },
         }
+        # Populate scoring and db defaults only when absent from the merge base
+        # (fresh install, Issue #299 fuse 1).  Deep-merge replaces individual
+        # scalar leaves, so unconditionally including them in the slice would
+        # overwrite a user's existing settings (e.g. their custom daily_budget_usd).
+        # By inserting only into a missing section we preserve every existing key
+        # while still guaranteeing validate_required_sections passes on restart.
+        if "scoring" not in existing_cfg:
+            config_slice["scoring"] = {"daily_budget_usd": DEFAULT_DAILY_BUDGET_USD}
+        if "db" not in existing_cfg:
+            # Use the app's current DB_PATH so JOB_CANNON_USER_DATA_DIR overrides
+            # and test fixtures aren't clobbered by a hardcoded "jobs.db" that
+            # wouldn't match the running process's actual database.
+            current_db_path = current_app.config.get("DB_PATH", "jobs.db")
+            config_slice["db"] = {"path": str(current_db_path)}
         if profile_edit.get("min_salary"):
             config_slice["profile"]["min_salary"] = profile_edit["min_salary"]
         if provider_block.get("api_key"):
@@ -513,33 +584,19 @@ def done():
                     canonical,
                 )
 
-        # --- Side effect 1: atomic config.yaml write (D-15) ---
-        # When load_config raises ConfigError (e.g. validate_target_titles fails on
-        # an existing-but-broken file), the previous except-Exception fallback set
-        # existing_cfg = {} and the merge produced just the slice — wiping scoring,
-        # db, filters, output, etc. Now: only fall back to {} when the file is
-        # genuinely absent. If the file exists but failed validation, read raw YAML
-        # so the merge preserves user data; an unvalidated merged write is far
-        # better than a slice-only wipe.
-        config_path = user_data_dirs.config_path()
-        try:
-            existing_cfg = load_config(str(config_path), allow_missing=True) or {}
-        except ConfigNotFoundError:
-            existing_cfg = {}
-        except (ConfigError, ValueError) as e:
-            logger.warning(
-                "onboarding done: existing config failed validation (%s); "
-                "reading raw YAML to preserve user data for merge",
-                e,
-            )
-            try:
-                with open(config_path, encoding="utf-8") as f:
-                    existing_cfg = yaml.safe_load(f) or {}
-            except (OSError, yaml.YAMLError):
-                existing_cfg = {}
         merged_cfg = state._deep_merge(existing_cfg, config_slice)
         state._write_config(merged_cfg, config_path)  # atomic temp+rename (CLAUDE.md mandate)
         logger.info("onboarding done: wrote %s atomically", config_path)
+
+        # --- Refresh the live in-memory config (Issue #300) ---
+        # Boot sets JF_CONFIG = {} when no config.yaml exists.  Without this
+        # refresh the one-shot first ingest (side effect 4) and every scheduler
+        # job registered at boot would call get_config_snapshot() against the
+        # empty dict, find no sources enabled, and ingest nothing — silently.
+        # refresh_jf_config is the single point of enforcement shared with the
+        # Settings save route so neither caller can diverge.
+        app_obj = current_app._get_current_object()
+        refresh_jf_config(app_obj, merged_cfg)
 
         # --- Side effect 2: atomic experience_profile.json write (D-16) ---
         resume_profile = wizard_data.get("resume_profile") or {}
@@ -580,11 +637,9 @@ def done():
         # _jobs.py:register_ingestion.run_pipeline shape: capture `app` here (current_app
         # proxy expires after the response), open an app_context inside the closure, fetch
         # config + db_path, then invoke run_ingestion.
+        # app_obj was already captured above (refresh_jf_config block) — reused here.
         scheduler = get_scheduler()
         if scheduler is not None:
-            # Capture the concrete Flask app BEFORE the request returns. The `current_app`
-            # proxy is request-scoped and will raise outside the request context.
-            app_obj = current_app._get_current_object()
 
             def _first_ingest():
                 """One-shot wizard first-ingest closure (D-17).
