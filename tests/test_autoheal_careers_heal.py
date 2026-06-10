@@ -365,3 +365,107 @@ def test_run_heal_careers_rejects_regressing_candidate(tmp_path, monkeypatch):
 
     assert result == "rejected:regression"
     assert not (overrides_dir / "careers" / "acme.com.json").exists()
+
+
+# ---------------------------------------------------------------------------
+# Break-sim: detect → heal → consume → upstream fix → shadow rollback (D4 task 6)
+# ---------------------------------------------------------------------------
+
+# Era 1 — original markup: job tiles, anchors crawlable by the generic pass.
+_ERA1_HTML = (
+    "<html><body>" + _PAD + '<div class="job"><h3>Software Engineer</h3>'
+    '<a href="/jobs/eng-1" data-url="/jobs/eng-1">Apply Now</a></div>'
+    '<div class="job"><h3>Product Manager</h3>'
+    '<a href="/jobs/pm-1" data-url="/jobs/pm-1">Apply Now</a></div>'
+    "</body></html>"
+)
+
+# Era 2 — redesign: container class renamed, hrefs dead ("#") with the real
+# URL moved to data-url. The generic link pass sees ZERO structural
+# candidates → break.
+_ERA2_HTML = (
+    "<html><body>" + _PAD + '<div class="job-card"><h3>Software Engineer</h3>'
+    '<a href="#" data-url="/jobs/eng-1">Apply Now</a></div>'
+    '<div class="job-card"><h3>Product Manager</h3>'
+    '<a href="#" data-url="/jobs/pm-1">Apply Now</a></div>'
+    "</body></html>"
+)
+
+# Era 3 — upstream "fix": one era-1 tile survives (the override still yields)
+# but the page now also carries plain crawlable job links the recipe's
+# container misses → the generic pass structurally outperforms the override.
+_ERA3_HTML = (
+    "<html><body>" + _PAD + '<div class="job"><h3>Software Engineer</h3>'
+    '<a href="/jobs/eng-1" data-url="/jobs/eng-1">Apply Now</a></div>'
+    '<a href="/jobs/a-1">Platform Engineer</a>'
+    '<a href="/jobs/b-2">Data Engineer</a>'
+    '<a href="/jobs/c-3">QA Engineer</a>'
+    "</body></html>"
+)
+
+# Or-selector recipe covering both eras (a@data-url present in both).
+_BREAK_SIM_RECIPE = {
+    "source": "careers:example.com",
+    "container_selector": "div.job, div.job-card",
+    "fields": {
+        "title": {"selector": "h3", "attr": "text"},
+        "url": {"selector": "a", "attr": "data-url"},
+    },
+}
+
+
+def _crawl(html: str, db: str) -> list[dict] | None:
+    with patch("requests.get", return_value=_mock_response(html)):
+        return _try_static_extract(_CAREERS_URL, ["engineer"], [], db_path=db)
+
+
+def test_break_sim_full_lifecycle(tmp_path, monkeypatch):
+    """Detect → heal → consume → upstream fix → generic-shadow auto-rollback."""
+    from job_finder.web.autoheal import BREAK_THRESHOLD
+    from job_finder.web.autoheal.health_monitor import run_detection
+
+    db = _setup_db(tmp_path)
+    _loader, overrides_dir = _isolated_loader(tmp_path, monkeypatch)
+    source = "careers:example.com"
+    override_file = overrides_dir / "careers" / "example.com.json"
+
+    # Era 1: healthy crawls build the corpus baseline.
+    for _ in range(3):
+        assert _crawl(_ERA1_HTML, db) == []  # "Apply Now" titles never match
+    assert _health(db, source)["status"] == "healthy"
+
+    # Era 2: the redesign breaks the generic extractor structurally.
+    for _ in range(BREAK_THRESHOLD):
+        _crawl(_ERA2_HTML, db)
+    assert run_detection(db) == [source]
+    assert _health(db, source)["status"] == "degraded"
+
+    # Heal: the (mocked) model proposes an or-selector recipe; the validator
+    # replays it over both eras' corpus samples; adoption lands the file.
+    conn = sqlite3.connect(db)
+    conn.row_factory = sqlite3.Row
+    model_result = SimpleNamespace(data=_BREAK_SIM_RECIPE, schema_valid=True)
+    with patch.object(codegen, "call_model", return_value=model_result):
+        assert heal_pipeline.run_heal(conn, _FLAG_ON, source) == "adopted"
+    assert override_file.is_file()
+
+    # Consume: the seam now extracts from the mutated page via the override.
+    jobs = _crawl(_ERA2_HTML, db)
+    assert [j["title"] for j in jobs] == ["Software Engineer"]
+    assert jobs[0]["url"] == "https://example.com/jobs/eng-1"
+    assert _snapshot(db, source)["extractor"] == "override"
+    assert _health(db, source)["status"] == "healthy"
+
+    # Era 3: upstream fixes the page; the generic pass structurally
+    # outperforms the stale override twice → automatic shadow rollback.
+    for _ in range(2):
+        assert _crawl(_ERA3_HTML, db)  # override still yields, so still used
+    assert not override_file.exists()
+    health = _health(db, source)
+    assert health["status"] == "healthy"
+    assert health["shadow_legacy_wins"] == 0  # zeroed at override death (I2)
+
+    # Post-rollback: crawling is pure generic again.
+    jobs = _crawl(_ERA3_HTML, db)
+    assert {j["title"] for j in jobs} == {"Platform Engineer", "Data Engineer", "QA Engineer"}
+    assert _snapshot(db, source)["extractor"] == "generic"

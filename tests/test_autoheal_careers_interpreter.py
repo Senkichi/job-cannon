@@ -87,9 +87,7 @@ def test_apply_field_rule_text_and_attr():
 
     from job_finder.web.autoheal.recipe_schema import FieldRule
 
-    block = BeautifulSoup(
-        '<div><h3> Engineer </h3><a href="/x">go</a></div>', "html.parser"
-    ).div
+    block = BeautifulSoup('<div><h3> Engineer </h3><a href="/x">go</a></div>', "html.parser").div
     assert apply_field_rule(block, FieldRule(selector="h3", attr="text")) == "Engineer"
     assert apply_field_rule(block, FieldRule(selector="a", attr="href")) == "/x"
     assert apply_field_rule(block, FieldRule(selector=".missing", attr="text")) == ""

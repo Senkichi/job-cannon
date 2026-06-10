@@ -70,9 +70,7 @@ def careers_recipe_extract(recipe: HtmlRecipe, html: str, base_url: str) -> list
             url = apply_field_rule(block, recipe.fields["url"])
             if not title or not url:
                 continue
-            results.append(
-                {"title": title, "url": urljoin(base_url, url), "description": ""}
-            )
+            results.append({"title": title, "url": urljoin(base_url, url), "description": ""})
         return results
     except Exception:
         logger.warning("careers_recipe_extract: unexpected error; returning []", exc_info=True)

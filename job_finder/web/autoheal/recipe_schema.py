@@ -108,9 +108,7 @@ def validate_recipe(surface: str, data: dict) -> HtmlRecipe | AtsAliasRecipe:
                     missing required fields, empty lists, non-string values.
     """
     if surface not in ("email", "ats", "careers"):
-        raise ValueError(
-            f"Unknown surface {surface!r}; expected 'email', 'ats', or 'careers'"
-        )
+        raise ValueError(f"Unknown surface {surface!r}; expected 'email', 'ats', or 'careers'")
     if surface in ("email", "careers"):
         return _validate_html_recipe(data)
     return _validate_ats_alias_recipe(data)
