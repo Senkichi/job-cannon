@@ -116,6 +116,29 @@ Optional paid SERP-based sources. Each has its own key field in `config.yaml` an
 | Thordata | [thordata.com](https://www.thordata.com/) |
 | DataForSEO | [app.dataforseo.com/api-access](https://app.dataforseo.com/api-access) (base64 `login:password`) |
 
+#### Dedicated label recommendation
+
+By default the IMAP source reads `INBOX`.  Because it scopes searches to known
+job-alert sender addresses, your personal email is **never fetched or examined**.
+However, for the cleanest separation you can point Job Cannon at a dedicated
+Gmail label (e.g. `Job Alerts`) instead:
+
+1. In Gmail, create a label — **Settings → Labels → Create new label**.
+2. Create a filter that applies the label to mail from each job-alert service
+   (LinkedIn, Glassdoor, Indeed, ZipRecruiter, etc.) and, optionally, archives
+   it out of your inbox.
+3. In Job Cannon, go to **Settings → Sources → IMAP** and set the
+   **Folder** field to the exact label name (e.g. `Job Alerts`).  Gmail exposes
+   labels as IMAP folders.
+
+When the source runs it:
+- Searches that folder for messages it hasn't read yet, scoped to the sender
+  addresses of the supported job-alert services.
+- Fetches message bodies non-destructively (`BODY.PEEK[]`), so nothing is
+  marked read during the fetch itself.
+- Marks a message `\Seen` only after it has been successfully dispatched to a
+  parser — and only messages from known job-alert senders are ever flagged.
+
 ### Gmail via OAuth (power-user alternative)
 
 If you prefer the Gmail API over IMAP, the one-time Google Cloud setup is below. This takes about 10 minutes. Most users should use IMAP.
