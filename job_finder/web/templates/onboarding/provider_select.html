@@ -4,6 +4,7 @@
 <!-- WIZARD_STEP_PROVIDER_SELECT_MARKER -->
 <h1 class="text-2xl font-bold text-slate-100 mb-4">Choose your AI provider</h1>
 <p class="text-slate-300 mb-6">These power job scoring. We auto-detected which CLIs you have installed; the top one is recommended.</p>
+
 {% if providers %}
   <form method="post" action="{{ url_for('onboarding.provider_select') }}" class="space-y-3">
     {% for p in providers %}
@@ -11,7 +12,8 @@
         <input type="radio" name="provider_name" value="{{ p.name }}" {% if loop.first %}checked{% endif %} class="mt-1">
         <div>
           <div class="text-slate-200 font-medium">{{ p.name }}</div>
-          <div class="text-slate-400 text-xs">{{ p.cost_label }} - detected at {{ p.binary_path }}</div>
+          <div class="text-slate-400 text-xs">{{ p.cost_label }}</div>
+          <div class="text-slate-500 text-xs font-mono">{{ p.binary_path }}</div>
         </div>
       </label>
     {% endfor %}
@@ -22,18 +24,47 @@
   </form>
 {% else %}
   <div class="p-4 bg-amber-900/30 border border-amber-700 rounded mb-4">
-    <p class="text-amber-200 text-sm">No subscription-leveraged CLIs detected. You can:</p>
-    <ul class="list-disc list-inside text-amber-100 text-sm mt-2 space-y-1">
-      <li>Install claude-code CLI (Claude Pro subscription)</li>
-      <li>Install gemini CLI (free tier available)</li>
-      <li>Install Ollama (fully local)</li>
-      <li>Or proceed with Anthropic API (BYO key)</li>
+    <p class="text-amber-200 text-sm font-medium mb-2">No subscription-leveraged CLIs detected.</p>
+    <p class="text-amber-100 text-sm mb-3">You can install one of these free options:</p>
+    <ul class="list-disc list-inside text-amber-100 text-sm space-y-1 ml-2">
+      <li><span class="font-medium">claude-code CLI</span> — requires a Claude Pro subscription; run <span class="font-mono bg-slate-800 px-1 rounded">npm install -g @anthropic-ai/claude-code</span></li>
+      <li><span class="font-medium">gemini CLI</span> — free tier available; run <span class="font-mono bg-slate-800 px-1 rounded">npm install -g @google/gemini-cli</span></li>
+      <li><span class="font-medium">Ollama</span> — fully local, no API key; install from <span class="font-mono bg-slate-800 px-1 rounded">ollama.ai</span> then pull a model</li>
     </ul>
+    <p class="text-amber-200 text-xs mt-3">After installing, click <strong>Re-detect</strong> below.</p>
   </div>
-  <form method="post" action="{{ url_for('onboarding.provider_select') }}">
-    <input type="hidden" name="provider_name" value="anthropic">
-    <button type="submit" class="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded">Use Anthropic API</button>
+  <form method="post" action="{{ url_for('onboarding.provider_select') }}" class="flex gap-2 flex-wrap">
+    <button type="submit" name="provider_name" value="anthropic" class="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded">Use Anthropic API (BYO key)</button>
     <button type="submit" name="redetect" value="1" class="bg-slate-700 hover:bg-slate-600 text-slate-200 px-4 py-2 rounded">Re-detect</button>
+    <button type="submit" name="skip_provider" value="1" formnovalidate
+            class="bg-slate-600 hover:bg-slate-500 text-slate-300 px-4 py-2 rounded text-sm">
+      Skip — configure later in Settings
+    </button>
   </form>
+{% endif %}
+
+{# Ollama installed but no models pulled yet — render inline pull guidance #}
+{% if ollama_no_model %}
+  <div class="mt-4 p-4 bg-blue-900/30 border border-blue-700 rounded">
+    <p class="text-blue-200 text-sm font-medium mb-1">Ollama is installed but has no models.</p>
+    <p class="text-blue-100 text-sm mb-2">Run the following to pull the recommended model (~9 GB):</p>
+    <pre class="bg-slate-900 text-green-300 text-xs rounded px-3 py-2 overflow-x-auto">ollama pull qwen2.5:14b</pre>
+    <p class="text-blue-200 text-xs mt-2">Once the pull finishes, click <strong>Re-detect</strong> on this page.</p>
+    <form method="post" action="{{ url_for('onboarding.provider_select') }}" class="mt-3">
+      <button type="submit" name="redetect" value="1" class="bg-slate-700 hover:bg-slate-600 text-slate-200 px-4 py-2 rounded text-sm">Re-detect</button>
+    </form>
+  </div>
+{% endif %}
+
+{# Skip path is always available, even when providers were detected #}
+{% if providers %}
+  <div class="mt-6 pt-4 border-t border-slate-700">
+    <form method="post" action="{{ url_for('onboarding.provider_select') }}">
+      <button type="submit" name="skip_provider" value="1" formnovalidate
+              class="text-slate-400 hover:text-slate-300 text-sm underline">
+        Skip — configure a provider later in Settings
+      </button>
+    </form>
+  </div>
 {% endif %}
 {% endblock %}
