@@ -8,8 +8,12 @@ Coverage:
 - Posting age parsing (all age string formats)
 - fetch_jobs iterates queries and combines results
 - _search: POST request with correct headers; returns [] on HTTP error
+- _search: uses engine=google_jobs and reads jobs_results[] (the gap that shipped the bug)
+- _search: warns on 200 response missing jobs_results key (expired key / engine mismatch)
+- _search: pagination loop stops at max_pages cap; short page terminates early
 """
 
+import logging
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -331,7 +335,7 @@ class TestSearch:
         """_search sends Authorization: Bearer header."""
         mock_resp = MagicMock()
         mock_resp.raise_for_status.return_value = None
-        mock_resp.json.return_value = {"job_results": {"jobs": []}}
+        mock_resp.json.return_value = {"jobs_results": []}
 
         with patch(
             "job_finder.sources.thordata_source.requests.post", return_value=mock_resp
@@ -341,6 +345,51 @@ class TestSearch:
         call_kwargs = mock_post.call_args
         headers = call_kwargs.kwargs.get("headers") or call_kwargs[1].get("headers", {})
         assert headers.get("Authorization") == "Bearer test-key"
+
+    def test_uses_google_jobs_engine(self, source):
+        """_search sends engine=google_jobs — the gap that let the original bug ship."""
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status.return_value = None
+        mock_resp.json.return_value = {"jobs_results": []}
+
+        with patch(
+            "job_finder.sources.thordata_source.requests.post", return_value=mock_resp
+        ) as mock_post:
+            source._search("Data Scientist", "Remote")
+
+        call_kwargs = mock_post.call_args
+        payload = call_kwargs.kwargs.get("data") or call_kwargs[1].get("data", {})
+        assert payload.get("engine") == "google_jobs"
+
+    def test_query_does_not_append_jobs_keyword(self, source):
+        """engine=google_jobs makes the 'jobs' keyword hack redundant."""
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status.return_value = None
+        mock_resp.json.return_value = {"jobs_results": []}
+
+        with patch(
+            "job_finder.sources.thordata_source.requests.post", return_value=mock_resp
+        ) as mock_post:
+            source._search("Staff Data Scientist", "San Francisco Bay Area")
+
+        call_kwargs = mock_post.call_args
+        payload = call_kwargs.kwargs.get("data") or call_kwargs[1].get("data", {})
+        assert "jobs" not in payload.get("q", "").split()
+
+    def test_location_sent_as_separate_param(self, source):
+        """engine=google_jobs accepts a location param directly."""
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status.return_value = None
+        mock_resp.json.return_value = {"jobs_results": []}
+
+        with patch(
+            "job_finder.sources.thordata_source.requests.post", return_value=mock_resp
+        ) as mock_post:
+            source._search("Data Scientist", "Remote")
+
+        call_kwargs = mock_post.call_args
+        payload = call_kwargs.kwargs.get("data") or call_kwargs[1].get("data", {})
+        assert payload.get("location") == "Remote"
 
     def test_returns_empty_list_on_http_error(self, source):
         """HTTP errors are caught and return []."""
@@ -362,14 +411,13 @@ class TestSearch:
             jobs = source._search("Data Scientist", "Remote")
         assert jobs == []
 
-    def test_parses_job_results_key(self, source):
-        """_search extracts jobs from job_results.jobs[] key."""
+    def test_parses_jobs_results_key(self, source):
+        """_search extracts jobs from top-level jobs_results[] key (SerpApi shape)."""
         mock_resp = MagicMock()
         mock_resp.raise_for_status.return_value = None
+        # Captured-shape fixture: top-level jobs_results array (not job_results.jobs)
         mock_resp.json.return_value = {
-            "job_results": {
-                "jobs": [_result(title="DS Role", extensions=["1 day ago", "Full-time"])]
-            }
+            "jobs_results": [_result(title="DS Role", extensions=["1 day ago", "Full-time"])]
         }
 
         with patch("job_finder.sources.thordata_source.requests.post", return_value=mock_resp):
@@ -378,17 +426,42 @@ class TestSearch:
         assert len(jobs) == 1
         assert jobs[0].title == "DS Role"
 
+    def test_warns_on_missing_jobs_results_key(self, source, caplog):
+        """200 response without jobs_results key logs a warning (expired account etc.)."""
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status.return_value = None
+        # Mirrors the live expired-package response: {"code": 400, "data": "Package has expired!"}
+        mock_resp.json.return_value = {"code": 400, "data": "Package has expired!"}
+
+        with patch("job_finder.sources.thordata_source.requests.post", return_value=mock_resp):
+            with caplog.at_level(logging.WARNING, logger="job_finder.sources.thordata_source"):
+                jobs = source._search("Data Scientist", "Remote")
+
+        assert jobs == []
+        assert any("missing 'jobs_results'" in r.message for r in caplog.records)
+
+    def test_missing_jobs_results_key_does_not_log_info_only(self, source, caplog):
+        """Missing jobs_results must NOT be silently logged at INFO only."""
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status.return_value = None
+        mock_resp.json.return_value = {"code": 400, "data": "Package has expired!"}
+
+        with patch("job_finder.sources.thordata_source.requests.post", return_value=mock_resp):
+            with caplog.at_level(logging.WARNING, logger="job_finder.sources.thordata_source"):
+                source._search("Data Scientist", "Remote")
+
+        warning_records = [r for r in caplog.records if r.levelno >= logging.WARNING]
+        assert len(warning_records) >= 1
+
     def test_skips_old_jobs_during_search(self, source):
         """_search applies the recency filter during parsing."""
         mock_resp = MagicMock()
         mock_resp.raise_for_status.return_value = None
         mock_resp.json.return_value = {
-            "job_results": {
-                "jobs": [
-                    _result(title="Old Job", extensions=["30 days ago"]),
-                    _result(title="New Job", extensions=["1 day ago"]),
-                ]
-            }
+            "jobs_results": [
+                _result(title="Old Job", extensions=["30 days ago"]),
+                _result(title="New Job", extensions=["1 day ago"]),
+            ]
         }
 
         with patch("job_finder.sources.thordata_source.requests.post", return_value=mock_resp):
@@ -396,3 +469,91 @@ class TestSearch:
 
         assert len(jobs) == 1
         assert jobs[0].title == "New Job"
+
+    def test_pagination_stops_at_max_pages(self, source):
+        """Pagination loop issues at most max_pages requests."""
+        source_3pg = ThordataSource(api_key="test-key", max_age_days=3, max_pages=3)
+
+        # Each page returns a full page of 10 results
+        def full_page_resp(*args, **kwargs):
+            mock_resp = MagicMock()
+            mock_resp.raise_for_status.return_value = None
+            mock_resp.json.return_value = {
+                "jobs_results": [
+                    _result(title=f"Job {i}", extensions=["1 day ago", "Full-time"])
+                    for i in range(ThordataSource._PAGE_SIZE)
+                ]
+            }
+            return mock_resp
+
+        with patch(
+            "job_finder.sources.thordata_source.requests.post", side_effect=full_page_resp
+        ) as mock_post:
+            with patch("job_finder.sources.thordata_source.time.sleep"):
+                jobs = source_3pg._search("Data Scientist", "Remote")
+
+        assert mock_post.call_count == 3
+        assert len(jobs) == 30  # 3 pages × 10 results
+
+    def test_short_page_terminates_early(self, source):
+        """A page shorter than _PAGE_SIZE signals the last page — stop without reaching cap."""
+        responses = [
+            # Page 0: full page
+            {
+                "jobs_results": [
+                    _result(title=f"Job {i}", extensions=["1 day ago", "Full-time"])
+                    for i in range(ThordataSource._PAGE_SIZE)
+                ]
+            },
+            # Page 1: short page → last
+            {"jobs_results": [_result(title="Last Job", extensions=["1 day ago", "Full-time"])]},
+        ]
+        resp_iter = iter(responses)
+
+        def side_effect(*args, **kwargs):
+            mock_resp = MagicMock()
+            mock_resp.raise_for_status.return_value = None
+            mock_resp.json.return_value = next(resp_iter)
+            return mock_resp
+
+        source_5pg = ThordataSource(api_key="test-key", max_age_days=3, max_pages=5)
+        with patch(
+            "job_finder.sources.thordata_source.requests.post", side_effect=side_effect
+        ) as mock_post:
+            with patch("job_finder.sources.thordata_source.time.sleep"):
+                jobs = source_5pg._search("Data Scientist", "Remote")
+
+        # Only 2 pages issued even though max_pages=5
+        assert mock_post.call_count == 2
+        assert len(jobs) == 11  # 10 + 1
+
+    def test_pagination_start_offsets(self, source):
+        """Each page sends the correct start offset."""
+        call_payloads: list[dict] = []
+
+        def capture_payload(*args, **kwargs):
+            payload = kwargs.get("data", {})
+            call_payloads.append(dict(payload))
+            mock_resp = MagicMock()
+            mock_resp.raise_for_status.return_value = None
+            # Return full page on page 0, empty on page 1 to terminate
+            if payload.get("start", 0) == 0:
+                mock_resp.json.return_value = {
+                    "jobs_results": [
+                        _result(title=f"Job {i}", extensions=["1 day ago", "Full-time"])
+                        for i in range(ThordataSource._PAGE_SIZE)
+                    ]
+                }
+            else:
+                mock_resp.json.return_value = {"jobs_results": []}
+            return mock_resp
+
+        source_2pg = ThordataSource(api_key="test-key", max_age_days=3, max_pages=2)
+        with patch(
+            "job_finder.sources.thordata_source.requests.post", side_effect=capture_payload
+        ):
+            with patch("job_finder.sources.thordata_source.time.sleep"):
+                source_2pg._search("Data Scientist", "Remote")
+
+        assert call_payloads[0]["start"] == 0
+        assert call_payloads[1]["start"] == ThordataSource._PAGE_SIZE
