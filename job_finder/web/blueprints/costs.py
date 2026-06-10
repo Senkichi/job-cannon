@@ -75,11 +75,16 @@ def index():
         .get("scoring", {})
         .get("daily_budget_usd", DEFAULT_DAILY_BUDGET_USD)
     )
+    cost_stats = get_cost_stats(conn, budget_cap=budget_cap)
+    # Compare like-with-like: today's spend vs the daily cap (matches what
+    # cost_gate enforces).  Compute once here so both render sites agree.
+    budget_pct = (cost_stats["today"] / budget_cap * 100) if budget_cap > 0 else 0.0
     return render_template(
         "costs/index.html",
         view=view,
         budget_cap=budget_cap,
-        cost_stats=get_cost_stats(conn, budget_cap=budget_cap),
+        budget_pct=budget_pct,
+        cost_stats=cost_stats,
         daily_breakdown=get_daily_cost_breakdown(conn),
         monthly_breakdown=get_monthly_feature_breakdown(conn),
         monthly_provider_breakdown=get_monthly_provider_breakdown(conn),

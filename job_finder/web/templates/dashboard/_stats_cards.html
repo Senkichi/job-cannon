@@ -4,7 +4,7 @@
    Required context: stats, cost_stats, budget_cap, pending_count,
    company_count, ats_tracked_count, ats_last_scan. #}
 
-{% set budget_pct = (cost_stats.month / budget_cap * 100) if budget_cap > 0 else 0 %}
+{% set budget_pct = (cost_stats.today / budget_cap * 100) if budget_cap > 0 else 0 %}
 {% if budget_pct >= 100 %}
 <div class="bg-red-900/60 border border-red-700 rounded-lg px-4 py-3 flex items-center justify-between mb-4">
   <span class="text-red-200 text-sm">

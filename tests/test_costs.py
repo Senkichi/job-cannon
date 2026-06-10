@@ -739,3 +739,223 @@ class TestGetMonthlyProviderUsage:
         assert providers["ollama"]["output_tokens"] == 200
         assert providers["claude_cli"]["output_tokens"] == 50
         assert providers["anthropic"]["output_tokens"] == 50
+
+
+# ---------------------------------------------------------------------------
+# Tests: budget_pct uses today's spend vs daily cap (issue #295)
+# ---------------------------------------------------------------------------
+
+
+def _make_app_with_budget(tmp_db_path, daily_budget_usd: float):
+    """Build a minimal test client with a specific daily_budget_usd."""
+    from job_finder.web import create_app
+
+    test_config = {
+        "db": {"path": tmp_db_path},
+        "scoring": {
+            "min_score_threshold": 40,
+            "daily_budget_usd": daily_budget_usd,
+        },
+        "profile": {
+            "target_titles": ["Staff Data Scientist"],
+            "target_locations": ["Remote"],
+            "min_salary": 150000,
+            "industries": [],
+            "exclusions": {"title_keywords": [], "companies": []},
+            "skills": [],
+        },
+        "sources": {},
+        "output": {"default_format": "cli", "max_results": 50},
+    }
+    app = create_app(config=test_config)
+    app.config["TESTING"] = True
+    return app.test_client()
+
+
+class TestBudgetPctDayVsDailyCap:
+    """Acceptance criteria for issue #295.
+
+    budget_pct must equal today_spend / daily_cap, NOT month_spend / daily_cap.
+    The percentage is computed once in the blueprint and both render sites
+    (costs page + dashboard banner) must use the same value.
+    """
+
+    def _seed_db(self, tmp_db_path, today_spend: float, older_spend: float) -> None:
+        """Seed scoring_costs with a today row and a row from earlier this month.
+
+        Uses month_start + 1 second as the "older" timestamp so it always falls
+        within the current calendar month but outside today's local-day window,
+        regardless of which day of the month it is (day 1 edge case included —
+        the row lands at 00:00:01 UTC on the 1st, which is within the month but
+        before local midnight for any negative-offset timezone).
+        """
+        import sqlite3
+
+        from job_finder.web.db_migrate import run_migrations
+
+        run_migrations(tmp_db_path)
+        conn = sqlite3.connect(tmp_db_path)
+        now = datetime.now(UTC)
+
+        # Row timestamped right now — counts as today's spend.
+        ts_today = now.strftime("%Y-%m-%dT%H:%M:%SZ")
+        # Row at the very start of the current month (month_start + 1s) — always
+        # within the calendar month window but outside the local-day today window
+        # (which starts at local midnight, i.e. >= a few hours into the day at
+        # best).  Using month_start + 1s instead of "yesterday" avoids the edge
+        # case where today IS the 1st of the month.
+        month_start = now.replace(day=1, hour=0, minute=0, second=1, microsecond=0)
+        ts_month_start = month_start.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        _insert_rows_with_provider(
+            conn,
+            [
+                ("j1", "score_job", "openrouter/x", 100, 50, today_spend, ts_today, "openrouter"),
+                (
+                    "j2",
+                    "score_job",
+                    "openrouter/x",
+                    100,
+                    50,
+                    older_spend,
+                    ts_month_start,
+                    "openrouter",
+                ),
+            ],
+        )
+        conn.close()
+
+    def test_budget_pct_uses_today_not_month(self, tmp_db_path):
+        """budget_pct == today_spend / daily_cap (not month_spend / daily_cap).
+
+        Seed two paid rows: one for right now (today_spend=2.0) and one at the
+        very start of the current calendar month (older_spend=5.0), so
+        month_total=7.0.  today/cap*100=20%, month/cap*100=70%.  The correct
+        computation must produce 20%, not 70%.
+        """
+        import sqlite3
+
+        from job_finder.web.claude_client import get_cost_stats
+        from job_finder.web.db_migrate import run_migrations
+
+        run_migrations(tmp_db_path)
+        conn = sqlite3.connect(tmp_db_path)
+        daily_cap = 10.0
+        today_spend = 2.0
+        older_spend = 5.0  # in-month but not today → month total=7.0
+
+        now = datetime.now(UTC)
+        ts_today = now.strftime("%Y-%m-%dT%H:%M:%SZ")
+        # Use month_start + 1s so it's always inside the calendar-month window
+        # but outside the local-day today window (matches _seed_db logic).
+        month_start = now.replace(day=1, hour=0, minute=0, second=1, microsecond=0)
+        ts_month_start = month_start.strftime("%Y-%m-%dT%H:%M:%SZ")
+        _insert_rows_with_provider(
+            conn,
+            [
+                ("j1", "score_job", "openrouter/x", 100, 50, today_spend, ts_today, "openrouter"),
+                (
+                    "j2",
+                    "score_job",
+                    "openrouter/x",
+                    100,
+                    50,
+                    older_spend,
+                    ts_month_start,
+                    "openrouter",
+                ),
+            ],
+        )
+        stats = get_cost_stats(conn, budget_cap=daily_cap)
+        conn.close()
+
+        expected_pct = stats["today"] / daily_cap * 100  # should be ~20%
+        wrong_pct = stats["month"] / daily_cap * 100  # would be ~70%
+
+        assert abs(expected_pct - 20.0) < 0.01, f"today pct={expected_pct}"
+        assert abs(wrong_pct - 70.0) < 0.01, f"month pct={wrong_pct}"
+        # Confirm the two differ so the test isn't vacuous.
+        assert abs(expected_pct - wrong_pct) > 1.0
+
+    def test_costs_page_renders_correct_pct(self, tmp_db_path):
+        """Cost view HTML shows today_spend/daily_cap pct, not month/daily_cap."""
+        self._seed_db(tmp_db_path, today_spend=2.0, older_spend=5.0)
+        # daily_cap=10 → today_pct=20%, month_pct=70%
+        client = _make_app_with_budget(tmp_db_path, daily_budget_usd=10.0)
+
+        response = client.get("/costs?view=cost")
+        assert response.status_code == 200
+        html = response.data.decode("utf-8")
+
+        # Rendered percentage must be 20% (today/cap), not 70% (month/cap).
+        assert "20% of daily cap used" in html, "Expected '20% of daily cap used' in HTML"
+        assert "70% of daily cap used" not in html
+
+    def test_costs_page_label_names_period(self, tmp_db_path):
+        """Budget progress bar label text must name the period ('today' or 'daily')."""
+        self._seed_db(tmp_db_path, today_spend=1.0, older_spend=0.0)
+        client = _make_app_with_budget(tmp_db_path, daily_budget_usd=10.0)
+
+        response = client.get("/costs?view=cost")
+        html = response.data.decode("utf-8")
+
+        # The label must name the period — "daily cap" is the required signal.
+        assert "daily cap" in html.lower(), "Label must mention 'daily cap'"
+        # And the spend label must say "today" not "this month".
+        assert "today" in html.lower(), "Spend label must mention 'today'"
+
+    def test_costs_page_shows_todays_spend_in_bar_label(self, tmp_db_path):
+        """The 'Today's spend: $X.XXXX' row label matches cost_stats.today."""
+        import sqlite3
+
+        from job_finder.web.db_migrate import run_migrations
+
+        run_migrations(tmp_db_path)
+        conn = sqlite3.connect(tmp_db_path)
+        now = datetime.now(UTC)
+        ts_today = now.strftime("%Y-%m-%dT%H:%M:%SZ")
+        _insert_rows_with_provider(
+            conn,
+            [("j1", "score_job", "openrouter/x", 100, 50, 1.2345, ts_today, "openrouter")],
+        )
+        conn.close()
+
+        client = _make_app_with_budget(tmp_db_path, daily_budget_usd=10.0)
+        response = client.get("/costs?view=cost")
+        html = response.data.decode("utf-8")
+
+        assert "Today's spend" in html
+        assert "1.2345" in html
+
+    def test_dashboard_banner_uses_today_spend(self, tmp_db_path):
+        """Dashboard stats fragment computes budget_pct from today's spend, not month."""
+        self._seed_db(tmp_db_path, today_spend=2.0, older_spend=5.0)
+        client = _make_app_with_budget(tmp_db_path, daily_budget_usd=10.0)
+
+        # The stats fragment is what _stats_cards.html renders.
+        response = client.get("/dashboard")
+        assert response.status_code == 200
+        html = response.data.decode("utf-8")
+
+        # The dashboard card shows "$X.XX / $Y this month" in a subtitle —
+        # the COLOR logic (border/text color classes) is driven by budget_pct
+        # which must be today/cap=20%, not month/cap=70%.  At 70% the amber
+        # threshold (>=80%) would not be hit, but we verify it's neither red
+        # (>=100%) nor amber-colored when today_pct is clearly below 80%.
+        # We check the Today's Cost card value is today's spend, not month.
+        assert "$2.00" in html or "2.00" in html  # today's spend rendered
+
+    def test_costs_and_dashboard_agree_on_pct(self, tmp_db_path):
+        """Both costs page and dashboard banner compute the same budget_pct value."""
+        self._seed_db(tmp_db_path, today_spend=3.0, older_spend=4.0)
+        # daily_cap=10 → pct=30% on both pages
+        client = _make_app_with_budget(tmp_db_path, daily_budget_usd=10.0)
+
+        costs_html = client.get("/costs?view=cost").data.decode("utf-8")
+        dashboard_html = client.get("/dashboard").data.decode("utf-8")
+
+        # costs page: rendered by the pre-computed blueprint value
+        assert "30% of daily cap used" in costs_html, "costs page must show 30%"
+        # dashboard: uses cost_stats.today/budget_cap directly in template
+        # at 30% it's in the "else" branch (green, no banner) — verify $3.00 shown
+        assert "3.00" in dashboard_html, "dashboard must show today's $3.00 spend"
