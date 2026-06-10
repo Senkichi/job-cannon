@@ -1241,12 +1241,12 @@ def test_tier_has_provider_non_anthropic_with_key():
 
 
 def test_tier_has_provider_anthropic_only_no_client():
-    """Anthropic-only chain + no ANTHROPIC_API_KEY env -> False.
+    """Anthropic-only chain + no API key + no claude binary on PATH -> False.
 
-    Post-2026-05-21 DASHBOARD-SDK-REFACTOR: availability is detected via
-    ``is_anthropic_available()`` (env var check). Clearing both
-    ``ANTHROPIC_API_KEY`` and ``JF_ANTHROPIC_API_KEY`` is the canonical
-    "Anthropic not configured" state.
+    Issue 303 (2026-06-10): is_anthropic_available() now also returns True
+    when the ``claude`` binary is on PATH (subscription OAuth path). The test
+    must mock shutil.which to simulate a machine with neither transport
+    available so the predicate returns False as documented.
     """
     config = {"providers": {"primary": "anthropic", "fallback_chain": []}}
     env = {
@@ -1254,7 +1254,10 @@ def test_tier_has_provider_anthropic_only_no_client():
         for k, v in os.environ.items()
         if k not in ("ANTHROPIC_API_KEY", "JF_ANTHROPIC_API_KEY")
     }
-    with patch.dict("os.environ", env, clear=True):
+    with (
+        patch.dict("os.environ", env, clear=True),
+        patch("job_finder.web.claude_client.shutil.which", return_value=None),
+    ):
         assert tier_has_configured_provider("quick", config) is False
 
 

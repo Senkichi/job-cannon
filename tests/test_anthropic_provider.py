@@ -258,14 +258,22 @@ def test_call_propagates_timeout_error(provider):
 # ---------------------------------------------------------------------------
 
 
-def test_anthropic_provider_init_takes_no_args():
-    """U4 contract: AnthropicProvider() has no constructor params after F2.
-
-    Reintroducing conn/config/job_id/purpose without code that uses them
-    would re-create the dead-arg surface U4 cleaned up.
+def test_anthropic_provider_init_params():
+    """Issue 303 (2026-06-10): AnthropicProvider accepts exactly one optional
+    constructor param — ``provider_name`` — used to distinguish API-key
+    transport (billed, "anthropic_api") from subscription-OAuth transport
+    ($0, "anthropic").  No other args should be present; the dead-arg
+    surface from U4 must not reappear.
     """
     import inspect
 
+    from job_finder.web.providers.anthropic_provider import (
+        ANTHROPIC_SUBSCRIPTION_PROVIDER,
+    )
+
     sig = inspect.signature(AnthropicProvider.__init__)
     params = [p for p in sig.parameters if p != "self"]
-    assert params == [], f"Unexpected constructor params: {params}"
+    assert params == ["provider_name"], f"Unexpected constructor params: {params}"
+    # Default should be the free subscription name.
+    default = sig.parameters["provider_name"].default
+    assert default == ANTHROPIC_SUBSCRIPTION_PROVIDER

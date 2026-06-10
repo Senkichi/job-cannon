@@ -11,12 +11,20 @@ retry. Provider attribution flips from ``"claude_cli"`` to
 budget gate continues to treat the CLI-subscription transport as $0
 (per CLAUDE.md M-2).
 
+Issue 303 (2026-06-10): when ``ANTHROPIC_API_KEY`` / ``JF_ANTHROPIC_API_KEY``
+is present the ``claude -p`` CLI bills against the API key (per-token).
+``_make_adapter`` now passes ``provider_name="anthropic_api"`` in that case;
+``"anthropic_api"`` is NOT in ``FREE_PROVIDERS``, so ``cost_gate`` and the
+daily budget cap apply.  Subscription-only OAuth login (no API key) keeps
+``provider_name="anthropic"`` (FREE_PROVIDERS member, $0).
+
 ``call_claude`` remains in ``claude_client`` as a back-compat shim for
 the small set of legacy direct callers (ai_career_navigator,
 careers_scraper, description_reformatter); the cascade no longer routes
 through it.
 
-Phase 25 introduced the adapter; F2 (2026-05-26) slimmed it.
+Phase 25 introduced the adapter; F2 (2026-05-26) slimmed it;
+Issue 303 (2026-06-10) added transport-mode attribution.
 """
 
 from __future__ import annotations
@@ -29,6 +37,12 @@ from job_finder.web.providers._cli_envelope import parse_oneshot_envelope
 
 logger = logging.getLogger(__name__)
 
+# Provider name constants — used by _make_adapter and tests.
+# "anthropic"     → subscription OAuth transport (FREE_PROVIDERS member, $0).
+# "anthropic_api" → API-key transport (NOT in FREE_PROVIDERS, billed per token).
+ANTHROPIC_SUBSCRIPTION_PROVIDER = "anthropic"
+ANTHROPIC_API_KEY_PROVIDER = "anthropic_api"
+
 
 class AnthropicProvider(BaseProvider):
     """BaseProvider adapter that shells out to ``claude -p`` via _run_oneshot.
@@ -40,14 +54,18 @@ class AnthropicProvider(BaseProvider):
 
     F2 (commit c8e698d) collapsed the historical double-layer; U4 dropped
     the vestigial constructor parameters (conn / config / job_id / purpose)
-    that F2 had kept for "symmetry". If a future change re-introduces cost
-    recording into the adapter, the parameters come back together with the
-    code that uses them — symmetry is not load-bearing in the cascade
-    today (every other adapter takes a different kwarg shape already).
+    that F2 had kept for "symmetry". Issue 303 (2026-06-10) re-introduces
+    a single ``provider_name`` constructor arg to distinguish transport mode:
+    - ``"anthropic_api"`` (set when API key is present) — billed per token,
+      NOT in FREE_PROVIDERS; cost_gate and budget accounting apply.
+    - ``"anthropic"``     (default; when subscription OAuth only) — FREE_PROVIDERS
+      member, $0, no budget gate.
+    ``_make_adapter`` selects the correct name via ``is_anthropic_api_key_transport()``.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, provider_name: str = ANTHROPIC_SUBSCRIPTION_PROVIDER) -> None:
         self._timeout_default = 120.0
+        self._provider_name = provider_name
 
     def call(
         self,
@@ -78,7 +96,9 @@ class AnthropicProvider(BaseProvider):
             timeout: Subprocess timeout in seconds. Defaults to 120.
 
         Returns:
-            ModelResult with ``provider="anthropic"`` and real token counts
+            ModelResult with ``provider`` set to ``self._provider_name``
+            (either ``"anthropic"`` for subscription transport or
+            ``"anthropic_api"`` for API-key transport) and real token counts
             from ``envelope["usage"]``.
 
         Raises:
@@ -100,4 +120,6 @@ class AnthropicProvider(BaseProvider):
             json_schema=output_schema,
             timeout=timeout or self._timeout_default,
         )
-        return parse_oneshot_envelope(envelope, output_schema, model=model, provider="anthropic")
+        return parse_oneshot_envelope(
+            envelope, output_schema, model=model, provider=self._provider_name
+        )

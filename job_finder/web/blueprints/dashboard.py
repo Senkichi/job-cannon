@@ -113,7 +113,7 @@ def _cached_tier_available(tier: str, config: dict) -> bool:
             providers = [resolved["provider"]] + [
                 e["provider"] for e in resolved["fallback_chain"]
             ]
-            if "anthropic" in providers:
+            if "anthropic" in providers or "anthropic_api" in providers:
                 _provider_cache[tier] = (True, now)
                 return True
 
