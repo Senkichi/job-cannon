@@ -95,6 +95,10 @@ def parse_glassdoor_alert(body: str, email_date: datetime | None = None) -> list
             logger.debug("Skipping company-follow / review digest email (no job listings)")
         elif _is_meta_email(soup.get_text()):
             logger.debug("Skipping meta-email (pollution filter)")
+        elif len(body) > 500:
+            logger.warning(
+                "Glassdoor parser: non-empty body yielded 0 jobs — email format may have changed."
+            )
         return []
 
     for link in job_links:

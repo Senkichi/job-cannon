@@ -231,7 +231,7 @@ def query_ats_api(job_row: dict, conn: Any, config: dict) -> dict:
         return result
 
     except Exception as e:
-        logger.debug("ATS API query failed: %s", e)
+        logger.warning("ATS API query failed: %s", e)
         return {}
 
 
@@ -305,7 +305,7 @@ def scrape_careers(job_row: dict, conn: Any, config: dict) -> dict:
         return result
 
     except Exception as e:
-        logger.debug("Careers scrape failed: %s", e)
+        logger.warning("Careers scrape failed: %s", e)
         return {}
 
 

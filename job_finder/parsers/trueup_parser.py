@@ -80,7 +80,14 @@ def parse_trueup_alert(body: str, email_date: datetime | None = None) -> list[Jo
         return jobs
 
     # Fallback for archived/legacy emails.
-    return _parse_legacy_layout(soup, email_date)
+    jobs = _parse_legacy_layout(soup, email_date)
+
+    if len(body) > 500 and not jobs:
+        logger.warning(
+            "TrueUp parser: non-empty body yielded 0 jobs — email format may have changed."
+        )
+
+    return jobs
 
 
 # ---------------------------------------------------------------------------
