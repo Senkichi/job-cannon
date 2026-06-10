@@ -180,6 +180,48 @@ def test_generate_recipe_malformed_returns_none(tmp_path):
             assert codegen.generate_recipe(conn, _CONFIG, "linkedin", "email") is None
 
 
+# ---------------------------------------------------------------------------
+# Careers surface (D4)
+# ---------------------------------------------------------------------------
+
+_CAREERS_RECIPE_DICT = {
+    "source": "careers:acme.com",
+    "container_selector": "li.opening",
+    "fields": {
+        "title": {"selector": "h3", "attr": "text"},
+        "url": {"selector": "a", "attr": "href"},
+    },
+}
+
+
+def test_build_prompt_careers_framing(tmp_path):
+    conn = _conn(tmp_path)
+    _seed_corpus(conn, "careers:acme.com", "careers")
+    inputs = codegen.assemble_inputs(conn, "careers:acme.com", "careers")
+
+    system, messages = codegen.build_prompt("careers", inputs, "careers:acme.com")
+
+    assert "careers" in system.lower()
+    assert "email" not in system.lower()  # reframed, not the email prompt
+    user_text = messages[0]["content"]
+    assert "container_selector" in user_text  # same JSON contract as email
+    assert "careers:acme.com" in user_text
+
+
+def test_generate_recipe_careers_uses_html_schema(tmp_path):
+    conn = _conn(tmp_path)
+    _seed_corpus(conn, "careers:acme.com", "careers")
+
+    with patch.object(
+        codegen, "call_model", return_value=_model_result(_CAREERS_RECIPE_DICT)
+    ) as mock_cm:
+        recipe = codegen.generate_recipe(conn, _CONFIG, "careers:acme.com", "careers")
+
+    assert isinstance(recipe, HtmlRecipe)
+    _args, kwargs = mock_cm.call_args
+    assert kwargs["output_schema"] == codegen.EMAIL_RECIPE_SCHEMA
+
+
 def test_generate_recipe_provider_error_propagates(tmp_path):
     """ProviderCascadeExhaustedError must propagate so run_heal can audit no_provider."""
     import pytest

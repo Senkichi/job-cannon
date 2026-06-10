@@ -197,6 +197,25 @@ def build_prompt(surface: str, inputs: dict, source: str) -> tuple[str, list[dic
             "(jobs without a company are dropped). attr is 'text' or an HTML attribute "
             "name; optional 'regex' + 'group' post-process the extracted string."
         )
+    elif surface == "careers":
+        system = (
+            "You repair broken careers-page job extractors by writing a declarative "
+            "extraction recipe. The samples are rendered careers-page HTML — job "
+            "links or job tiles in a listing, not alert markup. Respond with ONLY "
+            "JSON matching the given schema — no prose, no markdown fences. The "
+            "recipe must extract job postings from the FAILING samples AND still "
+            "extract from the PRIOR-WORKING samples (use CSS or-selectors like "
+            "'.old, .new' where the markup diverged)."
+        )
+        contract = (
+            "Recipe JSON contract:\n"
+            f'{{"source": "{source}", "container_selector": "<CSS selector matching '
+            'one block per job tile/link>", "fields": {"title": {"selector": "...", '
+            '"attr": "text"}, "url": {"selector": "a", "attr": "href"}}}\n'
+            "fields.title and fields.url are required. attr is 'text' or an HTML "
+            "attribute name; optional 'regex' + 'group' post-process the extracted "
+            "string. Relative hrefs are resolved against the page URL automatically."
+        )
     else:
         system = (
             "You repair broken ATS API field mappings by proposing ADDITIONAL field "
@@ -244,7 +263,7 @@ def generate_recipe(
         inputs = assemble_inputs(conn, source, surface)
     system, messages = build_prompt(surface, inputs, source)
     tier = config.get("autoheal", {}).get("heal_provider", "quick")
-    schema = EMAIL_RECIPE_SCHEMA if surface == "email" else ATS_RECIPE_SCHEMA
+    schema = EMAIL_RECIPE_SCHEMA if surface in ("email", "careers") else ATS_RECIPE_SCHEMA
 
     result = call_model(
         tier,

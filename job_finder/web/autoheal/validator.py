@@ -1,8 +1,8 @@
 """Autoheal VALIDATE gate — subprocess corpus replay + regression proof.
 
 No arbitrary code executes here: the worker subprocess only runs OUR
-interpreters (``RecipeExtractor`` / ``extract_field``) over a candidate
-recipe and stored corpus samples. The subprocess exists purely for the
+interpreters (``RecipeExtractor`` / ``careers_recipe_extract`` /
+``extract_field``) over a candidate recipe and stored corpus samples. The subprocess exists purely for the
 wall-clock timeout — a pathological generated regex (ReDoS) must not hang
 the ingestion thread. It is NOT a security sandbox.
 
@@ -177,6 +177,17 @@ def _replay(surface: str, candidate_dict: dict, corpus: list[str], failing: list
 
         def yields(sample: str) -> bool:
             return any(j.title and j.source_url for j in extractor(sample))
+
+    elif surface == "careers":
+        from job_finder.web.autoheal.recipe_extractor import careers_recipe_extract
+
+        # Structural gate (consistent with D3's structural detection counts, I4):
+        # the recipe must extract postings, not postings matching the user's
+        # titles — the title filter is the consumer's concern.
+        def yields(sample: str) -> bool:
+            return any(
+                d["title"] and d["url"] for d in careers_recipe_extract(candidate, sample, "")
+            )
 
     else:
         from job_finder.web._field_alias import (
