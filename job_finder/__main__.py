@@ -466,6 +466,22 @@ def _install_terminal_shutdown(app) -> None:
         pass  # pywin32 not available — fine on non-Windows and some Windows configs
 
 
+def _print_migration_error(exc: Exception) -> None:
+    """Print a friendly, actionable migration error message to stderr.
+
+    Follows the same pattern as the ConfigError handler in :func:`main`.
+    Called for both :exc:`~job_finder.web.db_migrate.DatabaseNewerThanCodeError`
+    and :exc:`~job_finder.web.migrations._gate.MigrationBlockedError`.
+    """
+    # Use the exception class name as a short label so the output identifies
+    # the error type without requiring the user to parse a traceback.
+    label = type(exc).__name__
+    print(
+        f"job-cannon: {label}\n\n{exc}\n",
+        file=sys.stderr,
+    )
+
+
 def _run_terminal_mode(cfg: dict, bind_host: str, port: int, debug: bool, url: str) -> None:
     """Build the app and serve it on the main thread (terminal mode).
 
@@ -476,8 +492,14 @@ def _run_terminal_mode(cfg: dict, bind_host: str, port: int, debug: bool, url: s
     """
     from job_finder.web import create_app
     from job_finder.web._runtime import runtime_shutdown
+    from job_finder.web.db_migrate import DatabaseNewerThanCodeError
+    from job_finder.web.migrations._gate import MigrationBlockedError
 
-    app = create_app(config=cfg)
+    try:
+        app = create_app(config=cfg)
+    except (DatabaseNewerThanCodeError, MigrationBlockedError) as exc:
+        _print_migration_error(exc)
+        sys.exit(1)
 
     # F2 / Issue #290: surface the URL before any Werkzeug noise and
     # (unless opted out) kick off a delayed browser open.  The shared helper
@@ -660,12 +682,19 @@ def main() -> None:
             logger.warning("Tray mode unavailable (%s); falling back to terminal mode", exc)
             _run_terminal_mode(cfg, bind_host, port, debug, url)
         else:
+            from job_finder.web.db_migrate import DatabaseNewerThanCodeError
+            from job_finder.web.migrations._gate import MigrationBlockedError
+
             # Issue #290: print banner + schedule browser open BEFORE the icon
             # event loop blocks the main thread.  The tray banner includes a
             # hint about the tray icon so the user isn't puzzled by a silent
             # terminal.  _print_startup_banner honours JOB_CANNON_NO_BROWSER.
             _print_startup_banner(url, tray_mode=True)
-            TrayApp(cfg).run()
+            try:
+                TrayApp(cfg).run()
+            except (DatabaseNewerThanCodeError, MigrationBlockedError) as exc:
+                _print_migration_error(exc)
+                sys.exit(1)
 
 
 if __name__ == "__main__":
