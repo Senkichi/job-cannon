@@ -80,12 +80,19 @@ def merge_primary_posting_fields(
     conn: sqlite3.Connection,
     job_row: dict,
     posting: dict,
+    *,
+    source_tag: str | None = None,
 ) -> bool:
     """Fold a strict-matched primary posting's fields into the existing row.
 
     Returns True when the row gained data (upsert kind 'updated' or 'touched'),
     False on a no-op or any failure. Never raises — enrichment must not abort
     because the bonus merge failed.
+
+    source_tag, when given, rides along in the set-union ``sources`` list
+    next to the posting's platform label — the resolver passes
+    'primary_source_llm' for tie-breaker-upgraded merges so they remain
+    auditable in the row itself (pitfall P13).
     """
     dedup_key = job_row.get("dedup_key")
     if not dedup_key or not posting:
@@ -126,7 +133,7 @@ def merge_primary_posting_fields(
             # cannot regress the structured-locations derivation in upsert.
             location=posting.get("location") or row["location"] or "",
             locations_structured=posting.get("locations_structured") or [],
-            sources=[source_label] if source_label else [],
+            sources=[s for s in (source_label, source_tag) if s],
             source_urls=[posting_url] if posting_url else [],
             salary_min=salary_min,
             salary_max=salary_max,

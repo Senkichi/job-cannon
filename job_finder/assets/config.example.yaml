@@ -336,6 +336,14 @@ direct_link:
     recheck_days: 30
     # Board fetches per run; the backlog drains across nightly runs.
     max_companies_per_run: 50
+    # When the title match is ambiguous, one quick-tier model call (free on
+    # the Ollama primary; cascade budget gates protect paid fallbacks) judges
+    # which posting is the same job. Only a confident verdict upgrades the
+    # loose link to strict + data merge, tagged with a 'primary_source_llm'
+    # source label for auditability.
+    llm_tiebreak: true
+    # Skip the LLM when the board has more candidate postings than this.
+    llm_tiebreak_max_board: 40
 
 # --- Scheduler cadence (Phase 42 wizard writes this; Settings allows custom edits) ---
 scheduler:
