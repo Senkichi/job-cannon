@@ -199,6 +199,77 @@ def test_write_override_invalid_recipe_raises(tmp_path):
         loader.write_override("email", "linkedin", {"source": "linkedin", "bad": "data"})
 
 
+# ---------------------------------------------------------------------------
+# Careers surface (D4) — heal_overrides/careers/<hostname>.json
+# ---------------------------------------------------------------------------
+
+GOOD_CAREERS_RECIPE_DICT = {
+    "source": "careers:acme.com",
+    "container_selector": "li.opening",
+    "fields": {
+        "title": {"selector": "h3", "attr": "text"},
+        "url": {"selector": "a", "attr": "href"},
+    },
+}
+
+
+def write_careers_override(tmp_path, hostname: str, recipe_dict: dict) -> None:
+    careers_dir = tmp_path / "careers"
+    careers_dir.mkdir(parents=True, exist_ok=True)
+    (careers_dir / f"{hostname}.json").write_text(json.dumps(recipe_dict), encoding="utf-8")
+
+
+def test_careers_recipe_returns_none_when_no_file(tmp_path):
+    loader = make_loader(tmp_path)
+    assert loader.careers_recipe("careers:acme.com") is None
+
+
+def test_careers_recipe_loads_from_hostname_file(tmp_path):
+    write_careers_override(tmp_path, "acme.com", GOOD_CAREERS_RECIPE_DICT)
+    loader = make_loader(tmp_path)
+    result = loader.careers_recipe("careers:acme.com")
+    assert isinstance(result, HtmlRecipe)
+    assert result.source == "careers:acme.com"
+
+
+def test_recipe_for_resolves_careers_source(tmp_path):
+    write_careers_override(tmp_path, "acme.com", GOOD_CAREERS_RECIPE_DICT)
+    loader = make_loader(tmp_path)
+    result = loader.recipe_for("careers:acme.com")
+    assert isinstance(result, HtmlRecipe)
+
+
+def test_delete_override_careers(tmp_path):
+    write_careers_override(tmp_path, "acme.com", GOOD_CAREERS_RECIPE_DICT)
+    loader = make_loader(tmp_path)
+    assert loader.delete_override("careers", "acme.com") is True
+    loader.reload()
+    assert loader.careers_recipe("careers:acme.com") is None
+    # Second delete: file already gone → False, never raises.
+    assert loader.delete_override("careers", "acme.com") is False
+
+
+def test_reload_picks_up_new_careers_file(tmp_path):
+    loader = make_loader(tmp_path)
+    assert loader.careers_recipe("careers:acme.com") is None
+    write_careers_override(tmp_path, "acme.com", GOOD_CAREERS_RECIPE_DICT)
+    loader.reload()
+    assert isinstance(loader.careers_recipe("careers:acme.com"), HtmlRecipe)
+
+
+def test_write_override_careers_round_trips(tmp_path):
+    loader = make_loader(tmp_path)
+    loader.write_override("careers", "acme.com", GOOD_CAREERS_RECIPE_DICT)
+    loader.reload()
+    assert isinstance(loader.careers_recipe("careers:acme.com"), HtmlRecipe)
+
+
+def test_careers_invalid_recipe_returns_none(tmp_path):
+    write_careers_override(tmp_path, "acme.com", {"source": "careers:acme.com", "bad": 1})
+    loader = make_loader(tmp_path)
+    assert loader.careers_recipe("careers:acme.com") is None
+
+
 def test_write_override_is_atomic_no_partial_file_on_error(tmp_path):
     """write_override should not leave a partial file if JSON serialization fails."""
     loader = make_loader(tmp_path)

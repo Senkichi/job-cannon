@@ -6,8 +6,10 @@ Provides a module-level singleton (``_LOADER``) that reads recipe files from
 never crash ingestion.
 
 Source-key → file layout:
-  - Email:  ``heal_overrides/email/<label>.json``   (label = SENDER_LABEL value)
-  - ATS:    ``heal_overrides/ats/<platform>.json``  (platform = source key without "ats:" prefix)
+  - Email:   ``heal_overrides/email/<label>.json``      (label = SENDER_LABEL value)
+  - ATS:     ``heal_overrides/ats/<platform>.json``     (platform = source key without "ats:" prefix)
+  - Careers: ``heal_overrides/careers/<hostname>.json`` (hostname = source key without
+    "careers:" prefix; filesystem-safe by construction — I5: no port, no colon)
 
 ``reload()`` atomically swaps the in-memory cache by replacing the dict reference;
 snapshot semantics guarantee that a reference captured before reload remains valid.
@@ -51,7 +53,7 @@ class OverrideLoader:
 
             overrides_root = user_data_root() / "heal_overrides"
         self._root = Path(overrides_root)
-        self._cache: _Cache = {"email": {}, "ats": {}}
+        self._cache: _Cache = {"email": {}, "ats": {}, "careers": {}}
         self._load_all()
 
     # ------------------------------------------------------------------
@@ -69,13 +71,15 @@ class OverrideLoader:
         """
         return self._cache["ats"].get(source)  # type: ignore[return-value]
 
-    def recipe_for(self, source: str) -> HtmlRecipe | AtsAliasRecipe | None:
-        """Return the cached recipe for *source* on any surface, or None.
+    def careers_recipe(self, source: str) -> HtmlRecipe | None:
+        """Return the validated careers HtmlRecipe for *source*, or None.
 
-        Until D4 adds the ``careers`` cache surface, careers sources resolve
-        against an empty dict → None, which is correct (no careers overrides
-        can exist yet).
+        *source* should include the ``careers:`` prefix (e.g. ``"careers:acme.com"``).
         """
+        return self._cache["careers"].get(source)  # type: ignore[return-value]
+
+    def recipe_for(self, source: str) -> HtmlRecipe | AtsAliasRecipe | None:
+        """Return the cached recipe for *source* on any surface, or None."""
         from job_finder.web.autoheal import surface_for_source
 
         surface = surface_for_source(source)
@@ -100,9 +104,10 @@ class OverrideLoader:
 
     def reload(self) -> None:
         """Re-scan the overrides directory and swap the cache atomically."""
-        new_cache: _Cache = {"email": {}, "ats": {}}
+        new_cache: _Cache = {"email": {}, "ats": {}, "careers": {}}
         self._scan_surface(new_cache, "email")
         self._scan_surface_ats(new_cache)
+        self._scan_surface_careers(new_cache)
         # Atomic swap — no mutation of the old dict
         self._cache = new_cache
 
@@ -141,6 +146,7 @@ class OverrideLoader:
     def _load_all(self) -> None:
         self._scan_surface(self._cache, "email")
         self._scan_surface_ats(self._cache)
+        self._scan_surface_careers(self._cache)
 
     def _scan_surface(self, cache: _Cache, surface: str) -> None:
         surface_dir = self._override_dir(surface)
@@ -163,6 +169,18 @@ class OverrideLoader:
             recipe = self._load_file(json_file, "ats", source_key)
             if recipe is not None:
                 cache["ats"][source_key] = recipe
+
+    def _scan_surface_careers(self, cache: _Cache) -> None:
+        """Scan the careers/ directory; source keys use the ``careers:`` prefix (I5)."""
+        surface_dir = self._override_dir("careers")
+        if not surface_dir.is_dir():
+            return
+        for json_file in surface_dir.glob("*.json"):
+            hostname = json_file.stem
+            source_key = f"careers:{hostname}"
+            recipe = self._load_file(json_file, "careers", source_key)
+            if recipe is not None:
+                cache["careers"][source_key] = recipe
 
     def _load_file(
         self, path: Path, surface: str, source_key: str
@@ -214,6 +232,11 @@ def html_recipe(source: str) -> HtmlRecipe | None:
 def ats_alias(source: str) -> AtsAliasRecipe | None:
     """Return the cached AtsAliasRecipe for *source*, or None."""
     return _get_loader().ats_alias(source)
+
+
+def careers_recipe(source: str) -> HtmlRecipe | None:
+    """Return the cached careers HtmlRecipe for *source*, or None."""
+    return _get_loader().careers_recipe(source)
 
 
 def reload() -> None:
