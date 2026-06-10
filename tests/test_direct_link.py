@@ -185,8 +185,12 @@ def test_primary_posting_no_exact_match_returns_no_posting():
 def test_primary_posting_location_disambiguates_multi_location_board():
     """Same title in N locations: the job's location picks the strict match."""
     nyc = dict(_posting("Data Scientist", src="https://jobs.lever.co/acme/1"), location="New York")
-    lon = dict(_posting("Data Scientist", src="https://jobs.lever.co/acme/2"), location="London, UK")
-    posting, url, confidence = resolve_primary_posting([nyc, lon], "Data Scientist", "New York, NY")
+    lon = dict(
+        _posting("Data Scientist", src="https://jobs.lever.co/acme/2"), location="London, UK"
+    )
+    posting, url, confidence = resolve_primary_posting(
+        [nyc, lon], "Data Scientist", "New York, NY"
+    )
     assert posting is nyc
     assert url == "https://jobs.lever.co/acme/1"
     assert confidence == "strict"

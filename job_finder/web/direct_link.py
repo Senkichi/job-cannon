@@ -78,7 +78,9 @@ def _posting_link(posting: dict) -> str | None:
 # Tokens too generic to disambiguate a location on their own ("United States",
 # "Greater Boston Area"). Remote/Hybrid are deliberately KEPT — they are the
 # signal for remote-vs-office duplicates of the same title.
-_LOCATION_STOPWORDS = frozenset({"united", "states", "usa", "the", "and", "area", "greater", "metro"})
+_LOCATION_STOPWORDS = frozenset(
+    {"united", "states", "usa", "the", "and", "area", "greater", "metro"}
+)
 
 
 def _location_tokens(text: str | None) -> set[str]:

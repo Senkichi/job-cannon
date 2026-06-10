@@ -629,9 +629,7 @@ def set_source_id_if_free(
         return False
     source_id = str(source_id)
 
-    row = conn.execute(
-        "SELECT source_id FROM jobs WHERE dedup_key = ?", (dedup_key,)
-    ).fetchone()
+    row = conn.execute("SELECT source_id FROM jobs WHERE dedup_key = ?", (dedup_key,)).fetchone()
     if row is None or row[0]:
         return False
 

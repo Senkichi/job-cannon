@@ -49,7 +49,6 @@ from job_finder.db._jobs import _reconcile_salary_for_write
 from job_finder.json_utils import utc_now_iso
 from job_finder.web.direct_link import pick_direct_link
 from job_finder.web.enrichment_sources import merge_apply_urls, parse_source_urls
-from job_finder.web.primary_source_merge import merge_primary_posting_fields
 from job_finder.web.enrichment_tiers import (
     fetch_ddg_jds,
     fetch_direct_jd,
@@ -60,6 +59,7 @@ from job_finder.web.enrichment_tiers import (
     search_duckduckgo,
     search_serpapi,
 )
+from job_finder.web.primary_source_merge import merge_primary_posting_fields
 
 logger = logging.getLogger(__name__)
 

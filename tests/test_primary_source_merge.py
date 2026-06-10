@@ -141,9 +141,7 @@ def test_merge_source_id_conflict_is_skipped(tmp_path):
 
     # Column default is '' (not NULL) — assert the conflicting id was NOT written.
     assert not _row(conn, key)["source_id"]
-    holder = conn.execute(
-        "SELECT dedup_key FROM jobs WHERE source_id = 'abc-123'"
-    ).fetchone()
+    holder = conn.execute("SELECT dedup_key FROM jobs WHERE source_id = 'abc-123'").fetchone()
     assert holder["dedup_key"] == "acme|sr data scientist ii"
     conn.close()
 
