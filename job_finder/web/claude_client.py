@@ -59,39 +59,76 @@ MODEL_PRICING: dict[str, dict[str, float]] = {
 # to record $0 for these providers.
 # - "claude_cli" = legacy call_claude() internal path (kept for backward compat).
 # - "claude_code_cli" / "gemini_cli" / "local_bundled" = Phase 39 new providers.
-# - "anthropic" = polish-review F2 (2026-05-26). The cascade-routed
-#   AnthropicProvider now dispatches via `claude -p` CLI (per CLAUDE.md M-2,
-#   2026-05-20), which is subscription-funded. Pre-F2 these calls landed in
-#   scoring_costs with provider="claude_cli" via call_claude's internal
-#   record_cost (so the budget gate already excluded them); post-F2 the
-#   single cost row is written by _maybe_record_cost with
-#   provider="anthropic" — that name must therefore join FREE_PROVIDERS to
-#   preserve the existing budget-gate semantics. If future work re-introduces
-#   per-token SDK billing, remove this entry and gate on a transport flag.
+# - "anthropic" = polish-review F2 (2026-05-26) + Issue 303 fix.  Kept as the
+#   FREE name for subscription-CLI transport (``claude`` logged in via OAuth,
+#   no ANTHROPIC_API_KEY set).  When an API key IS present the adapter emits
+#   provider="anthropic_api" instead (see AnthropicProvider + _make_adapter),
+#   which is NOT in this set, so cost_gate and budget accounting apply.
+#
+# Issue 303 (2026-06-10): the previous code incorrectly assumed the anthropic
+# cascade hop was always subscription-funded.  It is reachable only when
+# ANTHROPIC_API_KEY / JF_ANTHROPIC_API_KEY is present — i.e., per-token billed
+# transport.  Fix: API-key transport → provider="anthropic_api" (paid);
+# subscription-only OAuth transport → provider="anthropic" (free, still here).
 FREE_PROVIDERS: frozenset[str] = frozenset(
     {
         "gemini",
         "ollama",
-        "anthropic",  # F2 — CLI subscription transport, $0 per call
-        "claude_cli",  # existing — internal call_claude() path
+        "anthropic",  # subscription-only OAuth transport ($0 per call)
+        "claude_cli",  # existing — internal call_claude() path (back-compat)
         "claude_code_cli",  # NEW — ClaudeCodeCLIProvider (Plan 02)
         "gemini_cli",  # NEW — GeminiCLIProvider (Plan 03)
         "local_bundled",  # NEW — LocalBundledProvider (Plan 04)
         "google_cse",  # Stage 3 — Google Programmable Search Engine ($0 up to 100/day quota)
+        # NOTE: "anthropic_api" is intentionally absent — API-key transport is paid.
+        #
+        # Under-reported-spend window audit (Issue 303 / 2026-06-10):
+        # Between migration m057 (2026-05-26, F2 moved "anthropic" into FREE_PROVIDERS)
+        # and this fix, every AnthropicProvider call wrote provider='anthropic' regardless
+        # of whether the CLI was OAuth-subscription ($0) or per-token API-key (paid).
+        # Those rows have cost_usd=0 but real token counts. To estimate missing spend:
+        #   SELECT * FROM scoring_costs
+        #   WHERE provider = 'anthropic'
+        #     AND timestamp >= '2026-05-26T00:00:00Z'
+        #     AND timestamp < '<date you deployed Issue 303 fix>';
+        # Multiply input_tokens/1e6 * MODEL_PRICING[model]['input']
+        #       + output_tokens/1e6 * MODEL_PRICING[model]['output'].
     }
 )
 
 
-def is_anthropic_available() -> bool:
-    """Return True if Anthropic CLI fallback is configured.
+def is_anthropic_api_key_transport() -> bool:
+    """Return True when an Anthropic API key is present in the environment.
 
-    Phase M-2 (2026-05-20) confirmed every Anthropic dispatch routes through
-    the ``claude -p`` subprocess, not the Python SDK. The CLI's auth check
-    honors ``ANTHROPIC_API_KEY`` and the project-namespaced
-    ``JF_ANTHROPIC_API_KEY``. When neither is set, the CLI rejects the call
-    during cascade execution, so the cascade should skip this hop preemptively.
+    When True, the ``claude -p`` CLI will bill against the API key rather
+    than using OAuth subscription credits.  The cascade adapter should
+    attribute cost rows to ``"anthropic_api"`` (a paid provider name) so
+    ``cost_gate`` and the daily budget cap apply.
+
+    When False, the CLI must rely on OAuth subscription login to authenticate.
+    That path is $0 (subscription-funded) and is attributed to ``"anthropic"``
+    (a member of FREE_PROVIDERS).
+
+    Issue 303 (2026-06-10).
     """
     return bool(os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("JF_ANTHROPIC_API_KEY"))
+
+
+def is_anthropic_available() -> bool:
+    """Return True if the Anthropic CLI cascade hop is usable.
+
+    Returns True when EITHER:
+    - An API key is set (``ANTHROPIC_API_KEY`` or ``JF_ANTHROPIC_API_KEY``) — paid
+      transport, billed per token; provider name will be ``"anthropic_api"``.
+    - The ``claude`` binary is on PATH (subscription OAuth login assumed) — free
+      transport; provider name will be ``"anthropic"``.
+
+    The cascade should skip this hop when neither condition holds.
+    """
+    if is_anthropic_api_key_transport():
+        return True
+    # Subscription-only path: claude binary present means OAuth login may work.
+    return shutil.which("claude") is not None
 
 
 class BudgetExceededError(Exception):

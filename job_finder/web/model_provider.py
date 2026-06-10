@@ -25,6 +25,7 @@ from job_finder.web.claude_client import (  # noqa: F401 — record_cost + Budge
     FREE_PROVIDERS,
     BudgetExceededError,
     cost_gate,
+    is_anthropic_api_key_transport,
     is_anthropic_available,
     record_cost,
 )
@@ -49,6 +50,9 @@ _VALID_WORKLOADS: frozenset[str] = frozenset({"quick", "score", "triage"})
 _PROVIDER_DEFAULTS: dict[str, dict[str, str]] = {
     "claude_code_cli": {"quick": "claude-haiku-4-5", "score": "claude-sonnet-4-6"},
     "anthropic": {"quick": "claude-haiku-4-5", "score": "claude-sonnet-4-6"},
+    # Issue 303: "anthropic_api" = API-key transport (billed per token).
+    # Same model defaults as "anthropic"; cost_gate applies to this name.
+    "anthropic_api": {"quick": "claude-haiku-4-5", "score": "claude-sonnet-4-6"},
     "gemini": {"quick": "gemini-2.5-flash", "score": "gemini-2.5-pro"},
     "gemini_cli": {"quick": "gemini-2.5-flash", "score": "gemini-2.5-pro"},
     "ollama": {"quick": "qwen2.5:14b", "score": "qwen2.5:14b"},
@@ -253,7 +257,8 @@ def resolve_provider_config(tier: str, config: dict) -> dict:
 # requires updating both _SUPPORTED_PROVIDERS and the dispatch chain in _make_adapter().
 _SUPPORTED_PROVIDERS: frozenset[str] = frozenset(
     {
-        "anthropic",
+        "anthropic",  # subscription OAuth transport ($0, FREE_PROVIDERS)
+        "anthropic_api",  # Issue 303: API-key transport (billed per token)
         "cerebras",
         "claude_code_cli",
         "gemini",
@@ -323,7 +328,7 @@ def tier_has_configured_provider(
     all_providers = [primary] + [entry["provider"] for entry in chain]
 
     for provider_name in all_providers:
-        if provider_name == "anthropic":
+        if provider_name in ("anthropic", "anthropic_api"):
             if is_anthropic_available():
                 return True
             continue
@@ -515,12 +520,27 @@ def _make_adapter(
     from job_finder.web.providers.anthropic_provider import AnthropicProvider
     from job_finder.web.providers.ollama_provider import OllamaProvider
 
-    if provider_name == "anthropic":
+    if provider_name in ("anthropic", "anthropic_api"):
         if not is_anthropic_available():
             raise ValueError(
-                "Anthropic CLI not configured (ANTHROPIC_API_KEY / JF_ANTHROPIC_API_KEY missing)"
+                "Anthropic CLI not configured — set ANTHROPIC_API_KEY for API-key transport, "
+                "or log in via 'claude' CLI for subscription transport"
             )
-        return AnthropicProvider()
+        # Issue 303: pick the transport-aware provider name.
+        # When an API key is present the CLI bills per token → use "anthropic_api"
+        # (NOT in FREE_PROVIDERS) so cost_gate and budget accounting apply.
+        # When only subscription OAuth login is available → use "anthropic" ($0).
+        from job_finder.web.providers.anthropic_provider import (
+            ANTHROPIC_API_KEY_PROVIDER,
+            ANTHROPIC_SUBSCRIPTION_PROVIDER,
+        )
+
+        effective_provider = (
+            ANTHROPIC_API_KEY_PROVIDER
+            if is_anthropic_api_key_transport()
+            else ANTHROPIC_SUBSCRIPTION_PROVIDER
+        )
+        return AnthropicProvider(provider_name=effective_provider)
     if provider_name == "gemini":
         from job_finder.web.providers.gemini_provider import GeminiProvider
 

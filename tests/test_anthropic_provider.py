@@ -258,14 +258,86 @@ def test_call_propagates_timeout_error(provider):
 # ---------------------------------------------------------------------------
 
 
-def test_anthropic_provider_init_takes_no_args():
-    """U4 contract: AnthropicProvider() has no constructor params after F2.
+# ---------------------------------------------------------------------------
+# API-key transport cost computation (Issue 303)
+# ---------------------------------------------------------------------------
 
-    Reintroducing conn/config/job_id/purpose without code that uses them
-    would re-create the dead-arg surface U4 cleaned up.
+
+def test_api_key_transport_returns_nonzero_cost():
+    """AnthropicProvider('anthropic_api') computes real cost_usd from token counts.
+
+    parse_oneshot_envelope always returns cost_usd=0.0 (it is shared with
+    genuinely-free CLI providers). AnthropicProvider.call must override this for
+    the 'anthropic_api' transport using compute_cost / MODEL_PRICING.
+    """
+    from job_finder.web.claude_client import compute_cost
+    from job_finder.web.providers.anthropic_provider import (
+        ANTHROPIC_API_KEY_PROVIDER,
+        AnthropicProvider,
+    )
+
+    model = "claude-haiku-4-5"
+    input_tokens = 500
+    output_tokens = 200
+    envelope = {
+        "structured_output": {"score": 80},
+        "usage": {"input_tokens": input_tokens, "output_tokens": output_tokens},
+    }
+    p = AnthropicProvider(provider_name=ANTHROPIC_API_KEY_PROVIDER)
+    with patch(
+        "job_finder.web.providers.anthropic_provider._run_oneshot",
+        return_value=envelope,
+    ):
+        result = p.call(
+            model=model,
+            system="sys",
+            messages=[{"role": "user", "content": "hi"}],
+            output_schema={"type": "object"},
+        )
+
+    expected = compute_cost(model, input_tokens, output_tokens)
+    assert result.cost_usd == pytest.approx(expected)
+    assert result.cost_usd > 0
+    assert result.provider == ANTHROPIC_API_KEY_PROVIDER
+
+
+def test_subscription_transport_keeps_zero_cost():
+    """Default (subscription) provider still returns cost_usd=0.0."""
+    envelope = {
+        "structured_output": {"score": 80},
+        "usage": {"input_tokens": 500, "output_tokens": 200},
+    }
+    with patch(
+        "job_finder.web.providers.anthropic_provider._run_oneshot",
+        return_value=envelope,
+    ):
+        result = AnthropicProvider().call(
+            model="claude-haiku-4-5",
+            system="sys",
+            messages=[{"role": "user", "content": "hi"}],
+            output_schema={"type": "object"},
+        )
+
+    assert result.cost_usd == 0.0
+    assert result.provider == "anthropic"
+
+
+def test_anthropic_provider_init_params():
+    """Issue 303 (2026-06-10): AnthropicProvider accepts exactly one optional
+    constructor param — ``provider_name`` — used to distinguish API-key
+    transport (billed, "anthropic_api") from subscription-OAuth transport
+    ($0, "anthropic").  No other args should be present; the dead-arg
+    surface from U4 must not reappear.
     """
     import inspect
 
+    from job_finder.web.providers.anthropic_provider import (
+        ANTHROPIC_SUBSCRIPTION_PROVIDER,
+    )
+
     sig = inspect.signature(AnthropicProvider.__init__)
     params = [p for p in sig.parameters if p != "self"]
-    assert params == [], f"Unexpected constructor params: {params}"
+    assert params == ["provider_name"], f"Unexpected constructor params: {params}"
+    # Default should be the free subscription name.
+    default = sig.parameters["provider_name"].default
+    assert default == ANTHROPIC_SUBSCRIPTION_PROVIDER
