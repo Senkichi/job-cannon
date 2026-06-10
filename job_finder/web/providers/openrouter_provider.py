@@ -7,6 +7,12 @@ passed through to OpenRouter unchanged; see `evals/cascade_audit/judge.py`
 for the judge's chosen model id. No Anthropic spend incurred.
 
 Phase 36 deliverable — part of the cascade audit eval harness.
+
+Issue 292 (2026-06-10): compute real ``cost_usd`` by preferring the API-
+reported ``usage.cost`` field (OpenRouter returns the actual provider charge
+in the response body).  Falls back to the static pricing table when the field
+is absent or None.  The current production model (``deepseek-v4-flash:free``)
+is $0 — the :free suffix on OpenRouter models always means $0/token.
 """
 
 from __future__ import annotations
@@ -24,12 +30,48 @@ logger = logging.getLogger(__name__)
 _DEFAULT_BASE_URL = "https://openrouter.ai/api/v1"
 _DEFAULT_TIMEOUT = 300.0
 
+# ---------------------------------------------------------------------------
+# Pricing table — price per million tokens (USD)
+# Source: https://openrouter.ai/deepseek/deepseek-v4-flash  last_verified: 2026-06-10
+#
+# The :free suffix models (e.g. deepseek/deepseek-v4-flash:free) are always $0.
+# Paid variants are listed here for the static-table fallback path.
+# ---------------------------------------------------------------------------
+_OPENROUTER_PRICING: dict[str, dict[str, float]] = {
+    # :free variants — OpenRouter free tier, genuinely $0/token
+    "deepseek/deepseek-v4-flash:free": {"input": 0.0, "output": 0.0},
+    # paid variant
+    # Source: https://openrouter.ai/deepseek/deepseek-v4-flash  last_verified: 2026-06-10
+    "deepseek/deepseek-v4-flash": {"input": 0.0983, "output": 0.1966},
+}
+
+
+def _openrouter_cost(model: str, input_tokens: int, output_tokens: int) -> float:
+    """Return cost in USD for an OpenRouter call using the static pricing table.
+
+    Falls back to the most expensive known entry for unrecognised model IDs
+    (conservative — gate trips early rather than never).
+    """
+    pricing = _OPENROUTER_PRICING.get(model)
+    if pricing is None:
+        logger.warning(
+            "Unknown OpenRouter model '%s' in _openrouter_cost — using highest known pricing as fallback",
+            model,
+        )
+        pricing = max(_OPENROUTER_PRICING.values(), key=lambda p: p["input"] + p["output"])
+    return (input_tokens / 1_000_000) * pricing["input"] + (output_tokens / 1_000_000) * pricing[
+        "output"
+    ]
+
 
 class OpenRouterProvider(BaseProvider):
     """Provider adapter for OpenRouter API (cascade-audit judge — currently DeepSeek-V4-Flash).
 
-    Uses OPENROUTER_API_KEY environment variable. All calls are free
-    (cost_usd=0.0) when using the :free tier endpoint.
+    Uses OPENROUTER_API_KEY environment variable. Prefers the API-reported
+    ``usage.cost`` field for ``cost_usd``; falls back to ``_openrouter_cost()``
+    when the field is absent (Issue 292, 2026-06-10).  The current production
+    model (``deepseek/deepseek-v4-flash:free``) returns $0 — the ``:free``
+    suffix on OpenRouter models always means $0/token.
 
     Args:
         config: Application config dict (unused for OpenRouter, kept for
@@ -70,8 +112,9 @@ class OpenRouterProvider(BaseProvider):
             timeout: Request timeout in seconds. Defaults to 300.0.
 
         Returns:
-            ModelResult with provider="openrouter", cost_usd=0.0 (free tier),
-            schema_valid=True (assume valid for judge output).
+            ModelResult with provider="openrouter", real ``cost_usd``
+            (API-reported when available, otherwise ``_openrouter_cost()``),
+            and schema_valid=True (assume valid for judge output).
 
         Raises:
             requests.HTTPError: On non-2xx response from OpenRouter API.
@@ -118,9 +161,18 @@ class OpenRouterProvider(BaseProvider):
         input_tokens = usage.get("prompt_tokens", 0)
         output_tokens = usage.get("completion_tokens", 0)
 
+        # Prefer API-reported cost (usage.cost) over static table — OpenRouter
+        # returns the actual provider charge in the response body, which is more
+        # accurate than our static table for dynamic/new models.
+        api_cost = usage.get("cost")
+        if api_cost is not None:
+            cost_usd = float(api_cost)
+        else:
+            cost_usd = _openrouter_cost(model, input_tokens, output_tokens)
+
         return ModelResult(
             data=data,
-            cost_usd=0.0,  # Free tier
+            cost_usd=cost_usd,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             model=model,

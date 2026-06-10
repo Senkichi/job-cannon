@@ -7,6 +7,12 @@ score: ``llama-3.3-70b``).
 
 Phase 153 deliverable: re-implements the Cerebras adapter (previously built in
 commit 2585f43, deleted in 38ea791) using the openrouter_provider template.
+
+Issue 292 (2026-06-10): compute real ``cost_usd`` from usage tokens so that
+``_maybe_record_cost`` in the cascade records truthful per-call spend.  Cerebras
+has a free tier (≈1M tokens/day) — a free-tier key bills nothing even though
+the meter records a notional cost (conservative: gate trips early rather than
+never).
 """
 
 from __future__ import annotations
@@ -24,6 +30,36 @@ logger = logging.getLogger(__name__)
 _DEFAULT_BASE_URL = "https://api.cerebras.ai/v1"
 _DEFAULT_TIMEOUT = 300.0
 
+# ---------------------------------------------------------------------------
+# Pricing table — price per million tokens (USD)
+# Source: https://github.com/pydantic/genai-prices/blob/main/prices/providers/cerebras.yml
+#         last_verified: 2026-06-10
+# ---------------------------------------------------------------------------
+_CEREBRAS_PRICING: dict[str, dict[str, float]] = {
+    # quick-tier default (model_provider._PROVIDER_DEFAULTS cerebras.quick)
+    "llama3.1-8b": {"input": 0.10, "output": 0.10},
+    # score-tier default (model_provider._PROVIDER_DEFAULTS cerebras.score)
+    "llama-3.3-70b": {"input": 0.85, "output": 1.20},
+}
+
+
+def _cerebras_cost(model: str, input_tokens: int, output_tokens: int) -> float:
+    """Return cost in USD for a Cerebras API call.
+
+    Falls back to the most expensive known entry for unrecognised model IDs
+    (conservative — gate trips early rather than never).
+    """
+    pricing = _CEREBRAS_PRICING.get(model)
+    if pricing is None:
+        logger.warning(
+            "Unknown Cerebras model '%s' in _cerebras_cost — using highest known pricing as fallback",
+            model,
+        )
+        pricing = max(_CEREBRAS_PRICING.values(), key=lambda p: p["input"] + p["output"])
+    return (input_tokens / 1_000_000) * pricing["input"] + (output_tokens / 1_000_000) * pricing[
+        "output"
+    ]
+
 
 class CerebrasProvider(BaseProvider):
     """Provider adapter for Cerebras API (OpenAI-compatible).
@@ -33,10 +69,11 @@ class CerebrasProvider(BaseProvider):
     in config.yaml). Raises ``ValueError`` immediately when no key is found
     so the cascade can skip the provider gracefully.
 
-    Reports ``cost_usd=0.0``; Cerebras has both free and paid tiers but the
-    provider is intentionally kept out of ``FREE_PROVIDERS`` — callers that
-    add real cost tracking later can update this field without changing the
-    gating logic.
+    Computes real ``cost_usd`` from usage tokens (Issue 292, 2026-06-10).
+    Cerebras has a free tier (≈1M tokens/day) — a free-tier key bills nothing
+    even though the meter records a notional cost (conservative).
+    ``"cerebras"`` is intentionally kept out of ``FREE_PROVIDERS`` so the
+    budget gate applies when a paid-tier key is present.
 
     Args:
         config: Application config dict.
@@ -79,8 +116,8 @@ class CerebrasProvider(BaseProvider):
             timeout: Request timeout in seconds.  Defaults to 300.0.
 
         Returns:
-            ``ModelResult`` with ``provider="cerebras"``, ``cost_usd=0.0``,
-            and ``schema_valid=True``.
+            ``ModelResult`` with ``provider="cerebras"``, real ``cost_usd``
+            computed from ``_cerebras_cost()``, and ``schema_valid=True``.
 
         Raises:
             requests.HTTPError: On non-2xx response from the Cerebras API.
@@ -118,10 +155,11 @@ class CerebrasProvider(BaseProvider):
         usage = body.get("usage", {})
         input_tokens = usage.get("prompt_tokens", 0)
         output_tokens = usage.get("completion_tokens", 0)
+        cost_usd = _cerebras_cost(model, input_tokens, output_tokens)
 
         return ModelResult(
             data=data,
-            cost_usd=0.0,
+            cost_usd=cost_usd,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             model=model,

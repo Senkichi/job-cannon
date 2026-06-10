@@ -1,12 +1,17 @@
-"""Unit tests for Cerebras provider adapter (Phase 153)."""
+"""Unit tests for Cerebras provider adapter (Phase 153 + Issue 292)."""
 
 import json
+import sqlite3
 from unittest.mock import Mock, patch
 
 import pytest
 
-from job_finder.web.model_provider import ModelResult
-from job_finder.web.providers.cerebras_provider import CerebrasProvider
+from job_finder.web.model_provider import ModelResult, _maybe_record_cost
+from job_finder.web.providers.cerebras_provider import (
+    _CEREBRAS_PRICING,
+    CerebrasProvider,
+    _cerebras_cost,
+)
 
 
 def test_cerebras_provider_init_with_key():
@@ -58,7 +63,10 @@ def test_cerebras_provider_call_returns_model_result():
             # ModelResult contract
             assert isinstance(result, ModelResult)
             assert result.provider == "cerebras"
-            assert result.cost_usd == 0.0
+            # cost_usd must be > 0 for a known model with real token counts
+            expected_cost = _cerebras_cost("llama3.1-8b", 150, 60)
+            assert abs(result.cost_usd - expected_cost) < 1e-9
+            assert result.cost_usd > 0.0
             assert result.input_tokens == 150
             assert result.output_tokens == 60
             assert result.schema_valid is True
@@ -134,4 +142,95 @@ def test_cerebras_provider_call_missing_usage_defaults_to_zero():
 
     assert result.input_tokens == 0
     assert result.output_tokens == 0
+    # Zero tokens → zero cost (no rounding issues)
     assert result.cost_usd == 0.0
+
+
+# ---------------------------------------------------------------------------
+# Issue 292 — pricing table + cost computation
+# ---------------------------------------------------------------------------
+
+
+def test_cerebras_cost_known_model_8b():
+    """llama3.1-8b: 1M in + 1M out = $0.10 + $0.10 = $0.20."""
+    cost = _cerebras_cost("llama3.1-8b", 1_000_000, 1_000_000)
+    assert abs(cost - 0.20) < 1e-9
+
+
+def test_cerebras_cost_known_model_70b():
+    """llama-3.3-70b: 1M in + 1M out = $0.85 + $1.20 = $2.05."""
+    cost = _cerebras_cost("llama-3.3-70b", 1_000_000, 1_000_000)
+    assert abs(cost - 2.05) < 1e-9
+
+
+def test_cerebras_cost_unknown_model_uses_most_expensive_fallback():
+    """Unknown model falls back to the most expensive entry in _CEREBRAS_PRICING."""
+    most_expensive = max(_CEREBRAS_PRICING.values(), key=lambda p: p["input"] + p["output"])
+    cost_unknown = _cerebras_cost("unknown-model-xyz", 1_000_000, 1_000_000)
+    expected = most_expensive["input"] + most_expensive["output"]
+    assert abs(cost_unknown - expected) < 1e-9
+
+
+def test_cerebras_cost_partial_tokens():
+    """200k in + 50k out for llama-3.3-70b."""
+    # 200k / 1M * 0.85 + 50k / 1M * 1.20 = 0.17 + 0.06 = 0.23
+    cost = _cerebras_cost("llama-3.3-70b", 200_000, 50_000)
+    assert abs(cost - 0.23) < 1e-9
+
+
+def test_cerebras_result_flows_through_maybe_record_cost(tmp_path):
+    """A Cerebras ModelResult with real cost_usd lands in scoring_costs with cost_usd > 0."""
+    from job_finder.web.db_migrate import run_migrations
+
+    db_path = str(tmp_path / "cerebras_cost_test.db")
+    run_migrations(db_path)
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+
+    result = ModelResult(
+        data={"score": 3},
+        cost_usd=_cerebras_cost("llama-3.3-70b", 300_000, 100_000),
+        input_tokens=300_000,
+        output_tokens=100_000,
+        model="llama-3.3-70b",
+        provider="cerebras",
+        schema_valid=True,
+    )
+
+    _maybe_record_cost(result, conn, job_id="test-job-2", purpose="score_job")
+
+    rows = conn.execute("SELECT cost_usd, provider FROM scoring_costs").fetchall()
+    conn.close()
+
+    assert len(rows) == 1
+    assert rows[0]["provider"] == "cerebras"
+    assert rows[0]["cost_usd"] > 0.0
+    # 300k / 1M * 0.85 + 100k / 1M * 1.20 = 0.255 + 0.12 = 0.375
+    assert abs(rows[0]["cost_usd"] - 0.375) < 1e-6
+
+
+def test_cerebras_cost_included_in_cost_gate_sum(tmp_path):
+    """cost_gate counts cerebras spend toward the daily budget (cerebras not in FREE_PROVIDERS)."""
+    from datetime import UTC, datetime
+
+    from job_finder.web.claude_client import cost_gate
+    from job_finder.web.db_migrate import run_migrations
+
+    db_path = str(tmp_path / "cerebras_gate_test.db")
+    run_migrations(db_path)
+    conn = sqlite3.connect(db_path)
+
+    ts = datetime.now(UTC).strftime("%Y-%m-%dT12:00:00Z")
+    # Insert a cerebras row with $5.00 spend — above a $1.00 cap
+    conn.execute(
+        "INSERT INTO scoring_costs "
+        "(job_id, purpose, model, input_tokens, output_tokens, cost_usd, timestamp, provider) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        ("j2", "score_job", "llama-3.3-70b", 1000, 1000, 5.00, ts, "cerebras"),
+    )
+    conn.commit()
+
+    config = {"scoring": {"daily_budget_usd": 1.00}}
+    # $5.00 cerebras spend > $1.00 cap → gate must block
+    assert cost_gate(conn, config, model_tier="score") is False
+    conn.close()
