@@ -106,6 +106,30 @@ def derive_classification(
         return "reject"
     if enrichment_tier in _TERMINAL_ENRICHMENT_TIERS and jd_full_length < low_signal_threshold:
         return "low_signal"
+
+    # Domain guard: reject malformed sub-score dicts loudly rather than
+    # silently classifying garbage as "apply" (e.g. empty dict passes
+    # all(v >= 3 ...) vacuously). bool is an int subclass and is excluded
+    # because True/False are not ordinal scores.
+    _expected = set(_SUB_SCORE_KEYS)
+    _actual = set(sub_scores)
+    if _actual != _expected:
+        _missing = _expected - _actual
+        _extra = _actual - _expected
+        parts: list[str] = []
+        if _missing:
+            parts.append(f"missing keys: {sorted(_missing)}")
+        if _extra:
+            parts.append(f"extra keys: {sorted(_extra)}")
+        raise ValueError(f"sub_scores has wrong keys — {'; '.join(parts)}")
+    _bad = {
+        k: v
+        for k, v in sub_scores.items()
+        if not isinstance(v, int) or isinstance(v, bool) or not (1 <= v <= 5)
+    }
+    if _bad:
+        raise ValueError(f"sub_scores values must be int in 1..5 (got {_bad})")
+
     if any(v == 1 for v in sub_scores.values()):
         return "reject"
     if all(v >= 3 for v in sub_scores.values()):

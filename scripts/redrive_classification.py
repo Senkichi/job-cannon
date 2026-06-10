@@ -20,14 +20,23 @@ Usage:
     uv run --active python scripts/redrive_classification.py --audit
     uv run --active python scripts/redrive_classification.py --remediate
     uv run --active python scripts/redrive_classification.py --verify
+
+ValueError handling: ``derive_classification`` now raises ``ValueError`` for
+malformed sub-score dicts (wrong/missing/extra keys, values outside 1..5).
+Both ``find_divergences`` and ``remediate`` catch ``ValueError`` per row,
+log the offending ``dedup_key`` and the reason, and continue — a single bad
+legacy row never aborts the batch.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import logging
 import sqlite3
 from dataclasses import dataclass
+
+_log = logging.getLogger(__name__)
 
 from job_finder.db import JobAssessment, derive_classification, persist_job_assessment
 
@@ -72,13 +81,17 @@ def find_divergences(conn: sqlite3.Connection, config: dict | None = None) -> li
             continue
         if not isinstance(sub_scores, dict) or not sub_scores:
             continue
-        computed = derive_classification(
-            sub_scores,
-            legit,
-            enrichment_tier=tier,
-            jd_full_length=jd_len or 0,
-            low_signal_threshold=threshold,
-        )
+        try:
+            computed = derive_classification(
+                sub_scores,
+                legit,
+                enrichment_tier=tier,
+                jd_full_length=jd_len or 0,
+                low_signal_threshold=threshold,
+            )
+        except ValueError as exc:
+            _log.warning("redrive_classification: skipping malformed row %r — %s", dedup_key, exc)
+            continue
         if computed != stored:
             out.append(Divergence(dedup_key=dedup_key, stored=stored, computed=computed))
     return out
@@ -112,7 +125,12 @@ def remediate(conn: sqlite3.Connection, config: dict | None = None) -> int:
             rationale=rationale if isinstance(rationale, dict) else {},
             provider=provider,
         )
-        persist_job_assessment(conn, d.dedup_key, assessment, config=config)
+        try:
+            persist_job_assessment(conn, d.dedup_key, assessment, config=config)
+        except ValueError as exc:
+            _log.warning(
+                "redrive_classification: skipping malformed row %r — %s", d.dedup_key, exc
+            )
     return len(divergences)
 
 

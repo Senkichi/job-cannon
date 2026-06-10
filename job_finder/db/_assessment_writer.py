@@ -75,6 +75,14 @@ def persist_job_assessment(
         without a redundant re-SELECT — used by the orchestrator's per-job
         ``run_events`` ``score`` emission (issue #215). Existing callers that
         ignore the return are unaffected.
+
+    Raises:
+        ValueError: Propagated from ``derive_classification`` when
+            ``assessment.sub_scores`` is malformed (wrong/missing/extra keys,
+            or values not int-in-1..5). Production input is schema-guaranteed
+            valid by the cascade dispatcher, so this is unreachable on the hot
+            path; it surfaces in tests, the redrive script, and any future
+            caller that passes a raw dict.
     """
     cur = conn.cursor()
     cur.execute(
