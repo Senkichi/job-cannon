@@ -354,10 +354,12 @@ def test_detection_source_has_no_shell_true():
 def test_detection_source_uses_timeout_kwarg_on_every_subprocess_run():
     import pathlib
 
-    src = pathlib.Path("job_finder/web/providers/detection.py").read_text()
-    # Post-DRY-refactor: a single _probe_cli helper hosts the only
-    # subprocess.run call site for all three CLI probes. The security
-    # invariant (every probe runs with timeout=10) is preserved because
-    # all _check_X stubs route through that one helper.
-    assert src.count("subprocess.run(") == 1
-    assert src.count("timeout=10") >= 1
+    src = pathlib.Path("job_finder/web/providers/detection.py").read_text(encoding="utf-8")
+    # Issue #288 added a second subprocess.run call site in _check_ollama_no_model.
+    # The invariant is: every call site must use the shared _PROBE_TIMEOUT constant
+    # (no hardcoded timeout value that could diverge from the module constant).
+    run_count = src.count("subprocess.run(")
+    assert run_count >= 1, "Expected at least one subprocess.run call"
+    # No hardcoded timeout= integer literals (enforces use of _PROBE_TIMEOUT)
+    assert "timeout=10" not in src, "Hardcoded timeout=10 found — use _PROBE_TIMEOUT"
+    assert "_PROBE_TIMEOUT" in src, "Expected _PROBE_TIMEOUT constant used in subprocess.run calls"
