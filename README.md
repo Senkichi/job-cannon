@@ -86,7 +86,7 @@ It keeps forks open: anyone who runs a modified version as a service must share 
 The IMAP host and port are configurable (`sources.imap.host` / `sources.imap.port`), so any IMAP provider can work in principle — but honestly: only Gmail (with an app password) is tested today. The free portals and ATS scanners work with no email at all.
 
 **Can I export my data?**
-Your data *is* a regular SQLite file — `jobs.db` in the user-data directory (`%APPDATA%\JobCannon\` on Windows, `~/Library/Application Support/JobCannon/` on macOS, `~/.local/share/JobCannon/` on Linux). Copy it, query it with any SQLite tool, or point a notebook at it. Nothing is locked in.
+Your data *is* a regular SQLite file — `jobs.db` in the user-data directory (`%LOCALAPPDATA%\JobCannon\` on Windows, `~/Library/Application Support/JobCannon/` on macOS, `~/.local/share/JobCannon/` on Linux). Copy it, query it with any SQLite tool, or point a notebook at it. Nothing is locked in.
 
 ## Engineering Highlights
 
@@ -305,7 +305,7 @@ export JOB_CANNON_USER_DATA_DIR=$(pwd)              # macOS / Linux / Git Bash
 $env:JOB_CANNON_USER_DATA_DIR = (Get-Location).Path  # Windows PowerShell
 ```
 
-Otherwise data lives at `%APPDATA%\JobCannon\` (Windows) / `~/Library/Application Support/JobCannon/` (macOS) / `~/.local/share/JobCannon/` (Linux).
+Otherwise data lives at `%LOCALAPPDATA%\JobCannon\` (Windows) / `~/Library/Application Support/JobCannon/` (macOS) / `~/.local/share/JobCannon/` (Linux).
 
 **`config.yaml` keys to fill in (if you skipped the wizard):**
 

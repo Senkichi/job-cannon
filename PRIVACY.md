@@ -16,7 +16,7 @@
 Everything is stored on your machine in two places:
 
 - The SQLite database under your platform's user-data directory
-  (`%APPDATA%\JobCannon\jobs.db` on Windows;
+  (`%LOCALAPPDATA%\JobCannon\jobs.db` on Windows;
   `~/.local/share/JobCannon/jobs.db` on Linux;
   `~/Library/Application Support/JobCannon/jobs.db` on macOS).
 - Configuration and credentials in the same directory:
