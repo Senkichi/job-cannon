@@ -18,6 +18,20 @@ def utc_now_iso() -> str:
     return datetime.now(UTC).replace(tzinfo=None).isoformat()
 
 
+def to_naive_utc_iso(dt: datetime) -> str:
+    """Serialize a datetime to the canonical naive-UTC ISO storage format.
+
+    tz-aware input is converted to UTC and stripped; naive input is assumed
+    to already be UTC (the store-UTC-render-local convention) and serialized
+    as-is. Every datetime headed for a DB TEXT column should pass through
+    here so aware values from source feeds (Greenhouse ``-04:00`` offsets,
+    email ``Z`` suffixes) never leak tz suffixes into storage (#361).
+    """
+    if dt.tzinfo is not None:
+        dt = dt.astimezone(UTC).replace(tzinfo=None)
+    return dt.isoformat()
+
+
 def local_day_utc_window() -> tuple[str, str]:
     """Return (start_utc_iso, end_utc_iso) bounding the user-local current calendar day.
 
