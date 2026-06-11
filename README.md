@@ -26,6 +26,8 @@ job-cannon
 
 `pipx install job-cannon` is the recommended path: one command, isolated venv. Requires **Python 3.12+** — use `pipx install --python python3.12 job-cannon` if your default Python is older. The `job-cannon` command launches the Flask app on http://localhost:5000 and opens your browser. On first launch the onboarding wizard auto-detects AI providers (Ollama / Claude Code CLI / Gemini CLI), helps you connect Gmail via IMAP app password, and writes secrets to your OS keyring — no manual YAML editing required.
 
+**Want to see it before configuring anything?** `job-cannon --demo` launches with ~30 sample scored jobs in a throwaway database — no config, no API keys, no background jobs, and your real data is untouched. It even runs alongside a live instance (picks the next free port).
+
 **Don't have pipx yet?** Per-OS one-liners: `scoop install pipx` (Windows), `brew install pipx` (macOS), `apt install pipx` (Ubuntu 23.04+).
 
 **Already cloning the repo to hack on it?** See [For Contributors](#for-contributors) at the bottom.

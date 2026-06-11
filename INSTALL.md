@@ -48,6 +48,14 @@ job-cannon
 
 This starts the Flask app on http://localhost:5000. With no `config.yaml` present, the app redirects to an 8-step onboarding wizard that guides you through provider setup, Gmail configuration, and profile creation.
 
+### Try it first: demo mode
+
+```bash
+job-cannon --demo
+```
+
+Launches with ~30 sample scored jobs in a throwaway database — no config, no API keys, no background jobs. Useful for exploring the UI before committing to setup, and for reproducing UI bugs on clean data. Each launch gets a fresh temp database (the OS cleans it up); your real data is never touched. Demo mode runs happily alongside a real instance — it picks the next free port automatically.
+
 ---
 
 ## macOS [local-ai] install (community-supported)

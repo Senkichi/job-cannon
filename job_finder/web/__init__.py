@@ -144,6 +144,10 @@ def create_app(config_path: str = "config.yaml", config: dict | None = None) -> 
     # scheduler started anyway. See worktree validation run 2026-06-07.
     if cfg.get("SKIP_SCHEDULER"):
         app.config["SKIP_SCHEDULER"] = True
+    # Demo mode (job-cannon --demo): drives the non-dismissible sample-data
+    # banner in base.html via {% if config.DEMO_MODE %}.
+    if cfg.get("DEMO_MODE"):
+        app.config["DEMO_MODE"] = True
     app.secret_key = os.environ.get("FLASK_SECRET_KEY") or secrets.token_hex(32)
 
     # --- Database setup ---
