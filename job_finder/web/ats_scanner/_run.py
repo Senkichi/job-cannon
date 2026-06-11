@@ -547,7 +547,12 @@ def _upsert_one_ats_api_job(
             description=job_dict.get("description") or "",
             posted_date=job_dict.get("posted_date"),
             # ATS platform APIs return audited first-posted timestamps (#363).
-            posted_date_precision="exact" if job_dict.get("posted_date") else None,
+            # A platform may downgrade its own marker (Workday relative
+            # strings emit 'approximate', #364); default is 'exact'.
+            posted_date_precision=(
+                job_dict.get("posted_date_precision")
+                or ("exact" if job_dict.get("posted_date") else None)
+            ),
         )
         from job_finder.db import upsert_job
         from job_finder.parsed_job import DenylistedCompanyError, ParsedJob

@@ -119,6 +119,29 @@ class TestWorkdayLayer1HappyPath:
 
 
 class TestWorkdayPostedDate:
+    def test_relative_string_variants(self):
+        """The full relative-format table parses at 'approximate' precision."""
+        from datetime import UTC, datetime, timedelta
+
+        from job_finder.web.ats_platforms._platforms_workday import _parse_posted_date
+
+        utc_today = datetime.now(UTC).replace(
+            hour=0, minute=0, second=0, microsecond=0, tzinfo=None
+        )
+        cases = {
+            "Posted Today": 0,
+            "posted today": 0,
+            "Posted Yesterday": 1,
+            "Posted 1 Day Ago": 1,
+            "Posted 12 Days Ago": 12,
+            "Posted 30+ Days Ago": 30,  # lossy floor
+            "30+ days ago": 30,  # no 'Posted' prefix
+        }
+        for text, days in cases.items():
+            dt, precision = _parse_posted_date(text)
+            assert dt == utc_today - timedelta(days=days), text
+            assert precision == "approximate", text
+
     def test_missing_posted_on_returns_none(self):
         """When postedOn is absent, posted_date is None (not a synthesis)."""
         posting = {k: v for k, v in _BASE_POSTING.items() if k != "postedOn"}
@@ -132,10 +155,28 @@ class TestWorkdayPostedDate:
         assert result["posted_date"] is None
 
     def test_unrecognised_format_returns_none(self):
-        """Relative date strings ('Posted 3 Days Ago') → posted_date is None."""
-        posting = {**_BASE_POSTING, "postedOn": "Posted 3 Days Ago"}
+        """Garbage postedOn strings → posted_date is None."""
+        posting = {**_BASE_POSTING, "postedOn": "sometime last quarter"}
         result = _call_posting_to_job(posting)
         assert result["posted_date"] is None
+        assert result["posted_date_precision"] is None
+
+    def test_relative_string_yields_approximate_date(self):
+        """'Posted 3 Days Ago' → UTC-today − 3d at date precision (#364)."""
+        from datetime import UTC, datetime, timedelta
+
+        posting = {**_BASE_POSTING, "postedOn": "Posted 3 Days Ago"}
+        result = _call_posting_to_job(posting)
+        expected = datetime.now(UTC).replace(
+            hour=0, minute=0, second=0, microsecond=0, tzinfo=None
+        ) - timedelta(days=3)
+        assert result["posted_date"] == expected
+        assert result["posted_date_precision"] == "approximate"
+
+    def test_absolute_date_is_exact(self):
+        """Absolute postedOn dates carry 'exact' precision."""
+        result = _call_posting_to_job(dict(_BASE_POSTING))
+        assert result["posted_date_precision"] == "exact"
 
 
 # ---------------------------------------------------------------------------
