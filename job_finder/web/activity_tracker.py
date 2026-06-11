@@ -27,6 +27,11 @@ ACTION_STATUS_CHANGE = "status_change"
 ACTION_PASTE_JD = "paste_jd"
 ACTION_RESCORE = "rescore"
 ACTION_BATCH_SCORE = "batch_score"
+# Terminal "scoring blocked by daily budget" outcome (WP3). Logged once per
+# user-initiated scoring attempt and once per batch run — NEVER per cascade
+# provider skip (a paid provider being skipped while a free one succeeds is
+# normal routing, not a user-relevant event).
+ACTION_SCORING_SKIPPED_BUDGET = "scoring_skipped_budget"
 
 ACTION_SCHEDULED_ATS_SCAN = "scheduled_ats_scan"
 ACTION_SAVE_JD = "save_jd"

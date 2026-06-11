@@ -11,6 +11,21 @@
 
    Required context: active_sync, active_scoring, unscored_count, scoring_available. #}
 
+{# No-provider banner (WP3): state-driven, not dismissible — disappears on the
+   next fragment refresh once a provider is configured or nothing is unscored.
+   w-full forces its own row inside the flex-wrap Quick Actions container
+   (the #dashboard-quick-actions wrapper is class="contents"). #}
+{% if not scoring_available and unscored_count > 0 %}
+  <div class="w-full bg-amber-900/50 border border-amber-700 rounded-lg px-4 py-3 flex items-center justify-between">
+    <span class="text-amber-200 text-sm">
+      {{ unscored_count }} job{{ '' if unscored_count == 1 else 's' }} ingested but not yet AI-scored —
+      no AI provider is configured. Scoring is what moves jobs into your Apply / Consider pipeline.
+    </span>
+    <a href="{{ url_for('onboarding.provider_select') }}"
+       class="text-amber-300 hover:text-amber-200 underline text-xs whitespace-nowrap ml-4">Set up a provider</a>
+  </div>
+{% endif %}
+
 {# Sync Now / sync progress bar #}
 {% if active_sync %}
   {% with session_id=active_sync.id,

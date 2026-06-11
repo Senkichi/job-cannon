@@ -43,6 +43,7 @@ from job_finder.web.activity_tracker import (
     ACTION_PASTE_JD,
     ACTION_RESCORE,
     ACTION_SAVE_JD,
+    ACTION_SCORING_SKIPPED_BUDGET,
     ACTION_STATUS_CHANGE,
     log_activity,
 )
@@ -284,6 +285,15 @@ def index():
         "SELECT COUNT(*) FROM jobs WHERE pipeline_status IN ('archived', 'withdrawn', 'dismissed', 'rejected')"
     ).fetchone()[0]
 
+    # No-provider banner state (WP3) — same pair the dashboard computes, via
+    # the shared 5-minute availability cache in provider_status.
+    config = current_app.config.get("JF_CONFIG", {})
+    from job_finder.web.exclusion_filter import count_scorable
+    from job_finder.web.provider_status import cached_tier_available
+
+    unscored_count = count_scorable(conn, config)
+    scoring_available = cached_tier_available("score", config)
+
     return render_template(
         "jobs/index.html",
         jobs=jobs,
@@ -296,6 +306,8 @@ def index():
         stale_count=stale_count,
         archived_count=archived_count,
         hidden_count=hidden_count,
+        unscored_count=unscored_count,
+        scoring_available=scoring_available,
     )
 
 
@@ -544,6 +556,12 @@ def add_from_listing():
             score_note = "Scoring was attempted when a JD was available."
         elif job_row.get("jd_full"):
             score_note = "Budget cap reached — scoring skipped; JD is saved."
+            log_activity(
+                current_app.config["DB_PATH"],
+                ACTION_SCORING_SKIPPED_BUDGET,
+                entity_id=dedup_key,
+                metadata={"path": "add_from_listing"},
+            )
     except ImportError as e:
         logger.warning("add_from_listing: scorer not available: %s", e)
         score_note = "Scoring unavailable in this environment."
@@ -770,6 +788,12 @@ def paste_jd(dedup_key: str):
         else:
             logger.info("paste-jd: budget cap reached, scoring skipped for %s", dedup_key)
             error = "Budget cap reached. Scoring skipped."
+            log_activity(
+                current_app.config["DB_PATH"],
+                ACTION_SCORING_SKIPPED_BUDGET,
+                entity_id=dedup_key,
+                metadata={"path": "paste_jd"},
+            )
 
     except ImportError as e:
         logger.warning("paste-jd: scorer not available: %s", e)
@@ -850,6 +874,12 @@ def rescore(dedup_key: str):
         else:
             logger.info("rescore: budget cap reached, scoring skipped for %s", dedup_key)
             error = "Budget cap reached. Scoring skipped."
+            log_activity(
+                db_path,
+                ACTION_SCORING_SKIPPED_BUDGET,
+                entity_id=dedup_key,
+                metadata={"path": "rescore"},
+            )
 
     except ImportError as e:
         logger.warning("rescore: scorer not available: %s", e)
