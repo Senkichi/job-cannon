@@ -104,9 +104,14 @@ The wizard enables this by default (`sources.portal_search.enabled: true`). To d
 
 ### Gmail via IMAP (default — no OAuth)
 
-Wizard step 5 ("Connect Gmail") walks you through the Google App Password setup with two in-page links (to [2-Step Verification](https://myaccount.google.com/security) and [App Passwords](https://myaccount.google.com/apppasswords)) plus a 4-step list for the Google UI. For most users that's all you need; come back here only if you want the manual path.
+Wizard step 5 ("Connect Gmail") walks you through the Google App Password setup with two in-page links (to [2-Step Verification](https://myaccount.google.com/security) and [App Passwords](https://myaccount.google.com/apppasswords)), a collapsible 2-Step Verification enrollment walkthrough for accounts that don't have it yet, and numbered steps for Google's App Passwords page. For most users that's all you need; come back here only if you want the manual path.
 
-Manual path: enable [2-Step Verification](https://myaccount.google.com/security), generate an [app password](https://myaccount.google.com/apppasswords) (16 characters), then in Job Cannon go to **Settings → Sources → IMAP** and enter your email + app password.
+Manual path (Google-UI steps verified 2026-06 — Google changes this page without notice):
+
+1. Enable [2-Step Verification](https://myaccount.google.com/signinoptions/two-step-verification) if you haven't — pick the Google prompt or a phone number as your second step. The App Passwords page does not exist until this is on.
+2. Open [App Passwords](https://myaccount.google.com/apppasswords). There are no app/device dropdowns anymore: type a name (e.g. `Job Cannon`) in the **App name** field and click **Create**.
+3. Copy the 16-character password from the popup — spaces included. Google shows it only once; if you lose it, delete it and create a new one.
+4. In Job Cannon go to **Settings → Sources → IMAP** and enter your email + app password.
 
 The app password is stored in your OS keyring. Rotating it: delete in Google's app-password dashboard, generate a new one, paste into Settings — never edit `config.yaml` directly.
 
