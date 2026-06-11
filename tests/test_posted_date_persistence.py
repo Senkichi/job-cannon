@@ -51,6 +51,10 @@ def conn() -> Iterator[sqlite3.Connection]:
 _DT_A = datetime(2026, 5, 15, 10, 0, 0, tzinfo=UTC)
 _DT_B = datetime(2026, 5, 20, 10, 0, 0, tzinfo=UTC)
 
+# Stored form: the upsert boundary strips tzinfo to naive UTC (#361).
+_DT_A_STORED = "2026-05-15T10:00:00"
+_DT_B_STORED = "2026-05-20T10:00:00"
+
 
 def _make_job(
     title: str, posted_date: datetime | None
@@ -87,8 +91,8 @@ class TestPostedDatePersistence:
         upsert_job(conn, parsed)
 
         pd = _read_pd(conn, job.dedup_key)
-        # datetime.isoformat() with UTC tzinfo produces '+00:00' form
-        assert pd == _DT_A.isoformat()
+        # The upsert boundary serializes naive UTC — no tz suffix (#361).
+        assert pd == _DT_A_STORED
 
     def test_insert_with_none_posted_date_stores_null(self, conn: sqlite3.Connection):
         """Test 2: INSERT with posted_date=None stores NULL — no synthesis from first_seen."""
@@ -103,7 +107,7 @@ class TestPostedDatePersistence:
         # First ingest: sets posted_date
         job_first, parsed_first = _make_job("Principal Eng", posted_date=_DT_A)
         upsert_job(conn, parsed_first)
-        assert _read_pd(conn, job_first.dedup_key) == _DT_A.isoformat()
+        assert _read_pd(conn, job_first.dedup_key) == _DT_A_STORED
 
         # Second ingest: same dedup_key, posted_date=None
         job_second, parsed_second = _make_job("Principal Eng", posted_date=None)
@@ -112,7 +116,7 @@ class TestPostedDatePersistence:
 
         # DB value must be unchanged
         pd = _read_pd(conn, job_first.dedup_key)
-        assert pd == _DT_A.isoformat()
+        assert pd == _DT_A_STORED
 
     def test_update_value_overwrites_existing_null(self, conn: sqlite3.Connection):
         """Test 4: Re-ingest with posted_date updates a previously-NULL row."""
@@ -127,7 +131,7 @@ class TestPostedDatePersistence:
         upsert_job(conn, parsed_second)
 
         pd = _read_pd(conn, job_first.dedup_key)
-        assert pd == _DT_B.isoformat()
+        assert pd == _DT_B_STORED
 
     def test_ats_api_string_posted_date_coerced_and_persisted(self, conn: sqlite3.Connection):
         """Regression #108: ATS-API string posted_date must be coerced and persisted.
