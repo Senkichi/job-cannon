@@ -763,7 +763,9 @@ def main() -> None:
             # terminal.  _print_startup_banner honours JOB_CANNON_NO_BROWSER.
             _print_startup_banner(url, tray_mode=True)
             try:
-                TrayApp(cfg).run()
+                # Pass the RESOLVED host/port — TrayApp's cfg-derived defaults
+                # ignore --port / JOB_CANNON_PORT (WP9 frozen-smoke finding).
+                TrayApp(cfg, bind_host=bind_host, port=port).run()
             except (DatabaseNewerThanCodeError, MigrationBlockedError) as exc:
                 _print_migration_error(exc)
                 sys.exit(1)

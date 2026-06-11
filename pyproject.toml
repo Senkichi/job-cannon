@@ -131,6 +131,14 @@ eval = [
 local-ai = [
     "llama-cpp-python>=0.2.0",
 ]
+# Frozen-app build toolchain (WP9 Windows installer). PyInstaller freezes
+# whatever is importable in the active environment, so the build recipe is:
+#   uv sync --extra packaging && uv run pyinstaller packaging/windows/job-cannon.spec
+# pyinstaller-hooks-contrib (pulled in automatically) supplies the data-file
+# hooks for pycountry / geonamescache / trafilatura and friends.
+packaging = [
+    "pyinstaller>=6.10,<7",
+]
 # Test + tooling deps.
 #
 # ruff is intentionally not pinned here — it runs via `uvx ruff`, which

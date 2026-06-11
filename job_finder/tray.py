@@ -46,15 +46,23 @@ logger = logging.getLogger(__name__)
 class TrayApp:
     """Owns the tray icon, the background Flask thread, and process teardown."""
 
-    def __init__(self, cfg: dict):
+    def __init__(self, cfg: dict, *, bind_host: str | None = None, port: int | None = None):
         self.cfg = cfg
+        # main() resolves host/port with full precedence (--port CLI >
+        # JOB_CANNON_PORT env > config > default) and passes them in — the
+        # cfg-derived values below are only a fallback for callers that skip
+        # the kwargs (tests). Before WP9 this re-derived from cfg
+        # unconditionally, so tray mode silently ignored --port and served
+        # the config port while the banner advertised the resolved one.
+        #
         # Bind/client host split (wildcard-bind handling, mirrors __main__.py's
-        # split — duplicated defensively so TrayApp works even if the caller
-        # skips it). bind_host is passed to make_server(); client_host/url are
+        # split). bind_host is passed to make_server(); client_host/url are
         # what the user sees, so http://0.0.0.0:5000 never leaks into a menu.
         server = cfg.get("server", {})
-        self.bind_host = server.get("host", DEFAULT_SERVER_HOST)
-        self.port = server.get("port", DEFAULT_SERVER_PORT)
+        self.bind_host = (
+            bind_host if bind_host is not None else server.get("host", DEFAULT_SERVER_HOST)
+        )
+        self.port = port if port is not None else server.get("port", DEFAULT_SERVER_PORT)
         if self.bind_host in ("0.0.0.0", "::", ""):  # noqa: S104
             self.client_host = "127.0.0.1"
         else:

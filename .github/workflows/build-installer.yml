@@ -1,0 +1,141 @@
+# .github/workflows/build-installer.yml
+#
+# Builds the Windows installer (PyInstaller onedir + Inno Setup, see
+# packaging/windows/) and attaches it + SHA-256 checksum to the GitHub
+# Release for the version tag.
+#
+# Trigger: `workflow_run` on Publish completion — NOT the v* tag push.
+# Two reasons (WP9):
+#   1. publish.yml creates the Release AFTER the PyPI upload succeeds
+#      (invariant D-02: release exists iff artifact landed on PyPI). A
+#      tag-triggered installer build would race that creation — and the
+#      pypi environment's reviewer gate makes the wait unbounded.
+#   2. Events created with GITHUB_TOKEN don't trigger other workflows
+#      (GitHub recursion guard), so `release: published` would never fire.
+# workflow_run fires regardless of the token that completed the run; for a
+# tag-push-triggered Publish, `workflow_run.head_branch` is the tag name.
+#
+# workflow_dispatch is the manual fallback (re-runs, signed re-issues).
+#
+# Ships unsigned (decision #3 in RELEASE-POLISH-PLAN.md): SmartScreen warns
+# until reputation builds; INSTALL.md documents More info -> Run anyway, and
+# the checksum file published here is the integrity story.
+
+name: Build Installer
+
+on:
+  workflow_run:
+    workflows: [Publish]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to build the installer for (e.g. v5.1.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: write # gh release upload
+
+jobs:
+  build-installer:
+    name: Build Windows installer
+    runs-on: windows-latest
+    # Manual runs always proceed; workflow_run only after a SUCCESSFUL
+    # Publish of a version tag (head_branch carries the tag name).
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       startsWith(github.event.workflow_run.head_branch, 'v'))
+    steps:
+      - name: Resolve tag
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ inputs.tag }}"
+          else
+            TAG="${{ github.event.workflow_run.head_branch }}"
+          fi
+          echo "TAG=$TAG" >> "$GITHUB_ENV"
+          echo "Building installer for $TAG"
+
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ env.TAG }}
+
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.13"
+          enable-cache: true
+
+      - name: Read version from pyproject.toml
+        shell: bash
+        run: |
+          VERSION=$(grep -m1 '^version = ' pyproject.toml | sed 's/version = "\(.*\)"/\1/')
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          # The tag and pyproject version must agree — a mismatch means the
+          # checkout isn't the release commit.
+          if [ "v$VERSION" != "$TAG" ]; then
+            echo "::error::pyproject version v$VERSION != tag $TAG"
+            exit 1
+          fi
+
+      - name: Freeze app (PyInstaller)
+        run: |
+          uv sync --extra packaging
+          uv run pyinstaller packaging/windows/job-cannon.spec --noconfirm
+
+      # The frozen-app smoke test is the automated release gate: launch the
+      # exe headless, require the /__jc_health identity payload. Catches
+      # hidden-import regressions before anything reaches users.
+      - name: Smoke-test frozen app
+        shell: pwsh
+        run: |
+          $env:JOB_CANNON_NO_BROWSER = "1"
+          $env:JOB_CANNON_USER_DATA_DIR = Join-Path $env:RUNNER_TEMP "jc-smoke"
+          New-Item -ItemType Directory -Force $env:JOB_CANNON_USER_DATA_DIR | Out-Null
+          $p = Start-Process -FilePath "dist\JobCannon\job-cannon.exe" -ArgumentList "--terminal","--port","5099" -PassThru
+          $ok = $false
+          foreach ($i in 1..60) {
+            Start-Sleep -Seconds 1
+            try {
+              $r = Invoke-RestMethod -Uri "http://127.0.0.1:5099/__jc_health" -TimeoutSec 2
+              if ($r.app -eq "job-cannon") { $ok = $true; break }
+            } catch {}
+          }
+          Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+          if (-not $ok) { throw "Frozen app never answered /__jc_health" }
+          Write-Host "Frozen smoke OK: version $($r.version) after ~$i s"
+          if ($r.version -ne $env:VERSION) { throw "Frozen app reports $($r.version), expected $env:VERSION" }
+
+      - name: Compile installer (Inno Setup)
+        shell: pwsh
+        run: |
+          $iscc = @(
+            "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
+            "$env:ProgramFiles\Inno Setup 6\ISCC.exe"
+          ) | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $iscc) {
+            choco install innosetup -y --no-progress
+            $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          }
+          & $iscc /DAppVersion=$env:VERSION packaging\windows\installer.iss
+
+      - name: Generate SHA-256 checksum
+        shell: pwsh
+        run: |
+          $exe = "dist\JobCannon-Setup-$env:VERSION.exe"
+          $hash = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLower()
+          "$hash  JobCannon-Setup-$env:VERSION.exe" |
+            Out-File -FilePath "dist\JobCannon-Setup-$env:VERSION.exe.sha256" -Encoding ascii
+          Get-Content "dist\JobCannon-Setup-$env:VERSION.exe.sha256"
+
+      - name: Attach to GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "$TAG" \
+            "dist/JobCannon-Setup-$VERSION.exe" \
+            "dist/JobCannon-Setup-$VERSION.exe.sha256" \
+            --clobber

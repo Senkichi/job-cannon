@@ -36,7 +36,12 @@ logger = logging.getLogger(__name__)
 
 # --- Whitelist for the gate (D-18) ---
 _WHITELIST_PREFIXES: tuple[str, ...] = ("/onboarding/", "/static/")
-_WHITELIST_EXACT: tuple[str, ...] = ("/favicon.ico",)
+# /__jc_health is the launcher's single-instance identity probe
+# (__main__.probe_existing_jc). Gating it behind onboarding broke
+# already-running detection on unconfigured installs: the probe followed
+# the 302 to HTML, failed JSON parsing, and fell through to the weaker
+# psutil-cmdline fallback. Liveness endpoints are never gated.
+_WHITELIST_EXACT: tuple[str, ...] = ("/favicon.ico", "/__jc_health")
 
 
 # --- Helpers ---

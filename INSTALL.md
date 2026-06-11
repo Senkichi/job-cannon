@@ -168,9 +168,25 @@ The `--extra dev --extra eval` flags pull in test + benchmark tooling. If you on
 
 ---
 
-## Native installers (coming in v5.1)
+## Windows installer (no Python required)
 
-Native installers (single-click `.msi` / `.pkg` / `.AppImage`) are planned for v5.1+. Until then, pipx is the primary path.
+A single-click Windows installer ships with every release — no Python, no terminal.
+
+1. Download `JobCannon-Setup-<version>.exe` from the [latest release](https://github.com/Senkichi/job-cannon/releases/latest).
+2. Run it. The install is **per-user** (no administrator prompt) into `%LOCALAPPDATA%\Programs\JobCannon`, with a Start Menu shortcut and optional Desktop / start-at-login entries.
+3. Launch **Job Cannon** from the Start Menu — the tray icon appears and your browser opens into the onboarding wizard.
+
+**"Windows protected your PC" (SmartScreen):** the installer is not code-signed yet, so Windows shows a blue SmartScreen dialog on first run. Click **More info → Run anyway**. To verify what you downloaded, every release publishes a SHA-256 checksum next to the installer:
+
+```powershell
+Get-FileHash .\JobCannon-Setup-<version>.exe -Algorithm SHA256
+```
+
+Compare the output against the `.sha256` file on the release page.
+
+**Updating:** installed via the `.exe`? Update by downloading the new installer — it upgrades in place. Your data (jobs database, config) lives separately in `%LOCALAPPDATA%\JobCannon` and survives upgrades. Uninstalling asks whether to delete that data and defaults to keeping it.
+
+macOS `.pkg` and Linux AppImage are planned for a later release; until then those platforms use pipx or the one-liner above.
 
 ---
 
