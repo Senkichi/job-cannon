@@ -108,6 +108,13 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Port to listen on. Overrides config.yaml > server.port and "
         "the JOB_CANNON_PORT env var (precedence: --port > JOB_CANNON_PORT > config > default 5000).",
     )
+    parser.add_argument(
+        "--demo",
+        action="store_true",
+        help="Launch with ~30 sample scored jobs in a throwaway database. "
+        "No config.yaml, no API keys, no background jobs. Your real data is untouched. "
+        "Runs alongside a real instance (picks the next free port automatically).",
+    )
     return parser
 
 
@@ -215,6 +222,19 @@ def probe_existing_jc(url: str, timeout: float = 1.0) -> dict | None:
     if not isinstance(data, dict) or data.get("app") != "job-cannon":
         return None
     return data
+
+
+def _first_free_port(host: str, start: int, span: int = 10) -> int | None:
+    """Return the first port in ``[start, start + span]`` with no listener.
+
+    Demo mode must coexist with a live real instance, so instead of exiting
+    on an occupied port it shifts to the next free one. The listen-probe has
+    an inherent TOCTOU race; acceptable for a local single-user launcher.
+    """
+    for candidate in range(start, start + span + 1):
+        if not _port_is_listening(host, candidate):
+            return candidate
+    return None
 
 
 def _port_is_listening(host: str, port: int, timeout: float = 0.5) -> bool:
@@ -550,6 +570,18 @@ def main() -> None:
     if args.print_example_config:
         _print_example_config()  # prints + sys.exit(0)
 
+    # Demo mode: route ALL user-data side effects (database, logs, pidfile
+    # lock, update-check cache) into a throwaway temp dir via the existing
+    # JOB_CANNON_USER_DATA_DIR override — one mechanism, set before anything
+    # resolves a user-data path, so nothing of the user's is ever touched.
+    # The OS cleans the temp dir up on its own schedule; each launch is fresh.
+    demo_dir: str | None = None
+    if args.demo:
+        import tempfile
+
+        demo_dir = tempfile.mkdtemp(prefix="job-cannon-demo-")
+        os.environ["JOB_CANNON_USER_DATA_DIR"] = demo_dir
+
     # Lazy imports so a --help invocation doesn't pay the Flask import cost.
     from job_finder.config import (
         DEFAULT_SERVER_DEBUG,
@@ -560,22 +592,28 @@ def main() -> None:
     )
     from job_finder.web.user_data_dirs import user_data_root
 
-    try:
-        cfg = load_config(allow_missing=True)
-    except (ConfigError, ValueError) as exc:
-        # Partial or malformed config — print a friendly, actionable message
-        # instead of a raw traceback.  The docstring at config.py:259-262
-        # promises this: "the onboarding wizard handles ConfigError by routing
-        # to the migration UI" — that path is load_config(allow_missing=True)
-        # returning {}; if validation raises we land here instead.
-        print(
-            f"job-cannon: config error\n\n"
-            f"  {exc}\n\n"
-            f"To see the full expected structure, run:\n"
-            f"  job-cannon --print-example-config\n",
-            file=sys.stderr,
-        )
-        sys.exit(1)
+    if args.demo:
+        # Demo never reads or writes the user's config.yaml.
+        from job_finder.demo_seed import build_demo_config
+
+        cfg = build_demo_config(demo_dir)
+    else:
+        try:
+            cfg = load_config(allow_missing=True)
+        except (ConfigError, ValueError) as exc:
+            # Partial or malformed config — print a friendly, actionable message
+            # instead of a raw traceback.  The docstring at config.py:259-262
+            # promises this: "the onboarding wizard handles ConfigError by routing
+            # to the migration UI" — that path is load_config(allow_missing=True)
+            # returning {}; if validation raises we land here instead.
+            print(
+                f"job-cannon: config error\n\n"
+                f"  {exc}\n\n"
+                f"To see the full expected structure, run:\n"
+                f"  job-cannon --print-example-config\n",
+                file=sys.stderr,
+            )
+            sys.exit(1)
 
     server = cfg.get("server", {})
     bind_host = server.get("host", DEFAULT_SERVER_HOST)
@@ -605,6 +643,24 @@ def main() -> None:
     else:
         client_host = bind_host
     url = f"http://{client_host}:{port}"
+
+    # Demo mode must run alongside a live real instance: shift to the next
+    # free port instead of tripping the already-running probes below (which
+    # would detect the REAL instance and exit). After the shift the chosen
+    # port has no listener, so Steps 1–2 fall through naturally; the pidfile
+    # lock in Step 3 lives under the demo temp dir and cannot collide.
+    if args.demo:
+        free_port = _first_free_port(client_host, port)
+        if free_port is None:
+            print(
+                f"job-cannon: no free port found in {port}-{port + 10} for demo mode.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        if free_port != port:
+            print(f"Demo mode: port {port} is in use — using {free_port} instead.")
+            port = free_port
+            url = f"http://{client_host}:{port}"
 
     # --- Step 1: HTTP probe — matches post-plan instances responding at /__jc_health.
     if probe_existing_jc(url) is not None:
@@ -654,6 +710,22 @@ def main() -> None:
         if action == ExistingInstanceAction.EXIT_FAILURE:
             sys.exit(1)
         # CONTINUE_STARTUP: dead-PID retry succeeded inside handle_existing_instance
+
+    # --- Demo seeding: migrate the throwaway DB and populate sample data
+    # BEFORE the app builds, so the first page load is already a full board.
+    # create_app re-runs migrations idempotently; a fresh temp DB cannot hit
+    # the downgrade guard, so no migration-error handling is needed here.
+    if args.demo:
+        from job_finder.demo_seed import seed_demo_db
+        from job_finder.web.db_migrate import run_migrations
+
+        demo_db_path = cfg["db"]["path"]
+        run_migrations(demo_db_path)
+        seed_demo_db(demo_db_path)
+        print(
+            f"Demo mode: ~30 sample jobs in a throwaway database ({demo_dir}). "
+            f"Your real data is untouched."
+        )
 
     # --- Step 4: process-level orphan guard, then dispatch to a launch mode.
     from job_finder.web import _process_lifecycle
