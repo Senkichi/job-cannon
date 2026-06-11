@@ -184,44 +184,44 @@ class TestSourceId:
 
 
 class TestPostedDate:
-    def test_posted_date_from_updated_at(self):
-        """updated_at ISO-8601 string → posted_date."""
+    def test_posted_date_from_first_published(self):
+        """first_published ISO-8601 string → posted_date (#360)."""
         posting = {
             "id": 1,
             "title": "Engineer",
             "location": {"name": "Austin, TX"},
-            "updated_at": "2024-01-15T10:30:00Z",
-            "absolute_url": "https://example.com",
-        }
-        result = _posting_to_job(posting, "acme")
-        assert result["posted_date"] == "2024-01-15T10:30:00Z"
-
-    def test_posted_date_falls_back_to_created_at(self):
-        """When updated_at is absent, fall back to created_at."""
-        posting = {
-            "id": 1,
-            "title": "Engineer",
-            "location": {"name": "Austin, TX"},
-            "created_at": "2024-01-10T08:00:00Z",
+            "first_published": "2024-01-10T08:00:00Z",
             "absolute_url": "https://example.com",
         }
         result = _posting_to_job(posting, "acme")
         assert result["posted_date"] == "2024-01-10T08:00:00Z"
 
-    def test_updated_at_preferred_over_created_at(self):
-        """When both are present, updated_at wins."""
+    def test_updated_at_is_ignored(self):
+        """updated_at is last-modified, never used for posted_date (#360)."""
         posting = {
             "id": 1,
             "title": "Engineer",
             "location": {"name": "Austin, TX"},
             "updated_at": "2024-02-01T00:00:00Z",
-            "created_at": "2024-01-01T00:00:00Z",
             "absolute_url": "https://example.com",
         }
         result = _posting_to_job(posting, "acme")
-        assert result["posted_date"] == "2024-02-01T00:00:00Z"
+        assert result["posted_date"] is None
 
-    def test_posted_date_none_when_both_absent(self):
+    def test_first_published_wins_over_updated_at(self):
+        """When both are present, first_published wins (#360)."""
+        posting = {
+            "id": 1,
+            "title": "Engineer",
+            "location": {"name": "Austin, TX"},
+            "updated_at": "2024-02-01T00:00:00Z",
+            "first_published": "2024-01-01T00:00:00Z",
+            "absolute_url": "https://example.com",
+        }
+        result = _posting_to_job(posting, "acme")
+        assert result["posted_date"] == "2024-01-01T00:00:00Z"
+
+    def test_posted_date_none_when_first_published_absent(self):
         posting = {
             "id": 1,
             "title": "Engineer",
