@@ -15,6 +15,30 @@
     {% include "jobs/_row.html" %}
     <tr data-expand-slot="{{ job.dedup_key | urlencode }}" class="hidden"><td></td></tr>
   {% endfor %}
+{% elif total_jobs is defined and total_jobs == 0 %}
+  {# WP5: brand-new / empty DB — "loosen the filters" is wrong advice when
+     there is nothing to filter. Tell the user what Sync actually does. The
+     CTA links to the dashboard rather than half-wiring a Sync button here:
+     sync_start's progress UI polls #sync-status, which only exists there. #}
+  <tr>
+    <td colspan="7" class="px-4 py-16 text-center">
+      <p class="text-sm text-slate-400">No jobs yet.</p>
+      <p class="text-[13px] text-slate-500 mt-1 max-w-xl mx-auto">
+        Job Cannon pulls from the free job portals (RemoteOK, Remotive, Himalayas) using your
+        target titles — plus Gmail alerts and watched companies if you've connected them.
+      </p>
+      {% if profile_titles_missing %}
+      <p class="text-[13px] text-amber-400/90 mt-2">
+        Tip: free-portal search uses your target titles — set them in
+        <a href="{{ url_for('profile.index') }}" class="underline hover:text-amber-300">Profile</a> first.
+      </p>
+      {% endif %}
+      <a href="{{ url_for('dashboard.index') }}"
+         class="inline-block mt-4 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-sm font-medium text-white transition-colors">
+        Go to the Dashboard and press Sync Now
+      </a>
+    </td>
+  </tr>
 {% else %}
   {# DESIGN DECISION: empty state given a little more breathing room + a muted
      two-line read instead of a single terse line. No behavior change. #}
