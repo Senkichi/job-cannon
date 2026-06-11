@@ -212,6 +212,15 @@
                 Research company
               </button>
               {% endif %}
+              {# Track careers page (WP6) — gated on job.company (raw name),
+                 NOT company_id: most jobs lack the FK; tracking is by name.
+                 is_company_tracked is a Jinja global (single-point check —
+                 every render site of this partial gets it for free). #}
+              {% if job.company %}
+                {% with company_name = job.company, dedup_key = job.dedup_key, ui = 'menu', tracked = is_company_tracked(job.company) %}
+                  {% include "companies/_track_button.html" %}
+                {% endwith %}
+              {% endif %}
             </div>
           </details>
         </div>

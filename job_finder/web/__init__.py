@@ -242,6 +242,18 @@ def create_app(config_path: str = "config.yaml", config: dict | None = None) -> 
 
     app.jinja_env.globals["apply_url_for"] = apply_url_for_global
 
+    # Track-company state (WP6) — single enforcement point so every render
+    # site of jobs/_row_expanded.html shows the right Track/Tracking state
+    # without threading a flag through ~8 route contexts. Request-scoped
+    # g.db query; cheap EXISTS against the small companies table.
+    def is_company_tracked_global(name):
+        from job_finder.web.ats_scanner import is_company_tracked
+        from job_finder.web.db_helpers import get_db
+
+        return is_company_tracked(get_db(), name)
+
+    app.jinja_env.globals["is_company_tracked"] = is_company_tracked_global
+
     # --- Custom Jinja2 filters ---
     @app.template_filter("from_json")
     def from_json_filter(value):

@@ -125,6 +125,11 @@ def index():
     # Compute health metrics for full page
     health = _compute_health_metrics(conn)
 
+    # Suggested companies (WP6): feed-frequent companies not tracked yet.
+    from job_finder.web.company_suggestions import get_suggested_companies
+
+    suggested_companies = get_suggested_companies(conn)
+
     # Detect any in-flight ATS scan so the polling progress fragment renders
     # on a fresh page load. Without this, clicking 'Scan ATS' then navigating
     # away and back hides all scan progress until the next manual click,
@@ -151,6 +156,7 @@ def index():
         total_count=total_count,
         health=health,
         running_scan=running_scan,
+        suggested_companies=suggested_companies,
     )
 
 
@@ -280,6 +286,82 @@ def add():
         flash(f"Error adding company: {e}", "error")
 
     return redirect(url_for("companies.index"))
+
+
+@companies_bp.route("/track", methods=["POST"], strict_slashes=False)
+def track():
+    """Track a company's careers page (WP6): upsert a pending companies row.
+
+    Invoked from a job row's overflow menu or the suggested-companies card.
+    Idempotent: an already-tracked company still returns the ✓ fragment;
+    a row the user disabled (scan_enabled=0) is re-enabled. The pending
+    probe sweep picks the row up; a best-effort immediate probe runs in a
+    background thread so the user sees results in minutes, not at the
+    nightly sweep.
+
+    Returns the swapped-in ✓ button fragment (hx-target="this",
+    hx-swap="outerHTML" — 200, never 204 per the HTMX convention).
+    """
+    company_name = request.form.get("company_name", "").strip()
+    if not company_name:
+        return "Company name is required", 400
+    dedup_key = request.form.get("dedup_key") or None
+    ui = request.form.get("ui", "menu")
+    if ui not in ("menu", "card"):
+        ui = "menu"
+
+    conn = get_db()
+    from job_finder.web.ats_scanner import upsert_company
+
+    company_id = upsert_company(conn, name=company_name, ats_probe_status="pending")
+    if company_id is None:
+        return "Could not track company", 500
+
+    # Re-enable semantics: tracking a previously disabled company turns its
+    # scanning back on (upsert_company never touches scan_enabled).
+    conn.execute(
+        "UPDATE companies SET scan_enabled = 1 WHERE id = ? AND scan_enabled = 0",
+        (company_id,),
+    )
+    conn.commit()
+    logger.info("track: %r (dedup_key=%s) -> company_id=%s", company_name, dedup_key, company_id)
+
+    # Best-effort immediate probe (same bg-thread pattern as scan()); the
+    # pending sweep remains the guaranteed path.
+    if not current_app.config.get("TESTING", False):
+        t = threading.Thread(
+            target=_probe_company_bg,
+            args=(
+                current_app.config["DB_PATH"],
+                company_id,
+                current_app.config.get("JF_CONFIG", {}),
+            ),
+            daemon=True,
+        )
+        t.start()
+
+    return render_template(
+        "companies/_track_button.html",
+        company_name=company_name,
+        dedup_key=dedup_key,
+        ui=ui,
+        tracked=True,
+    )
+
+
+def _probe_company_bg(db_path: str, company_id: int, config: dict) -> None:
+    """Background thread: one-off probe for a freshly tracked company.
+
+    Opens its own connection (probe_single_company uses the caller's conn,
+    which must not be the request-thread g.db here). Failures are logged
+    and swallowed — the nightly pending sweep is the recovery path.
+    """
+    try:
+        with standalone_connection(db_path) as conn:
+            probe_single_company(company_id, conn, config)
+        publish_live(COMPANIES_CHANGED)
+    except Exception:
+        logger.warning("background probe failed for company %d", company_id, exc_info=True)
 
 
 @companies_bp.route("/<int:company_id>/toggle", methods=["POST"], strict_slashes=False)

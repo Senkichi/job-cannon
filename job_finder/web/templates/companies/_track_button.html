@@ -1,0 +1,43 @@
+{# ===========================================================================
+   companies/_track_button.html — "Track careers page" action (WP6)
+   ===========================================================================
+   Shared by two surfaces, selected via `ui`:
+     ui='menu' — job-row overflow-menu item (jobs/_row_expanded.html)
+     ui='card' — suggested-companies row on the Companies page
+   Context: company_name (required), dedup_key (optional, logging context),
+   tracked (bool). POST /companies/track responds with this same partial,
+   tracked=True, swapped in via hx-target="this" hx-swap="outerHTML" (200,
+   never 204 — HTMX outerHTML swap convention).
+#}
+{% if ui == 'card' %}
+  {% if tracked %}
+  <span class="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-emerald-900/40 text-emerald-400 text-xs font-medium">
+    <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg>
+    Tracking
+  </span>
+  {% else %}
+  <button type="button"
+          hx-post="{{ url_for('companies.track') }}"
+          hx-vals='{"company_name": {{ company_name | tojson }}, "ui": "card"}'
+          hx-target="this" hx-swap="outerHTML" hx-disable-elt="this"
+          class="px-3 py-1.5 rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-xs font-medium transition-colors disabled:opacity-50">
+    Track
+  </button>
+  {% endif %}
+{% else %}
+  {% if tracked %}
+  <div class="flex w-full items-center gap-2.5 px-3 py-2 text-[13px] text-emerald-400 cursor-default">
+    <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg>
+    Tracking careers page
+  </div>
+  {% else %}
+  <button type="button"
+          hx-post="{{ url_for('companies.track') }}"
+          hx-vals='{"company_name": {{ company_name | tojson }}, "dedup_key": {{ (dedup_key or "") | tojson }}, "ui": "menu"}'
+          hx-target="this" hx-swap="outerHTML" hx-disable-elt="this"
+          class="flex w-full items-center gap-2.5 px-3 py-2 text-[13px] text-slate-300 hover:bg-slate-750 hover:text-slate-100 transition-colors">
+    <svg class="w-4 h-4 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+    Track careers page
+  </button>
+  {% endif %}
+{% endif %}
