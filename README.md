@@ -28,6 +28,22 @@ job-cannon
 
 **Don't have pipx yet?** Per-OS one-liners: `scoop install pipx` (Windows), `brew install pipx` (macOS), `apt install pipx` (Ubuntu 23.04+).
 
+**Don't have Python either? One-liner that installs the Python bits for you:**
+
+Windows PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/Senkichi/job-cannon/main/bootstrap.ps1 | iex
+```
+
+macOS / Linux:
+
+```bash
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/Senkichi/job-cannon/main/bootstrap.sh)"
+```
+
+The script checks for Python 3.12+, installs pipx into your user account if needed (never sudo/admin), then runs `pipx install job-cannon` and launches the app. Read it first if you like — it's short: [bootstrap.ps1](bootstrap.ps1) / [bootstrap.sh](bootstrap.sh).
+
 **Already cloning the repo to hack on it?** See [For Contributors](#for-contributors) at the bottom.
 
 **Other install paths and troubleshooting:** [INSTALL.md](INSTALL.md).

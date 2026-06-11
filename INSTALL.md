@@ -58,6 +58,35 @@ Launches with ~30 sample scored jobs in a throwaway database — no config, no A
 
 ---
 
+## One-liner install (no Python required)
+
+If you don't have Python (or pipx) yet, the bootstrap script handles the whole ladder:
+
+Windows PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/Senkichi/job-cannon/main/bootstrap.ps1 | iex
+```
+
+macOS / Linux:
+
+```bash
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/Senkichi/job-cannon/main/bootstrap.sh)"
+```
+
+Step by step, the script:
+
+1. **Finds Python 3.12+** — probes `py -3.13` / `py -3.12` / `python3` / `python`. If none qualifies, Windows offers a `winget install Python.Python.3.12` (one confirmation prompt); macOS/Linux prints your package manager's install command and exits — the script never runs sudo itself.
+2. **Ensures pipx** — installed into your user account via `pip install --user pipx` if missing (no admin rights needed; on PEP 668 distros it retries with `--break-system-packages`, which only touches your user site-packages).
+3. **Installs or upgrades** `job-cannon` via pipx. Re-running the one-liner is the upgrade path.
+4. **Launches the app** and opens http://localhost:5000.
+
+Environment switches: `JC_BOOTSTRAP_NO_LAUNCH=1` installs without launching; `JC_BOOTSTRAP_YES=1` (Windows) answers the winget prompt non-interactively.
+
+Prefer not to pipe scripts into your shell? Entirely reasonable — read [bootstrap.ps1](bootstrap.ps1) / [bootstrap.sh](bootstrap.sh) first, or just use the pipx path above; the one-liner is a convenience wrapper around exactly those steps.
+
+---
+
 ## macOS [local-ai] install (community-supported)
 
 > Status: Not author-validated. Tested only on Windows. Submit experience via the
