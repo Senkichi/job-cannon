@@ -173,7 +173,13 @@ def reconcile_company(conn, company_row: dict) -> dict:
         company_row: dict with 'id', 'ats_platform', 'ats_slug'.
 
     Returns:
-        {'checked', 'live', 'expired', 'unparseable', 'skipped', 'skip_reason'}
+        {'checked', 'live', 'expired', 'unparseable', 'direct_url_cleared',
+         'skipped', 'skip_reason'}
+
+    Side effect (Phase 5 staleness): an expiring job that carried a resolved
+    primary-source link has its direct_url / direct_url_confidence NULLed and
+    its direct_url_attempts reset to 0, so the Apply button stops pointing at a
+    dead posting and a future repost is re-resolved from scratch.
     """
     platform = (company_row.get("ats_platform") or "").lower()
     slug = company_row.get("ats_slug") or ""
@@ -184,6 +190,7 @@ def reconcile_company(conn, company_row: dict) -> dict:
         "live": 0,
         "expired": 0,
         "unparseable": 0,
+        "direct_url_cleared": 0,
         "skipped": False,
         "skip_reason": None,
     }
@@ -263,7 +270,7 @@ def reconcile_company(conn, company_row: dict) -> dict:
 
     rows = conn.execute(
         """
-        SELECT dedup_key, source_urls, source_id
+        SELECT dedup_key, source_urls, source_id, direct_url
         FROM jobs
         WHERE company_id = ?
           AND pipeline_status IN ('discovered', 'reviewing')
@@ -278,6 +285,11 @@ def reconcile_company(conn, company_row: dict) -> dict:
     # No writes here — read-only set membership check.
     live_keys: list[str] = []
     expired_keys: list[str] = []
+    # dedup_keys carrying a resolved primary-source link (direct_url). When such
+    # a job expires, the recorded company posting is gone too — that link must be
+    # cleared (Phase 5 staleness), unlike aggregator source_urls which we leave
+    # in place because they often outlive the ATS posting.
+    direct_url_keys: set[str] = set()
 
     # source_id fallback (issue #218): for the aggregator-ingested cohort
     # (Gmail alerts whose URLs carry no ATS posting-id segment), the stored
@@ -293,6 +305,9 @@ def reconcile_company(conn, company_row: dict) -> dict:
     for row in rows:
         dedup_key = row["dedup_key"]
         source_urls = safe_json_load(row["source_urls"], default=[]) or []
+
+        if row["direct_url"]:
+            direct_url_keys.add(dedup_key)
 
         job_ids: set[str] = set()
         for url in source_urls:
@@ -355,6 +370,25 @@ def reconcile_company(conn, company_row: dict) -> dict:
             [now, *chunk],
         )
 
+    # Phase 5 staleness: clear the primary-source link for any expiring job that
+    # carried one. The posting it pointed at is provably gone (its ID dropped off
+    # the live board), so the Apply button must fall back to the aggregator URL.
+    # Reset direct_url_attempts to 0 so a future repost re-enters the resolver and
+    # is resolved afresh rather than being skipped as already-attempted.
+    cleared_keys = [k for k in expired_keys if k in direct_url_keys]
+    for i in range(0, len(cleared_keys), _BATCH):
+        chunk = cleared_keys[i : i + _BATCH]
+        placeholders = ", ".join("?" * len(chunk))
+        conn.execute(
+            f"""UPDATE jobs
+                   SET direct_url = NULL,
+                       direct_url_confidence = NULL,
+                       direct_url_attempts = 0
+                 WHERE dedup_key IN ({placeholders})""",
+            list(chunk),
+        )
+    result["direct_url_cleared"] = len(cleared_keys)
+
     if expired_keys:
         placeholders = ", ".join("?" * len(expired_keys))
         current_statuses = {
@@ -390,13 +424,15 @@ def reconcile_company(conn, company_row: dict) -> dict:
     conn.commit()
 
     logger.info(
-        "reconcile_company: %s/%s checked=%d live=%d expired=%d unparseable=%d",
+        "reconcile_company: %s/%s checked=%d live=%d expired=%d unparseable=%d "
+        "direct_url_cleared=%d",
         platform,
         slug,
         result["checked"],
         result["live"],
         result["expired"],
         result["unparseable"],
+        result["direct_url_cleared"],
     )
 
     # IA-13 visibility: when every tracked job for a company is unparseable,
@@ -436,6 +472,7 @@ def reconcile_all_companies(db_path: str, config: dict | None = None) -> dict:
         "live": 0,
         "expired": 0,
         "unparseable": 0,
+        "direct_url_cleared": 0,
     }
 
     with standalone_connection(db_path) as conn:
@@ -478,6 +515,7 @@ def reconcile_all_companies(db_path: str, config: dict | None = None) -> dict:
                 summary["live"] += company_result["live"]
                 summary["expired"] += company_result["expired"]
                 summary["unparseable"] += company_result["unparseable"]
+                summary["direct_url_cleared"] += company_result["direct_url_cleared"]
 
     logger.info("reconcile_all_companies complete: %s", summary)
     return summary

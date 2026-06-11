@@ -287,6 +287,132 @@ class TestReconcileCompany:
         assert row["pipeline_status"] == "archived"
 
     @patch("job_finder.web.ats_reconciler.run_platform_scan")
+    def test_expired_job_clears_direct_url_and_resets_attempts(self, mock_scan, tmp_db_path):
+        """Phase 5: when a job expires, a resolved primary-source link is dead
+        (its posting dropped off the board). NULL direct_url/direct_url_confidence
+        and reset direct_url_attempts so a future repost re-resolves."""
+        from job_finder.web.ats_reconciler import reconcile_company
+        from job_finder.web.db_helpers import standalone_connection
+
+        _, dedup_keys = _setup_company_and_jobs(
+            tmp_db_path,
+            job_urls=["https://jobs.lever.co/acme/111-222-aaa"],
+        )
+        conn = sqlite3.connect(tmp_db_path)
+        conn.execute(
+            "UPDATE jobs SET direct_url = ?, direct_url_confidence = 'strict', "
+            "direct_url_attempts = 2 WHERE dedup_key = ?",
+            ("https://jobs.lever.co/acme/111-222-aaa", dedup_keys[0]),
+        )
+        conn.commit()
+        conn.close()
+
+        mock_scan.return_value = [
+            {"source_url": "https://jobs.lever.co/acme/333-444-bbb"},  # different ID → gone
+        ]
+
+        with standalone_connection(tmp_db_path) as conn:
+            company_row = dict(
+                conn.execute("SELECT id, ats_platform, ats_slug FROM companies").fetchone()
+            )
+            result = reconcile_company(conn, company_row)
+
+        assert result["expired"] == 1
+        assert result["direct_url_cleared"] == 1
+
+        conn = sqlite3.connect(tmp_db_path)
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT direct_url, direct_url_confidence, direct_url_attempts, expiry_status "
+            "FROM jobs WHERE dedup_key = ?",
+            (dedup_keys[0],),
+        ).fetchone()
+        conn.close()
+        assert row["expiry_status"] == "expired"
+        assert row["direct_url"] is None
+        assert row["direct_url_confidence"] is None
+        assert row["direct_url_attempts"] == 0
+
+    @patch("job_finder.web.ats_reconciler.run_platform_scan")
+    def test_live_job_preserves_direct_url(self, mock_scan, tmp_db_path):
+        """A still-live job keeps its resolved primary link untouched."""
+        from job_finder.web.ats_reconciler import reconcile_company
+        from job_finder.web.db_helpers import standalone_connection
+
+        url = "https://jobs.lever.co/acme/abc-123-def"
+        _, dedup_keys = _setup_company_and_jobs(tmp_db_path, job_urls=[url])
+        conn = sqlite3.connect(tmp_db_path)
+        conn.execute(
+            "UPDATE jobs SET direct_url = ?, direct_url_confidence = 'strict' WHERE dedup_key = ?",
+            (url, dedup_keys[0]),
+        )
+        conn.commit()
+        conn.close()
+
+        mock_scan.return_value = [{"source_url": url}]  # still on the board
+
+        with standalone_connection(tmp_db_path) as conn:
+            company_row = dict(
+                conn.execute("SELECT id, ats_platform, ats_slug FROM companies").fetchone()
+            )
+            result = reconcile_company(conn, company_row)
+
+        assert result["live"] == 1
+        assert result["direct_url_cleared"] == 0
+
+        conn = sqlite3.connect(tmp_db_path)
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT direct_url, direct_url_confidence FROM jobs WHERE dedup_key = ?",
+            (dedup_keys[0],),
+        ).fetchone()
+        conn.close()
+        assert row["direct_url"] == url
+        assert row["direct_url_confidence"] == "strict"
+
+    @patch("job_finder.web.ats_reconciler.run_platform_scan")
+    def test_expired_job_without_direct_url_leaves_attempts_untouched(
+        self, mock_scan, tmp_db_path
+    ):
+        """The clear/reset is surgical: a job that never carried a direct_url is
+        not counted as cleared and its direct_url_attempts are left alone (only
+        rows with a now-dead primary link are reset)."""
+        from job_finder.web.ats_reconciler import reconcile_company
+        from job_finder.web.db_helpers import standalone_connection
+
+        _, dedup_keys = _setup_company_and_jobs(
+            tmp_db_path,
+            job_urls=["https://jobs.lever.co/acme/111-222-aaa"],
+        )
+        conn = sqlite3.connect(tmp_db_path)
+        conn.execute(
+            "UPDATE jobs SET direct_url_attempts = 2 WHERE dedup_key = ?",
+            (dedup_keys[0],),
+        )
+        conn.commit()
+        conn.close()
+
+        mock_scan.return_value = [{"source_url": "https://jobs.lever.co/acme/333-444-bbb"}]
+
+        with standalone_connection(tmp_db_path) as conn:
+            company_row = dict(
+                conn.execute("SELECT id, ats_platform, ats_slug FROM companies").fetchone()
+            )
+            result = reconcile_company(conn, company_row)
+
+        assert result["expired"] == 1
+        assert result["direct_url_cleared"] == 0
+
+        conn = sqlite3.connect(tmp_db_path)
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT direct_url_attempts FROM jobs WHERE dedup_key = ?",
+            (dedup_keys[0],),
+        ).fetchone()
+        conn.close()
+        assert row["direct_url_attempts"] == 2  # untouched — no direct_url to clear
+
+    @patch("job_finder.web.ats_reconciler.run_platform_scan")
     def test_scan_empty_skips_company(self, mock_scan, tmp_db_path):
         """Safety guard: scan returning [] must NOT mass-expire tracked jobs."""
         from job_finder.web.ats_reconciler import reconcile_company

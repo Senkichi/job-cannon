@@ -264,3 +264,43 @@ def test_apply_accepts_parsed_list_and_missing_keys():
 def test_apply_direct_url_without_confidence_is_ignored():
     job = {"direct_url": "https://jobs.lever.co/acme/1", "source_urls": _AGG}
     assert apply_url_for(job) == "https://www.linkedin.com/jobs/view/1"
+
+
+# ── apply_url_for staleness fallback (Phase 5) ────────────────────────────────
+
+
+def test_apply_expired_strict_direct_url_falls_back_to_aggregator():
+    """An expired job's primary posting is dead — skip direct_url even when the
+    column still holds a strict link (the window before the reconciler NULLs it)
+    and send the user to the aggregator listing instead."""
+    job = {
+        "direct_url": "https://jobs.lever.co/acme/1",
+        "direct_url_confidence": "strict",
+        "expiry_status": "expired",
+        "source_urls": _AGG,
+    }
+    assert apply_url_for(job) == "https://www.linkedin.com/jobs/view/1"
+
+
+def test_apply_expired_direct_url_with_no_source_urls_returns_none():
+    """Expired direct_url and no aggregator fallback → no Apply target at all
+    (better than a guaranteed 404)."""
+    job = {
+        "direct_url": "https://jobs.lever.co/acme/1",
+        "direct_url_confidence": "strict",
+        "expiry_status": "expired",
+        "source_urls": "[]",
+    }
+    assert apply_url_for(job) is None
+
+
+def test_apply_live_strict_direct_url_still_wins():
+    """Non-expired strict link is unaffected by the staleness guard (regression
+    on the happy path)."""
+    job = {
+        "direct_url": "https://jobs.lever.co/acme/1",
+        "direct_url_confidence": "strict",
+        "expiry_status": "live",
+        "source_urls": _AGG,
+    }
+    assert apply_url_for(job) == "https://jobs.lever.co/acme/1"
