@@ -189,9 +189,10 @@ def test_resume_upload_unlinks_temp_file(client, monkeypatch):
 
 
 def test_imap_credentials_renders_app_password_hand_holding(client):
-    """UAT F3 (2026-05-21): IMAP step must include the two Google links and
-    the 4-step numbered list so a user unfamiliar with App Passwords can
-    complete the step without leaving the page or opening docs/SETUP.md."""
+    """UAT F3 (2026-05-21) + WP13 (2026-06): IMAP step must include the two
+    Google links, current-UI App-Passwords steps, and the collapsible 2FA
+    enrollment walkthrough so a user with no 2FA can complete the step
+    without leaving the page or opening docs/SETUP.md."""
     resp = client.get("/onboarding/imap_credentials")
     assert resp.status_code == 200
     body = resp.get_data(as_text=True)
@@ -208,19 +209,25 @@ def test_imap_credentials_renders_app_password_hand_holding(client):
     # Anchor opener-noreferrer hardening — required by the design.
     assert 'rel="noopener"' in body
 
-    # The 4-step numbered list must be visible (no expand control).
-    # We assert on the 4 substrings the design fixed, not on exact wording.
-    assert "Mail" in body
-    assert "Other (custom name)" in body
+    # App-Passwords steps must match Google's current UI (single App-name
+    # field + Create button; the pre-2024 Mail / Other-device dropdowns are
+    # gone and their wording must NOT come back).
+    assert "App name" in body
+    assert "Create" in body
     assert "Job Cannon" in body
     assert "16-character" in body
+    assert "Other (custom name)" not in body
 
-    # The "Why am I doing this?" panel must be a <details> (collapsed by default).
+    # WP13: 2FA enrollment walkthrough — collapsed <details> with the
+    # enrollment deep link (not the generic /security page).
+    assert "2-minute walkthrough" in body
+    assert 'href="https://myaccount.google.com/signinoptions/two-step-verification"' in body
+    assert "Google prompt" in body
+
+    # Both <details> panels (walkthrough + "Why am I doing this?") must be
+    # collapsed by default — no `open` attribute on any of them.
     assert "<details" in body
     assert "Why am I doing this?" in body
-    # Detail must NOT be open by default — there must be no `open` attribute
-    # on the <details> element. Substring check is sufficient because the
-    # template has exactly one <details>.
     assert "<details open" not in body and "<details  open" not in body
 
 
