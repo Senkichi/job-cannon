@@ -157,7 +157,12 @@ def _posting_to_job(posting: dict, _slug: str) -> dict:
 
     # ── posted_date (F-02: was missing on 100% of rows) ──────────────────────
     # Greenhouse returns ISO-8601 strings (e.g. "2024-01-15T10:30:00Z").
-    posted_date: str | None = posting.get("updated_at") or posting.get("created_at") or None
+    # ``first_published`` is the only first-posted field the Job Board API
+    # exposes (#360): ``updated_at`` is last-modified (edits/reposts bump it,
+    # making stale jobs look fresh) and ``created_at`` does not exist in the
+    # payload at all. A missing first_published stays NULL — a wrong date is
+    # worse than no date (D-08).
+    posted_date: str | None = posting.get("first_published") or None
 
     # ── Description (JD Layer 2 step 2a) ─────────────────────────────────────
     # Greenhouse `content` is entity-escaped HTML (&lt;p&gt;…). Stored verbatim
