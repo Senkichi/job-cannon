@@ -91,6 +91,34 @@
     </form>
   </div>
 
+  {# Suggested companies (WP6) — feed-frequent, untracked. Omitted entirely
+     when empty. Each Track button swaps itself to the ✓ state in place. #}
+  {% if suggested_companies %}
+  <div class="bg-slate-800 rounded-xl border border-slate-700 p-5">
+    <h3 class="text-sm font-semibold text-slate-200 mb-1">Companies in your feed</h3>
+    <p class="text-xs text-slate-400 mb-4">
+      These show up often in your ingested jobs but aren't tracked yet. Track one and
+      Job Cannon will try to find its job board (Greenhouse / Lever / Ashby / Workday / SmartRecruiters)
+      and scan it on every sync.
+    </p>
+    <ul class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+      {% for s in suggested_companies %}
+      <li class="flex items-center justify-between gap-3 px-3 py-2 rounded-lg bg-slate-900/60 border border-slate-700/60">
+        <div class="min-w-0">
+          <span class="block text-sm text-slate-200 truncate">{{ s.company }}</span>
+          <span class="block text-xs text-slate-500">
+            {{ s.job_cnt }} job{{ 's' if s.job_cnt != 1 }}{% if s.good_cnt %} ({{ s.good_cnt }} good fit{{ 's' if s.good_cnt != 1 }}){% endif %}
+          </span>
+        </div>
+        {% with company_name = s.company, dedup_key = None, ui = 'card', tracked = False %}
+          {% include "companies/_track_button.html" %}
+        {% endwith %}
+      </li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+
   <!-- Filters row -->
   <div class="flex items-center gap-3">
     <form class="flex items-center gap-3 flex-1">

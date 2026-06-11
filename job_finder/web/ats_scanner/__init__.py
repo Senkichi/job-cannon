@@ -71,4 +71,4 @@ from job_finder.web.ats_scanner._probe import probe_ats_slugs  # noqa: F401
 # First-party concerns moved into private sibling modules during S7c.
 from job_finder.web.ats_scanner._promote import promote_ats_from_source_urls  # noqa: F401
 from job_finder.web.ats_scanner._run import run_ats_scan  # noqa: F401
-from job_finder.web.ats_scanner._upsert import upsert_company  # noqa: F401
+from job_finder.web.ats_scanner._upsert import is_company_tracked, upsert_company  # noqa: F401
