@@ -61,6 +61,18 @@ job-cannon
   scanners; the AI navigator caches Playwright recipes (16 active) for
   the long-tail of custom-built career sites (iCIMS, Phenom, UKG,
   bespoke).
+- **Self-healing parsers (default on).** Each source's extraction is
+  monitored for break signals (a previously-yielding parser going to
+  zero). When a source degrades, the heal pipeline assembles a corpus of
+  failing + prior-working samples, has an LLM generate a *declarative*
+  extraction recipe (CSS selectors / field aliases — never generated
+  code), and adopts it only after a subprocess corpus-replay proves it
+  fixes the break without regressing any prior-working sample. A
+  shipped-default recipe shadow-compared against the live extractor is
+  auto-retired if it underperforms, so no recipe is ever unremovable.
+  Without a configured LLM provider it costs nothing — the source just
+  surfaces as DEGRADED on the dashboard. Disable with
+  `autoheal.heal_enabled: false`.
 - **Eval harness with paired MAE + BCa bootstrap 95% CIs** for
   prompt-variant A/B testing across the full provider matrix
   (Ollama-local, Groq, Cerebras, Gemini, Anthropic).
