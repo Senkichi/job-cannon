@@ -396,15 +396,17 @@ filters:
   # Add staffing agencies or spam companies you keep seeing
   company_denylist: []
 
-# --- Parser auto-heal (Phase C, default off) ---
+# --- Parser auto-heal (default ON) ---
 # Declarative-recipe heal: when a source goes DEGRADED, the heal pipeline
 # generates a JSON recipe and writes it to <userdata>/heal_overrides/<surface>/.
-# With heal_enabled: false (the default), no recipes are generated and email
-# dispatch is byte-for-byte identical to the pre-Phase-C behaviour.
-# All reads are defensive: config.get('autoheal', {}).get(key, default).
+# Default-on so a broken parser repairs itself without you coming back to it.
+# Without a configured LLM provider it does nothing but surface the DEGRADED
+# source (no spend, no attempt consumed). Set heal_enabled: false to disable
+# entirely. All reads are defensive: config.get('autoheal', {}).get(key, default).
 autoheal:
-  # Master toggle. Set to true to enable recipe generation and adoption.
-  heal_enabled: false
+  # Master toggle (default true). Set to false to disable recipe generation
+  # and adoption — sources still degrade-and-surface, nothing is generated.
+  heal_enabled: true
   # LLM workload tier for recipe generation calls (quick / score / triage).
   heal_provider: quick
   # Maximum heal attempts per source before giving up (status stays DEGRADED).

@@ -233,7 +233,48 @@ Set it before running `uv run job-cannon` so the app sees it at boot. Add to you
 
 ---
 
-## 7. Starting the App
+## 7. Self-Healing Parsers (default on)
+
+Job Cannon watches each source's extraction yield. When a parser that used to
+return jobs starts returning zero on meaningful input, the source is flagged
+**DEGRADED** (visible on the dashboard's *Parser Health* panel). From there the
+heal pipeline tries to repair the break automatically:
+
+1. **Generate** — an LLM is asked for a *declarative* extraction recipe (CSS
+   selectors / field aliases), never code. It sees a corpus of failing and
+   prior-working samples (PII-scrubbed before they were ever stored).
+2. **Validate** — the recipe is replayed in a sandboxed subprocess against the
+   stored samples. It is adopted **only** if it extracts from every failing
+   sample *and* still extracts from every prior-working one (no regressions).
+3. **Adopt** — the recipe is written to
+   `<user data>/heal_overrides/<surface>/` and hot-swapped in. If it later
+   underperforms the built-in parser on live traffic, it is automatically
+   rolled back.
+
+**No provider, no cost.** The heal pipeline uses the same provider cascade as
+scoring (Section 3). Without a configured LLM provider it does nothing but
+surface the DEGRADED source — no spend, no wasted attempts. With a free
+provider (Ollama / Gemini free tier / Claude Code CLI) healing is also $0. If
+your *only* configured provider is the paid Anthropic API, each heal attempt is
+one bounded scoring-tier call, capped by `autoheal.heal_max_attempts` (default
+3) per break episode and one attempt per `autoheal.heal_backoff_hours` (default
+24) — so a worst-case stuck source costs at most 3 paid calls per day.
+
+**Disable it** by setting the master toggle in `config.yaml`:
+
+```yaml
+autoheal:
+  heal_enabled: false   # default is true
+```
+
+With it off, sources still degrade-and-surface on the dashboard; nothing is
+generated or adopted. Everything the auto-healer stores stays on your machine —
+see [PRIVACY.md](../PRIVACY.md) for the corpus, contribution-bundle, and
+maintainer-PR details.
+
+---
+
+## 8. Starting the App
 
 ```powershell
 uv run job-cannon
@@ -284,7 +325,7 @@ The scheduler's pidfile auto-cleans on graceful shutdown.
 
 ---
 
-## 8. Troubleshooting
+## 9. Troubleshooting
 
 ### "Config file not found" at startup
 

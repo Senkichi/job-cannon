@@ -290,12 +290,12 @@ def cost_gate(
 ) -> bool:
     """Check whether a model tier call is allowed under the daily budget.
 
-    Applies to NON-FREE BYO-key providers only. The Anthropic CLI fallback,
-    Ollama, the two Cloud CLIs, Groq, and Cerebras all live in FREE_PROVIDERS
-    (claude_client.FREE_PROVIDERS) and never count against the budget — the
-    spend sum below explicitly excludes them. The remaining real-cost
-    provider in the v5.0 cascade is OpenRouter (used as the cascade-audit
-    judge); that's the tripwire this gate exists for. M-2 (2026-05-20).
+    Applies to NON-FREE BYO-key providers only. The Anthropic CLI fallback
+    (OAuth subscription), Ollama, the two Cloud CLIs, Gemini, and google_cse
+    live in FREE_PROVIDERS (claude_client.FREE_PROVIDERS) and never count
+    against the budget — the spend sum below explicitly excludes them. Per-call
+    billed providers (Groq, Cerebras, anthropic_api, OpenRouter) are NOT in
+    that set and DO count; that's the tripwire this gate exists for.
 
     Quick-tier calls are always allowed regardless of spend.
     Score/triage-tier calls are blocked when daily spend >= budget cap.

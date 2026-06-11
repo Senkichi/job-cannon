@@ -2,9 +2,12 @@
 
 ``run_heal`` is the single entry point, fired from the post-ingestion
 detection pass and the daily health-check retry sweep. Everything is gated on
-``config['autoheal']['heal_enabled']`` (default false → never runs in
-production), a ``DEGRADED`` source_health status, the attempt cap, and the
-backoff window.
+``config['autoheal']['heal_enabled']`` (default true since D6 — the
+"never come back and fix the parser" promise holds out of the box; set to
+false to disable), a ``DEGRADED`` source_health status, the attempt cap, and
+the backoff window. Keyless instances simply audit ``no_provider`` once per
+backoff window and consume no attempt — default-on costs nothing without a
+configured provider.
 
 Phase D adds: re-break rollback (a degraded source with an adopted override
 rolls it back before re-healing), episodic attempt semantics (one generate =
@@ -33,13 +36,13 @@ def run_heal(conn: sqlite3.Connection, config: dict, source: str) -> str | None:
     """Attempt to heal one DEGRADED source. Returns the audit outcome or None.
 
     Gates (all must hold, else returns None without a model call):
-    - ``autoheal.heal_enabled`` is true (defensive read; default false)
+    - ``autoheal.heal_enabled`` is true (defensive read; default true since D6)
     - source_health.status == 'degraded'
     - heal_attempts < heal_max_attempts
     - backoff window elapsed since last_heal_at
     """
     autoheal_cfg = config.get("autoheal", {}) or {}
-    if not autoheal_cfg.get("heal_enabled", False):
+    if not autoheal_cfg.get("heal_enabled", True):
         return None
 
     row = conn.execute(
