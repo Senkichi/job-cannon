@@ -299,6 +299,27 @@ def _run_batch_bg(db_path: str, session_id: int, config: dict) -> None:
             )
             conn.commit()
 
+            # Budget-skip eventing (WP3): when a batch run scored NOTHING and
+            # the cost gate is closed, the budget is the plausible terminal
+            # cause — record exactly ONE activity row for the whole run (never
+            # per job, never per cascade-provider skip).
+            if scored_count == 0 and skipped_count > 0:
+                try:
+                    from job_finder.web.activity_tracker import (
+                        ACTION_SCORING_SKIPPED_BUDGET,
+                        log_activity,
+                    )
+                    from job_finder.web.claude_client import cost_gate
+
+                    if not cost_gate(conn, config, "scoring"):
+                        log_activity(
+                            db_path,
+                            ACTION_SCORING_SKIPPED_BUDGET,
+                            metadata={"path": "batch", "skipped_count": skipped_count},
+                        )
+                except Exception:
+                    logger.debug("budget-skip activity logging failed", exc_info=True)
+
             # All jobs processed — mark done
             _finish_session(conn, db_path, session_id, "done", _SESSION_TYPE_SCORING)
 

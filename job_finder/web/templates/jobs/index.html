@@ -238,6 +238,19 @@
     </div>
   </form>
 
+  {# No-provider banner (WP3) — compact mirror of the dashboard quick-actions
+     banner. Full-page render only (lives outside the #job-table-body fragment
+     swap, so a table refresh can never make it vanish or appear stale). #}
+  {% if not scoring_available and unscored_count > 0 %}
+    <div class="mb-3 bg-amber-900/50 border border-amber-700 rounded-lg px-4 py-2.5 flex items-center justify-between">
+      <span class="text-amber-200 text-sm">
+        {{ unscored_count }} job{{ '' if unscored_count == 1 else 's' }} not yet AI-scored — no AI provider is configured.
+      </span>
+      <a href="{{ url_for('onboarding.provider_select') }}"
+         class="text-amber-300 hover:text-amber-200 underline text-xs whitespace-nowrap ml-4">Set up a provider</a>
+    </div>
+  {% endif %}
+
   <!-- Job table — DESIGN DECISION #4: stays a dense <table>, wrapped + rounded. -->
   <div class="overflow-x-auto rounded-xl border border-slate-700 bg-slate-800">
     <table class="text-xs text-left border-collapse w-full" style="table-layout: fixed;">
