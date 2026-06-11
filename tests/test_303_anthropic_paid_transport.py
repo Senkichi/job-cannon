@@ -21,7 +21,6 @@ Acceptance criteria:
 from __future__ import annotations
 
 import sqlite3
-from datetime import UTC, datetime
 from unittest.mock import patch
 
 import pytest
@@ -45,7 +44,13 @@ def migrated_conn(tmp_path):
 
 
 def _now_ts() -> str:
-    return datetime.now(UTC).strftime("%Y-%m-%dT12:00:00Z")
+    # Real "now" in naive UTC ISO (production storage format) so cost rows land
+    # inside cost_gate's local-day window on any timezone. A hardcoded
+    # "...T12:00:00Z" on now(UTC).date() falls outside the window in the evening
+    # Pacific, when UTC has already rolled to the next calendar day.
+    from job_finder.json_utils import utc_now_iso
+
+    return utc_now_iso()
 
 
 # ---------------------------------------------------------------------------

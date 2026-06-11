@@ -211,8 +211,7 @@ def test_groq_result_flows_through_maybe_record_cost(tmp_path):
 
 def test_groq_cost_included_in_cost_gate_sum(tmp_path):
     """cost_gate counts groq spend toward the daily budget (groq not in FREE_PROVIDERS)."""
-    from datetime import UTC, datetime
-
+    from job_finder.json_utils import utc_now_iso
     from job_finder.web.claude_client import cost_gate
     from job_finder.web.db_migrate import run_migrations
 
@@ -220,7 +219,11 @@ def test_groq_cost_included_in_cost_gate_sum(tmp_path):
     run_migrations(db_path)
     conn = sqlite3.connect(db_path)
 
-    ts = datetime.now(UTC).strftime("%Y-%m-%dT12:00:00Z")
+    # Anchor on the real "now" (naive UTC ISO, matching production storage) so
+    # the row lands inside cost_gate's local-day window regardless of the run
+    # machine's timezone. A hardcoded "...T12:00:00Z" on now(UTC).date() falls
+    # outside the window in the evening Pacific (UTC already on the next day).
+    ts = utc_now_iso()
     # Insert a groq row with $5.00 spend — above a $1.00 cap
     conn.execute(
         "INSERT INTO scoring_costs "
