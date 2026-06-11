@@ -17,6 +17,10 @@
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
 
+![Job Cannon demo — dashboard, scored job board, inline fit analysis, kanban pipeline](docs/assets/demo.gif)
+
+![Job board — scored and classified](docs/assets/screenshots/job-board.png)
+
 ## Install
 
 ```bash
