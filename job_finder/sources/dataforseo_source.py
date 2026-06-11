@@ -387,6 +387,8 @@ class DataForSEOSource:
             salary_max=salary_max,
             description=None,  # enrichment pipeline fills this
             posted_date=posted_date,
+            # Google Jobs SERP timestamps are machine first-posted values (#363).
+            posted_date_precision="exact" if posted_date else None,
         )
 
     def _parse_timestamp(self, ts: str) -> datetime | None:

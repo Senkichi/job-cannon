@@ -119,9 +119,9 @@ def seed_demo_db(db_path: str) -> None:
                 """INSERT OR IGNORE INTO jobs
                        (dedup_key, title, company, location, sources, source_urls,
                         source_id, salary_min, salary_max, description, jd_full,
-                        posted_date, first_seen, last_seen, user_interest,
-                        pipeline_status, enrichment_tier, company_id)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        posted_date, posted_date_precision, first_seen, last_seen,
+                        user_interest, pipeline_status, enrichment_tier, company_id)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     dedup_key,
                     job["title"],
@@ -135,6 +135,7 @@ def seed_demo_db(db_path: str) -> None:
                     job["description"],
                     job["jd_full"],
                     first_seen,
+                    "exact",  # demo dates are synthetic; 'exact' renders cleanly (I-14)
                     first_seen,
                     now_iso,
                     job.get("user_interest", "unreviewed"),

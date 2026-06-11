@@ -298,6 +298,8 @@ def run_retroactive_dedup(conn: sqlite3.Connection) -> int:
                 salary_min = ?,
                 salary_max = ?,
                 pipeline_status = ?,
+                posted_date = ?,
+                posted_date_precision = ?,
                 classification = ?,
                 sub_scores_json = ?,
                 fit_analysis = ?
@@ -314,6 +316,8 @@ def run_retroactive_dedup(conn: sqlite3.Connection) -> int:
                 merged_data["salary_min"],
                 merged_data["salary_max"],
                 merged_data["pipeline_status"],
+                merged_data["posted_date"],
+                merged_data["posted_date_precision"],
                 merged_data["classification"],
                 merged_data["sub_scores_json"],
                 merged_data["fit_analysis"],
@@ -388,6 +392,27 @@ def _merge_job_data(canonical: dict, duplicates: list[dict]) -> dict:
     # Merge pipeline_status: keep highest precedence
     pipeline_status = _merge_pipeline_status(all_rows)
 
+    # Merge posted_date by provenance (#363): best precision wins; on equal
+    # precision the canonical (earliest first_seen, first in all_rows) wins.
+    # Pre-#363 this column was silently dropped, discarding duplicates' dates
+    # even when the canonical had none.
+    _prec_rank = {"exact": 3, "approximate": 2, "proxy": 1}
+    posted_date = canonical.get("posted_date")
+    posted_date_precision = canonical.get("posted_date_precision")
+    best_rank = _prec_rank.get(posted_date_precision or "", 1 if posted_date else 0)
+    for row in duplicates:
+        row_pd = row.get("posted_date")
+        if row_pd is None:
+            continue
+        row_prec = row.get("posted_date_precision")
+        row_rank = _prec_rank.get(row_prec or "", 1)
+        if row_rank > best_rank:
+            posted_date = row_pd
+            posted_date_precision = row_prec or "proxy"
+            best_rank = row_rank
+    if posted_date is not None and posted_date_precision is None:
+        posted_date_precision = "proxy"
+
     # v3.0 (Phase 34 Plan 3 Commit A): merge classification by priority
     # (apply > consider > skip > reject), merge sub_scores element-wise max,
     # keep the fit_analysis of whichever row contributed the winning
@@ -404,6 +429,8 @@ def _merge_job_data(canonical: dict, duplicates: list[dict]) -> dict:
         "salary_min": salary_min,
         "salary_max": salary_max,
         "pipeline_status": pipeline_status,
+        "posted_date": posted_date,
+        "posted_date_precision": posted_date_precision,
         "classification": classification,
         "sub_scores_json": sub_scores_json,
         "fit_analysis": fit_analysis,

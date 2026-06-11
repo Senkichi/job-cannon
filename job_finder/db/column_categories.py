@@ -52,6 +52,7 @@ COLUMN_CATEGORIES: dict[str, str] = {
     "jd_full": "parser",
     "description_reformatted": "parser",  # arguably system (reformatter)
     "posted_date": "parser",
+    "posted_date_precision": "parser",  # NEW in #363 m095 — provenance of posted_date
     # ── system-owned (managed by DB / scheduler / detector) ───────────────
     "dedup_key": "system",  # derived from (company, title)
     "first_seen": "system",

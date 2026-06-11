@@ -230,8 +230,12 @@ def test_data_backfills_populates_locations_raw(migrated_db):
 # ---------------------------------------------------------------------------
 
 
-def test_data_backfills_populates_posted_date(migrated_db):
-    """run_data_backfills_once copies first_seen into posted_date for NULL rows."""
+def test_data_backfills_never_synthesizes_posted_date(migrated_db):
+    """posted_date stays NULL — the first_seen synthesis was retired (#363/D-08).
+
+    Fabricating posting dates from detection time would fake 100% coverage on
+    every fresh DB; recency display falls back to first_seen explicitly (#365).
+    """
     path, conn = migrated_db
 
     _insert_job(conn, "no-posted-date", first_seen="2026-02-01T00:00:00")
@@ -247,7 +251,7 @@ def test_data_backfills_populates_posted_date(migrated_db):
     ).fetchone()
     verify.close()
 
-    assert row[0] == "2026-02-01T00:00:00", "posted_date should be set from first_seen"
+    assert row[0] is None, "posted_date must NOT be synthesized from first_seen"
 
 
 # ---------------------------------------------------------------------------

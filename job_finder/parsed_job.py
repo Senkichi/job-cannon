@@ -219,6 +219,7 @@ class ParsedJob:
 
     # ── Metadata ────────────────────────────────────────────────────────────
     posted_date: datetime | None = None
+    posted_date_precision: str | None = None  # 'exact' | 'approximate' | 'proxy' (#363)
 
     # ── Scoring (None at ingest; populated by scorer pipeline) ──────────────
     scoring_provider: str | None = None
@@ -375,6 +376,7 @@ class ParsedJob:
             "description": job.description,
             "jd_full": clean_jd_full,
             "posted_date": job.posted_date,
+            "posted_date_precision": job.posted_date_precision,
             "unresolved_reasons": unresolved_reasons,
         }
 
@@ -437,6 +439,7 @@ class UnresolvedParsedJob:
 
     # ── Metadata ────────────────────────────────────────────────────────────
     posted_date: datetime | None = None
+    posted_date_precision: str | None = None  # 'exact' | 'approximate' | 'proxy' (#363)
 
     # ── Scoring ─────────────────────────────────────────────────────────────
     scoring_provider: str | None = None

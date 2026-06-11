@@ -80,6 +80,7 @@ def tmp_db_path():
             user_interest TEXT DEFAULT 'unreviewed',
             pipeline_status TEXT DEFAULT 'discovered',
             posted_date TEXT,
+            posted_date_precision TEXT,
             notes TEXT,
             haiku_score REAL,
             haiku_summary TEXT,
