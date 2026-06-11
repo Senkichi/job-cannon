@@ -28,7 +28,7 @@ from __future__ import annotations
 import logging
 import re
 import time
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 
 import requests
 
@@ -158,31 +158,54 @@ def _to_canonical(posting: dict) -> list[JobLocation]:
     return dedupe_locations(results)
 
 
-def _parse_posted_date(value: str | None) -> datetime | None:
-    """Parse a Workday ``postedOn`` string to a naive UTC ``datetime``.
+# Relative postedOn strings — what most real tenants emit (#364). At audit
+# time (2026-06-11) 734 of the last 30 days' Workday jobs had NULL
+# posted_date because only the two absolute formats below were recognised.
+# "30+" parses as a 30-day floor: genuinely lossy, still a useful
+# "not fresh" signal.
+_RELATIVE_POSTED_RE = re.compile(
+    r"^(?:posted\s+)?(?:(today)|(yesterday)|(\d+)\+?\s+days?\s+ago)$",
+    re.IGNORECASE,
+)
 
-    Handles two formats seen across Workday tenants:
-      - ``"MM/DD/YYYY"`` (most common, e.g. ``"01/15/2024"``)
-      - ``"YYYY-MM-DD"`` (ISO date, e.g. ``"2024-01-15"``)
 
-    Other formats (relative strings like ``"Posted 3 Days Ago"``, or empty)
-    are silently dropped; caller receives ``None`` and a NULL is written to
-    ``posted_date`` (per D-08 — no synthesis from first_seen).
+def _parse_posted_date(value: str | None) -> tuple[datetime | None, str | None]:
+    """Parse a Workday ``postedOn`` string to ``(naive UTC datetime, precision)``.
+
+    Formats seen across Workday tenants:
+      - ``"MM/DD/YYYY"`` / ``"YYYY-MM-DD"`` absolute dates → ``'exact'``
+      - ``"Posted Today"`` / ``"Posted Yesterday"`` /
+        ``"Posted N Days Ago"`` / ``"Posted 30+ Days Ago"`` relative
+        strings → date-level value computed against UTC now, ``'approximate'``
+        (#364). This parses what the platform actually said — it is NOT
+        synthesis from first_seen (D-08).
+
+    Anything else (or empty) → ``(None, None)``; a NULL is written to
+    ``posted_date``.
     """
     if not value:
-        return None
+        return None, None
+    text = value.strip()
     # ISO date: "YYYY-MM-DD"
     try:
-        return datetime.strptime(value.strip(), "%Y-%m-%d")
+        return datetime.strptime(text, "%Y-%m-%d"), "exact"
     except ValueError:
         pass
     # US date: "MM/DD/YYYY"
     try:
-        return datetime.strptime(value.strip(), "%m/%d/%Y")
+        return datetime.strptime(text, "%m/%d/%Y"), "exact"
     except ValueError:
         pass
+    m = _RELATIVE_POSTED_RE.match(text)
+    if m:
+        today_m, yesterday_m, n_days = m.groups()
+        days = 0 if today_m else 1 if yesterday_m else int(n_days)
+        utc_today = datetime.now(UTC).replace(
+            hour=0, minute=0, second=0, microsecond=0, tzinfo=None
+        )
+        return utc_today - timedelta(days=days), "approximate"
     logger.debug("scan_workday: unrecognised postedOn format %r — skipping", value)
-    return None
+    return None, None
 
 
 # ---------------------------------------------------------------------------
@@ -343,8 +366,9 @@ def _posting_to_job(posting: dict, _slug: str) -> dict:
     # by tenant configuration.
     source_id: str | None = external_path if external_path else None
 
-    # posted_date: parsed from postedOn (varies by tenant format).
-    posted_date = _parse_posted_date(posting.get("postedOn"))
+    # posted_date: parsed from postedOn (varies by tenant format). Relative
+    # strings yield 'approximate' precision; absolute dates 'exact' (#364).
+    posted_date, posted_date_precision = _parse_posted_date(posting.get("postedOn"))
 
     # locations_structured: Layer-1 parse of locationsText with
     # workplace-type detection and best-effort City, ST extraction.
@@ -360,6 +384,7 @@ def _posting_to_job(posting: dict, _slug: str) -> dict:
         "source_url": source_url,
         "source_id": source_id,
         "posted_date": posted_date,
+        "posted_date_precision": posted_date_precision,
         "salary_min": None,
         "salary_max": None,
         "comp_json": None,
