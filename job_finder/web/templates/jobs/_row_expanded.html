@@ -45,7 +45,8 @@
 
 {% set first_seen_date = (job.first_seen | local_date) if job.first_seen else "—" %}
 {% set last_seen_date  = (job.last_seen  | local_date) if job.last_seen  else "—" %}
-{% set posted_date     = (job.posted_date| local_date) if job.posted_date else "—" %}
+{% set _pd_approx = job.posted_date and job.posted_date_precision in ('approximate', 'proxy') %}
+{% set posted_date     = (('~' if _pd_approx else '') ~ (job.posted_date | local_date)) if job.posted_date else "—" %}
 {% set jd_key_safe = job.dedup_key | urlencode | replace('%', '') %}
 
 {# DESIGN DECISION: the expanded panel sits on slate-850 (one plane lighter than

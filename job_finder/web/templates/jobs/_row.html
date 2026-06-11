@@ -36,7 +36,21 @@
   {% set salary = "N/A" %}
 {% endif %}
 
+{# Recency display (#365): best-known posting date, honestly labeled.
+   No posted_date → fall back to first_seen and say "seen"; an
+   approximate/proxy date (relative-string parse, alert-email header)
+   gets a "~" so the UI never overclaims "posted X ago". #}
 {% set posted = job.posted_date if job.posted_date else job.first_seen %}
+{% if not job.posted_date %}
+  {% set posted_marker = 'seen ' %}
+  {% set posted_title_label = 'first seen ' %}
+{% elif job.posted_date_precision in ('approximate', 'proxy') %}
+  {% set posted_marker = '~' %}
+  {% set posted_title_label = 'posted (approximate) ' %}
+{% else %}
+  {% set posted_marker = '' %}
+  {% set posted_title_label = 'posted ' %}
+{% endif %}
 
 {# Review-needed flag — UNCHANGED logic from original (Phase 47.06). #}
 {% set _review_reasons = job.unresolved_reasons | from_json %}
@@ -112,7 +126,7 @@
      we keep the existing `relative_date` filter as the visible value (and
      `local_date` in the title tooltip) because the combined format would need a
      new/extended date filter. ⚑ See PORT-MANIFEST: optional date-format follow-up. #}
-  <td class="px-2 py-2.5 text-[13px] text-slate-500 whitespace-nowrap overflow-hidden" title="{{ posted | local_date }}">{{ posted | relative_date }}</td>
+  <td class="px-2 py-2.5 text-[13px] text-slate-500 whitespace-nowrap overflow-hidden" title="{{ posted_title_label }}{{ posted | local_date }}">{{ posted_marker }}{{ posted | relative_date }}</td>
 
   {# STATUS — inline select. id kept for the archive OOB target. #}
   <td class="px-1 py-2.5" id="status-cell-{{ job.dedup_key | urlencode | replace('%', '') }}">
