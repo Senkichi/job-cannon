@@ -193,12 +193,23 @@ def apply_url_for(job_row, *, loose_apply_default: bool = False) -> str | None:
          experiment concludes);
       3. otherwise the first source_url (the aggregator listing).
 
+    Staleness fallback (Phase 5): an expired job's direct_url is skipped even if
+    still populated — the company posting is gone, so we send the user to the
+    aggregator listing (which often outlives the ATS posting and at least shows
+    context). The reconciler NULLs direct_url on expiry, but this guard also
+    covers the window before the next reconcile pass runs.
+
     Accepts dicts and sqlite3.Row; source_urls may be a JSON string (raw row)
     or an already-parsed list.
     """
     direct = _row_value(job_row, "direct_url")
     confidence = _row_value(job_row, "direct_url_confidence")
-    if direct and (confidence == "strict" or (confidence == "loose" and loose_apply_default)):
+    expired = _row_value(job_row, "expiry_status") == "expired"
+    if (
+        direct
+        and not expired
+        and (confidence == "strict" or (confidence == "loose" and loose_apply_default))
+    ):
         return direct
 
     raw = _row_value(job_row, "source_urls")
