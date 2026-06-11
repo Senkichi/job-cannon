@@ -266,6 +266,25 @@ def _register_filters(state):
     state.app.jinja_env.filters["local_date"] = local_date
 
 
+def _total_jobs(conn) -> int:
+    """Unfiltered jobs count — lets _table.html tell an empty DB apart from
+    filters that excluded everything (WP5). Cheap COUNT(*); no caching."""
+    return conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
+
+
+def _profile_titles_missing(config: dict) -> bool:
+    """True when free-portal search would fetch nothing for lack of queries.
+
+    Portal ingestion uses ``sources.portal_search.keywords`` and falls back to
+    ``profile.target_titles`` (ingestion_runner._fetch_portal_search); when
+    BOTH are empty the portal fetch is skipped entirely, so the empty-state
+    tip pointing at the Profile page is warranted.
+    """
+    portal_keywords = (config.get("sources") or {}).get("portal_search", {}).get("keywords")
+    target_titles = (config.get("profile") or {}).get("target_titles")
+    return not portal_keywords and not target_titles
+
+
 @jobs_bp.route("/", strict_slashes=False)
 def index():
     """Job Board landing page -- full page render with filter bar."""
@@ -308,6 +327,8 @@ def index():
         hidden_count=hidden_count,
         unscored_count=unscored_count,
         scoring_available=scoring_available,
+        total_jobs=_total_jobs(conn),
+        profile_titles_missing=_profile_titles_missing(config),
     )
 
 
@@ -325,6 +346,8 @@ def table():
         "jobs/_table.html",
         jobs=jobs,
         pipeline_statuses=PIPELINE_STATUSES,
+        total_jobs=_total_jobs(conn),
+        profile_titles_missing=_profile_titles_missing(current_app.config.get("JF_CONFIG", {})),
     )
 
 
@@ -337,6 +360,9 @@ def archived_table():
     jobs = get_filtered_jobs(
         conn, status="archived", sort_by="first_seen", sort_dir="DESC", limit=200
     )
+    # total_jobs deliberately NOT passed: the archived section only renders
+    # when archived_count > 0, and its empty state should never show the
+    # "No jobs yet" onboarding CTA — the filters message is correct there.
     return render_template(
         "jobs/_table.html",
         jobs=jobs,
