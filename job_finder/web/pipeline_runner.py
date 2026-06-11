@@ -61,13 +61,13 @@ logger = logging.getLogger(__name__)
 def _run_heal_pass(db_path: str, config: dict, degraded_sources: list[str]) -> None:
     """Phase C / C5: run the heal pipeline for each newly-DEGRADED source.
 
-    Gated on ``autoheal.heal_enabled`` (defensive read, default false) so the
-    flag-off shipped state never imports the heal pipeline. Every layer is
+    Gated on ``autoheal.heal_enabled`` (defensive read, default true since D6).
+    Setting it false skips importing the heal pipeline entirely. Every layer is
     wrapped: a heal error must never break ingestion.
     """
     if not degraded_sources:
         return
-    if not (config.get("autoheal", {}) or {}).get("heal_enabled", False):
+    if not (config.get("autoheal", {}) or {}).get("heal_enabled", True):
         return
     try:
         from job_finder.web.autoheal.heal_pipeline import run_heal
@@ -256,9 +256,9 @@ def run_ingestion(
     summary["degraded_sources"] = run_detection(db_path)
 
     # Phase C / C5: attempt auto-heal for newly-degraded sources. Flag-gated
-    # (autoheal.heal_enabled, default false) and fully error-isolated — a heal
-    # failure must never break ingestion. Piggybacks this detection pass; no
-    # scheduler job.
+    # (autoheal.heal_enabled, default true since D6) and fully error-isolated —
+    # a heal failure must never break ingestion. Piggybacks this detection pass;
+    # no scheduler job.
     _run_heal_pass(db_path, config, summary["degraded_sources"])
 
     total_fetched = (

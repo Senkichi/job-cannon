@@ -86,14 +86,33 @@ def test_flag_off_no_model_call(tmp_path):
     assert _audit_outcomes(conn, "linkedin") == []
 
 
-def test_missing_autoheal_block_no_model_call(tmp_path):
-    """Defensive read: installs without the autoheal: config block must not crash."""
+def test_missing_autoheal_block_heals_default_on(tmp_path):
+    """D6: with no autoheal config block, healing is ON by default (default-on flip).
+
+    The defensive read still must not crash on a config missing the block; it
+    now resolves heal_enabled to True, so a degraded source proceeds to GENERATE.
+    """
+    conn = _conn(tmp_path)
+    _seed_degraded(conn, "linkedin", "email")
+
+    with patch.object(heal_pipeline.codegen, "generate_recipe", return_value=None) as mock_gen:
+        result = heal_pipeline.run_heal(conn, {}, "linkedin")
+
+    mock_gen.assert_called_once()
+    assert result == "rejected:generation_failed"
+
+
+def test_explicit_false_fully_disables(tmp_path):
+    """D6 kill switch: heal_enabled: false still disables everything."""
     conn = _conn(tmp_path)
     _seed_degraded(conn, "linkedin", "email")
 
     with patch.object(heal_pipeline.codegen, "generate_recipe") as mock_gen:
-        assert heal_pipeline.run_heal(conn, {}, "linkedin") is None
+        result = heal_pipeline.run_heal(conn, _FLAG_OFF, "linkedin")
+
+    assert result is None
     mock_gen.assert_not_called()
+    assert _audit_outcomes(conn, "linkedin") == []
 
 
 def test_healthy_source_not_healed(tmp_path):
@@ -473,12 +492,14 @@ def test_fire_gating_flag_off_never_calls():
     mock_rh.assert_not_called()
 
 
-def test_fire_gating_missing_config_block_never_calls():
+def test_fire_gating_missing_config_block_heals_default_on(tmp_path):
+    """D6: the post-ingestion heal pass fires with no autoheal block (default-on)."""
     from job_finder.web import pipeline_runner
 
+    db, _conn_unused = _db(tmp_path)
     with patch("job_finder.web.autoheal.heal_pipeline.run_heal") as mock_rh:
-        pipeline_runner._run_heal_pass("unused.db", {}, ["linkedin"])
-    mock_rh.assert_not_called()
+        pipeline_runner._run_heal_pass(db, {}, ["linkedin"])
+    mock_rh.assert_called_once()
 
 
 def test_fire_gating_flag_on_calls_per_degraded_source(tmp_path):
