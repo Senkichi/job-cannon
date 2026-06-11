@@ -2,24 +2,18 @@
 
 ![Job Cannon](docs/assets/banner.svg)
 
-> A personal job-search command center: aggregates listings from Gmail
-> alerts and SERP APIs, **proactively scrapes career pages from a
-> curated company watchlist** (5-platform ATS coverage —
-> Greenhouse / Lever / Ashby / SmartRecruiters / Workday — plus a
-> tier-4 AI navigator for custom sites), scores everything with a
-> cascade-routed AI pipeline (free local + free cloud providers, with
-> the Anthropic CLI as $0 fallback via your Claude.ai subscription),
-> and tracks application state.
-> Single-user, runs on localhost.
-
 [![CI](https://github.com/Senkichi/job-cannon/actions/workflows/ci.yml/badge.svg)](https://github.com/Senkichi/job-cannon/actions/workflows/ci.yml)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org/downloads/)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
 
+**Every job listing you care about — your Gmail alerts, free job boards, and the career pages of companies you watch — lands on one board, where AI scores each listing against *your* profile and tells you whether it's worth your time.** Track every application from Applied to Offer on a kanban pipeline. All of it runs on your own machine, for $0/month, and your resume never leaves your laptop.
+
 ![Job Cannon demo — dashboard, scored job board, inline fit analysis, kanban pipeline](docs/assets/demo.gif)
 
-![Job board — scored and classified](docs/assets/screenshots/job-board.png)
+- **Local-only.** No account, no cloud, no telemetry — your data is a SQLite file on your own disk. See [PRIVACY.md](PRIVACY.md).
+- **$0 AI by default.** Scoring cascades through free providers (local Ollama → free cloud tiers → your existing Claude.ai subscription). A paid API key is an optional last resort, and even that is budget-capped.
+- **It does not auto-apply to jobs.** Job Cannon is a command center, not a spam cannon. You decide what's worth applying to — it makes sure you see everything and forget nothing.
 
 ## Install
 
@@ -38,6 +32,42 @@ job-cannon
 
 **Other install paths and troubleshooting:** [INSTALL.md](INSTALL.md).
 
+## Screenshots
+
+**The job board** — every source in one place, AI-scored, classified, triaged inline:
+
+![Job board — scored and classified](docs/assets/screenshots/job-board.png)
+
+**Inline fit analysis** — expand a row for the six-axis breakdown: strengths, gaps, and what to lead with:
+
+![Expanded job row with fit breakdown](docs/assets/screenshots/job-expanded.png)
+
+**The pipeline** — drag applications from Applied through Offer:
+
+![Kanban application pipeline](docs/assets/screenshots/pipeline-kanban.png)
+
+(Captured from `job-cannon --demo` — all companies fictional.)
+
+## FAQ
+
+**Why no Docker?**
+Deliberate. This is a single-user app that runs on `localhost` and stores everything in one SQLite file — a container adds an isolation layer with nothing to isolate, and makes the tray icon, browser auto-open, and OS keyring *harder*. `pipx install job-cannon` gives you the same one-command setup. (If a community Dockerfile appears, we'll link it as community-supported.)
+
+**Is my data sent anywhere?**
+The only outbound calls are to the job sources you enable (your inbox over IMAP, the free job portals, any paid SERP APIs you opt into) and the AI provider you pick. With local Ollama as the provider, job descriptions never leave your machine. There is no telemetry, no account, no analytics. Details: [PRIVACY.md](PRIVACY.md).
+
+**Does it apply to jobs for me?**
+No — deliberately. Auto-apply tools are why recruiters drown in spam and why those tools get accounts flagged. Job Cannon optimizes the part that's actually hard: seeing everything, knowing what's worth your time, and never losing track of an application. See [AUP.md](AUP.md).
+
+**Why AGPL?**
+It keeps forks open: anyone who runs a modified version as a service must share their changes. For personal use on your own machine it changes nothing.
+
+**Can I use a non-Gmail inbox?**
+The IMAP host and port are configurable (`sources.imap.host` / `sources.imap.port`), so any IMAP provider can work in principle — but honestly: only Gmail (with an app password) is tested today. The free portals and ATS scanners work with no email at all.
+
+**Can I export my data?**
+Your data *is* a regular SQLite file — `jobs.db` in the user-data directory (`%APPDATA%\JobCannon\` on Windows, `~/Library/Application Support/JobCannon/` on macOS, `~/.local/share/JobCannon/` on Linux). Copy it, query it with any SQLite tool, or point a notebook at it. Nothing is locked in.
+
 ## Engineering Highlights
 
 - **Single-tier ordinal scoring through a multi-provider cascade.**
@@ -47,11 +77,12 @@ job-cannon
   the paid Anthropic SDK only when all free options are exhausted or
   rate-limited. Phase 33 shootout selected `qwen2.5:14b` (Ollama) as
   the production primary; typical monthly cost is ~$0. Classification
-  (`apply | consider | skip | reject`) is **derived in Python from
-  the numeric sub-scores — never emitted by the LLM** — which
-  prevents classification drift across model swaps.
-- **Schema-versioned SQLite migrations.** 89 idempotent migrations
-  applied via `pragma user_version`. Migration 41 introduces a
+  (`apply | consider | skip | reject | low_signal`) is **derived in
+  Python from the numeric sub-scores — never emitted by the LLM** —
+  which prevents classification drift across model swaps.
+- **Schema-versioned SQLite migrations.** 90+ idempotent migrations
+  (one module per schema version) applied via `pragma user_version`.
+  Migration 41 introduces a
   backup-recency preflight that refuses destructive schema changes
   without a recent userdata snapshot (override via
   `GSD_BACKUP_CONFIRMED=1` for alternate backup schemes).
@@ -60,11 +91,11 @@ job-cannon
   single-instance enforced. Auto-starts a local Ollama service for the
   nightly agentic-backfill tier.
 - **HTMX-only frontend.** No JS framework, no bundler, no build step.
-  Inline expansion, partial fragments, server-driven UI. 58 Jinja2
+  Inline expansion, partial fragments, server-driven UI. ~60 Jinja2
   templates, Tailwind via CDN, SortableJS for the kanban.
 - **ATS coverage across 5 platforms with a tier-4 AI navigator.**
   Greenhouse, Lever, Ashby, SmartRecruiters, and Workday have explicit
-  scanners; the AI navigator caches Playwright recipes (16 active) for
+  scanners; the AI navigator caches Playwright recipes for
   the long-tail of custom-built career sites (iCIMS, Phenom, UKG,
   bespoke).
 - **Self-healing parsers (default on).** Each source's extraction is
@@ -98,7 +129,8 @@ job-cannon
 
 ```mermaid
 flowchart LR
-  Gmail[Gmail Alerts<br/>LinkedIn / Glassdoor / ZipRecruiter] --> Parser
+  Gmail[Gmail Alerts via IMAP or API<br/>LinkedIn / Glassdoor / ZipRecruiter] --> Parser
+  Portals[Free Portals<br/>RemoteOK / Remotive / Himalayas] --> Parser
   SerpAPI --> Parser
   Thordata --> Parser
   DataForSEO --> Parser
@@ -122,7 +154,7 @@ For deeper subsystem detail, see [`docs/architecture/`](docs/architecture/).
 | Storage | SQLite (WAL mode) — raw SQL, no ORM |
 | Frontend | Jinja2 + jinja2-fragments, HTMX 2.x, Tailwind (CDN), SortableJS |
 | AI | Multi-provider cascade: Ollama (qwen2.5:14b primary) → Gemini → Claude Code CLI ($0 via Claude.ai subscription, dispatched through `claude -p`) → Anthropic SDK (paid, final fallback) |
-| Sources | Gmail API v1 (OAuth), SerpAPI, Thordata, DataForSEO |
+| Sources | Gmail via IMAP app-password (default) or Gmail API OAuth; free portals (RemoteOK / Remotive / Himalayas); SerpAPI / Thordata / DataForSEO (optional, paid) |
 | Tooling | uv (canonical), ruff, pre-commit, gitleaks, commitizen, pytest |
 | CI | GitHub Actions (Ubuntu + Windows matrix) |
 
