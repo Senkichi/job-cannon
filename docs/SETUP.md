@@ -179,7 +179,7 @@ Adding yourself as a test user is required; without it the OAuth flow is blocked
 2. **Create Credentials → OAuth client ID**
 3. Application type: **Desktop app**, name it, click **Create**
 4. **Download JSON**, rename to `credentials.json`
-5. Move it to your user-data directory (see Section 6) — e.g. `%APPDATA%\JobCannon\credentials.json` on Windows
+5. Move it to your user-data directory (see Section 6) — e.g. `%LOCALAPPDATA%\JobCannon\credentials.json` on Windows
 
 #### Step 5: Run the Auth Flow
 
@@ -214,7 +214,7 @@ By default, the app uses your OS user-data directory:
 
 | OS | Path |
 |---|---|
-| Windows | `%APPDATA%\JobCannon\` |
+| Windows | `%LOCALAPPDATA%\JobCannon\` |
 | macOS | `~/Library/Application Support/JobCannon/` |
 | Linux | `~/.local/share/JobCannon/` |
 
