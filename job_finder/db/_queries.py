@@ -231,6 +231,11 @@ def get_filtered_jobs(
     to classification IN-list shim via the mapping above.
     The explicit `classification=` kwarg is the preferred filter.
     """
+    # Recency = best-known posting date with an explicit detection-time
+    # fallback (#365). Display marks the fallback cohort; filters and the
+    # 'recency' sort share this single expression.
+    _RECENCY_SQL = "COALESCE(posted_date, first_seen)"
+
     # SECURITY-CRITICAL: the `allowed_sort_cols` set literal and the f-string
     # composer below MUST stay co-located in the same file (per S7d split
     # invariant + CLAUDE.md "sort_by validated against Python allowlist before
@@ -243,6 +248,7 @@ def get_filtered_jobs(
         "company",
         "location",
         "first_seen",
+        "recency",
         "salary_min",
         "salary_max",
         "pipeline_status",
@@ -258,6 +264,11 @@ def get_filtered_jobs(
         sort_expr = f"{_SUB_SCORE_SUM_SQL} {sort_dir}"
     elif sort_by in _CLASSIFICATION_SORT_KEYS:
         sort_expr = _classification_score_order(sort_dir)
+    elif sort_by == "recency":
+        # Best-known posting date (#365): true posted_date when a source
+        # provided one, detection time otherwise. Fixed expression — the
+        # allowlist key never reaches the SQL string.
+        sort_expr = f"{_RECENCY_SQL} {sort_dir}"
     else:
         sort_expr = f"{sort_by} {sort_dir}"
 
@@ -305,7 +316,7 @@ def get_filtered_jobs(
             # 30 days is close enough for a display filter without adding dateutil).
             _within_cutoff = _local_day_start_as_utc_iso(30)
         if _within_cutoff is not None:
-            conditions.append("first_seen >= ?")
+            conditions.append(f"{_RECENCY_SQL} >= ?")
             params.append(_within_cutoff)
 
     if freshness:
@@ -336,7 +347,7 @@ def get_filtered_jobs(
                 .isoformat()
             )
         if cutoff:
-            conditions.append("first_seen >= ?")
+            conditions.append(f"{_RECENCY_SQL} >= ?")
             params.append(cutoff)
 
     if hide_stale:
