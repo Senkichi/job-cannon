@@ -211,8 +211,7 @@ def test_cerebras_result_flows_through_maybe_record_cost(tmp_path):
 
 def test_cerebras_cost_included_in_cost_gate_sum(tmp_path):
     """cost_gate counts cerebras spend toward the daily budget (cerebras not in FREE_PROVIDERS)."""
-    from datetime import UTC, datetime
-
+    from job_finder.json_utils import utc_now_iso
     from job_finder.web.claude_client import cost_gate
     from job_finder.web.db_migrate import run_migrations
 
@@ -220,7 +219,11 @@ def test_cerebras_cost_included_in_cost_gate_sum(tmp_path):
     run_migrations(db_path)
     conn = sqlite3.connect(db_path)
 
-    ts = datetime.now(UTC).strftime("%Y-%m-%dT12:00:00Z")
+    # utc_now_iso() (naive UTC, matches record_cost) lands inside the cost_gate
+    # local-day window on any runner timezone; a synthesized "<UTC-date>T12:00:00Z"
+    # drifts past the PT-local day_end on PT evenings (UTC date rolled, local day
+    # has not), pushing the row out of the window and silently failing the gate.
+    ts = utc_now_iso()
     # Insert a cerebras row with $5.00 spend — above a $1.00 cap
     conn.execute(
         "INSERT INTO scoring_costs "

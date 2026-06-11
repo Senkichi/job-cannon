@@ -21,10 +21,11 @@ Acceptance criteria:
 from __future__ import annotations
 
 import sqlite3
-from datetime import UTC, datetime
 from unittest.mock import patch
 
 import pytest
+
+from job_finder.json_utils import utc_now_iso
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -45,7 +46,11 @@ def migrated_conn(tmp_path):
 
 
 def _now_ts() -> str:
-    return datetime.now(UTC).strftime("%Y-%m-%dT12:00:00Z")
+    # Production timestamp helper (naive UTC, matches record_cost) so inserted
+    # cost rows land inside the cost_gate local-day window on any runner
+    # timezone. A synthesized "<UTC-date>T12:00:00Z" drifts past the PT-local
+    # day_end on PT evenings (UTC date rolled, local day has not).
+    return utc_now_iso()
 
 
 # ---------------------------------------------------------------------------
