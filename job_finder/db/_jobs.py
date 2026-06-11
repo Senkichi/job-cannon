@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal
 
 from job_finder.config import JD_STORAGE_MAX_CHARS
-from job_finder.json_utils import safe_json_load, utc_now_iso
+from job_finder.json_utils import safe_json_load, to_naive_utc_iso, utc_now_iso
 from job_finder.web.location_canonical import JobLocation
 from job_finder.web.location_canonical import to_json as _locations_to_json
 
@@ -356,7 +356,12 @@ def upsert_job(
             matched_dedup_key = sid_row["dedup_key"]
 
     now = utc_now_iso()
-    pd_str = parsed.posted_date.isoformat() if parsed.posted_date else None
+    # Naive-UTC boundary enforcement (#361): source feeds emit tz-aware
+    # datetimes (Greenhouse "-04:00" offsets, email "Z" suffixes) and
+    # Job.__post_init__ preserves tzinfo. This is the single serialization
+    # point for posted_date (and, via the INSERT branch, first_seen) — strip
+    # to naive UTC here so no tz suffix ever reaches storage.
+    pd_str = to_naive_utc_iso(parsed.posted_date) if parsed.posted_date else None
 
     if existing:
         # ── UPDATE branch ────────────────────────────────────────────────────
