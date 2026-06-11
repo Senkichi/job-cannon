@@ -58,6 +58,21 @@ def test_whitelist_favicon_passes_when_incomplete(unconf_client):
     assert resp.status_code != 302
 
 
+def test_whitelist_jc_health_passes_when_incomplete(unconf_client):
+    """Whitelist: /__jc_health MUST NOT be gated (WP9 frozen-app smoke-test finding).
+
+    The endpoint is the launcher's single-instance identity probe
+    (__main__.probe_existing_jc expects 200 + data["app"] == "job-cannon").
+    Before the fix, an unconfigured install 302'd the probe to the wizard,
+    silently degrading already-running detection to the psutil-cmdline
+    fallback.
+    """
+    resp = unconf_client.get("/__jc_health")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["app"] == "job-cannon"
+
+
 def test_gate_handles_missing_row_with_no_legacy_install(app_unconfigured):
     """If onboarding_state row is missing AND no legacy install detected, redirect to welcome."""
     # Delete the row that app_unconfigured seeded

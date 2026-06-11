@@ -43,6 +43,10 @@ backups/
 # Application data (parse failure archives, resume uploads)
 data/
 
+# PyInstaller / Inno Setup build outputs (WP9 Windows installer)
+build/
+dist/
+
 # Development tooling (not for distribution)
 .claude/
 .windsurf/

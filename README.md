@@ -17,6 +17,10 @@
 
 ## Install
 
+**Windows, no Python needed:** download `JobCannon-Setup-<version>.exe` from the [latest release](https://github.com/Senkichi/job-cannon/releases/latest) and run it — per-user install, no admin prompt, Start Menu shortcut, done. (Unsigned for now, so SmartScreen warns: **More info → Run anyway**. Details + checksums in [INSTALL.md](INSTALL.md).)
+
+Everyone else (or if you prefer a managed Python install):
+
 ```bash
 pipx install job-cannon
 job-cannon

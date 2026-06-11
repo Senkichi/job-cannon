@@ -27,11 +27,12 @@ from job_finder.tray import TrayApp
 _CFG = {"server": {"host": "127.0.0.1", "port": 5000}}
 
 
-def _make_tray(cfg=None):
+def _make_tray(cfg=None, **kwargs):
     """Construct a TrayApp with create_app stubbed (so no real Flask app /
-    scheduler is built). Returns the TrayApp; self.app is a MagicMock."""
+    scheduler is built). Returns the TrayApp; self.app is a MagicMock.
+    Keyword args are forwarded to TrayApp (resolved bind_host / port)."""
     with patch("job_finder.tray.create_app", return_value=MagicMock()):
-        return TrayApp(cfg or _CFG)
+        return TrayApp(cfg or _CFG, **kwargs)
 
 
 # ---------------------------------------------------------------------------
@@ -51,6 +52,23 @@ def test_wildcard_bind_rewrites_url_to_loopback():
     t = _make_tray({"server": {"host": "0.0.0.0", "port": 8080}})
     assert t.bind_host == "0.0.0.0"
     assert t.url == "http://127.0.0.1:8080"
+
+
+def test_resolved_port_overrides_config_port():
+    """WP9 frozen-smoke finding: main() resolves --port / JOB_CANNON_PORT and
+    must be able to hand the result to TrayApp — the cfg-derived port is only
+    a fallback. Before the fix, tray mode served cfg["server"]["port"] while
+    the startup banner advertised the resolved port."""
+    t = _make_tray({"server": {"host": "127.0.0.1", "port": 5000}}, port=5127)
+    assert t.port == 5127
+    assert t.url == "http://127.0.0.1:5127"
+
+
+def test_resolved_bind_host_overrides_config_host():
+    """Same contract for the bind host, including the wildcard→loopback split."""
+    t = _make_tray({"server": {"host": "127.0.0.1", "port": 5000}}, bind_host="0.0.0.0")
+    assert t.bind_host == "0.0.0.0"
+    assert t.url == "http://127.0.0.1:5000"
 
 
 def test_build_menu_returns_expected_items():
@@ -223,6 +241,17 @@ def test_dispatch_default_uses_tray(monkeypatch, _dispatch_env):
         main_mod.main()
     mock_tray_cls.assert_called_once()
     mock_tray_cls.return_value.run.assert_called_once()
+    mock_terminal.assert_not_called()
+
+
+def test_dispatch_forwards_resolved_port_to_tray(monkeypatch, _dispatch_env):
+    """--port must reach TrayApp as the resolved-port kwarg (WP9 finding)."""
+    monkeypatch.delenv("JOB_CANNON_NO_TRAY", raising=False)
+    mock_terminal, mock_tray_cls = _dispatch_env
+    with patch("job_finder.__main__.sys.argv", ["job-cannon", "--port", "5127"]):
+        main_mod.main()
+    mock_tray_cls.assert_called_once()
+    assert mock_tray_cls.call_args.kwargs["port"] == 5127
     mock_terminal.assert_not_called()
 
 
