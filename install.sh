@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Job Cannon bootstrap (macOS).
+# Job Cannon bootstrap (macOS + Linux).
 #
 # Walks a fresh-machine user from a clean clone to a running app in their
 # browser. Detects required tools (Python 3.13+, Git), installs uv via the
@@ -17,8 +17,9 @@
 #   --no-launch  Stop after install steps; do not run `uv run job-cannon`.
 #   -h / --help  Print this header.
 #
-# Tested on macOS (Homebrew path). Linux is not covered by this script;
-# Linux users follow docs/SETUP.md for manual setup steps.
+# Tested on macOS (Homebrew path) and Ubuntu 22.04. Other Linux distros:
+# the Ollama step uses the vendor installer (distro-agnostic); the Node
+# step prints per-package-manager instructions instead of auto-running.
 
 set -u  # error on undefined vars; intentionally NOT -e so we can surface
         # next-manual-command guidance on failures rather than exit silently.
@@ -29,6 +30,13 @@ PYTHON_MIN_MAJOR=3
 PYTHON_MIN_MINOR=13
 OLLAMA_MODEL="qwen2.5:14b"
 UV_INSTALL_URL="https://astral.sh/uv/install.sh"
+OLLAMA_LINUX_INSTALL_URL="https://ollama.com/install.sh"
+
+# --- OS detection (WP8) ---
+# Darwin keeps the original Homebrew paths; Linux gets the vendor Ollama
+# installer + printed Node instructions. Anything else falls through to
+# the Linux guidance (printing commands is always safe).
+OS_NAME="$(uname -s)"
 
 # --- Flag parsing ---
 ASSUME_YES=0
@@ -52,11 +60,11 @@ done
 
 # --- Output helpers (colour if stdout is a tty) ---
 if [ -t 1 ]; then
-    BOLD=$(printf '\033[1m'); DIM=$(printf '\033[2m'); RED=$(printf '\033[31m')
+    BOLD=$(printf '\033[1m'); RED=$(printf '\033[31m')
     GREEN=$(printf '\033[32m'); YELLOW=$(printf '\033[33m'); BLUE=$(printf '\033[34m')
     RESET=$(printf '\033[0m')
 else
-    BOLD=""; DIM=""; RED=""; GREEN=""; YELLOW=""; BLUE=""; RESET=""
+    BOLD=""; RED=""; GREEN=""; YELLOW=""; BLUE=""; RESET=""
 fi
 
 info()    { printf "%s==>%s %s\n" "$BLUE" "$RESET" "$*"; }
@@ -93,7 +101,7 @@ prompt_yes() {
 
 # --- Banner ---
 cat <<EOF
-${BOLD}Job Cannon bootstrap (macOS)${RESET}
+${BOLD}Job Cannon bootstrap (macOS + Linux)${RESET}
 
 This script will:
   1. Check for Python ${PYTHON_MIN_MAJOR}.${PYTHON_MIN_MINOR}+ and Git (exits with install link if missing).
@@ -137,7 +145,8 @@ done
 
 if [ -z "$PY_BIN" ]; then
     fail "Python ${PYTHON_MIN_MAJOR}.${PYTHON_MIN_MINOR}+ not found on PATH."
-    cat >&2 <<EOF
+    if [ "$OS_NAME" = "Darwin" ]; then
+        cat >&2 <<EOF
 
 Install Python ${PYTHON_MIN_MAJOR}.${PYTHON_MIN_MINOR} from one of:
   - https://www.python.org/downloads/    (official installer)
@@ -145,6 +154,18 @@ Install Python ${PYTHON_MIN_MAJOR}.${PYTHON_MIN_MINOR} from one of:
 
 Then re-run this script.
 EOF
+    else
+        cat >&2 <<EOF
+
+Install Python ${PYTHON_MIN_MAJOR}.${PYTHON_MIN_MINOR} with your package manager, e.g.:
+  - sudo apt install python${PYTHON_MIN_MAJOR}.${PYTHON_MIN_MINOR}          (Ubuntu 24.04+ / Debian; older releases need the deadsnakes PPA)
+  - sudo dnf install python${PYTHON_MIN_MAJOR}.${PYTHON_MIN_MINOR}          (Fedora)
+  - sudo pacman -S python                (Arch)
+  - https://www.python.org/downloads/    (official source)
+
+Then re-run this script.
+EOF
+    fi
     exit 2
 fi
 
@@ -153,7 +174,8 @@ step "Step 2 — Checking Git"
 
 if ! command -v git >/dev/null 2>&1; then
     fail "git not found on PATH."
-    cat >&2 <<EOF
+    if [ "$OS_NAME" = "Darwin" ]; then
+        cat >&2 <<EOF
 
 Install Git from one of:
   - https://git-scm.com/download/mac     (official installer)
@@ -162,6 +184,17 @@ Install Git from one of:
 
 Then re-run this script.
 EOF
+    else
+        cat >&2 <<EOF
+
+Install Git with your package manager, e.g.:
+  - sudo apt install git                 (Ubuntu / Debian)
+  - sudo dnf install git                 (Fedora)
+  - sudo pacman -S git                   (Arch)
+
+Then re-run this script.
+EOF
+    fi
     exit 2
 fi
 ok "Found git ($(git --version))"
@@ -236,28 +269,53 @@ if [ "$MINIMAL" -eq 0 ]; then
         ok "Found ollama ($(ollama --version 2>/dev/null | head -1))"
     else
         info "Ollama is not installed. It runs your local LLM (Job Cannon's free \$0 scoring tier)."
-        if prompt_yes "Install Ollama now?"; then
-            installed=0
-            if command -v brew >/dev/null 2>&1; then
-                info "Using Homebrew: brew install --cask ollama"
-                if brew install --cask ollama; then
-                    installed=1
+        if [ "$OS_NAME" = "Darwin" ]; then
+            if prompt_yes "Install Ollama now?"; then
+                installed=0
+                if command -v brew >/dev/null 2>&1; then
+                    info "Using Homebrew: brew install --cask ollama"
+                    if brew install --cask ollama; then
+                        installed=1
+                    fi
                 fi
-            fi
-            if [ "$installed" -eq 0 ]; then
-                fail "Could not install Ollama automatically."
-                cat >&2 <<EOF
+                if [ "$installed" -eq 0 ]; then
+                    fail "Could not install Ollama automatically."
+                    cat >&2 <<EOF
 
 Install manually from: https://ollama.com/download/mac
 Then re-run this script.
 
 EOF
-                warn "Continuing without Ollama. Cascade fallbacks (Groq/Cerebras/Gemini/Anthropic) will be used instead."
+                    warn "Continuing without Ollama. Cascade fallbacks (Groq/Cerebras/Gemini/Anthropic) will be used instead."
+                else
+                    ok "Installed Ollama."
+                fi
             else
-                ok "Installed Ollama."
+                warn "Skipped Ollama. Cascade fallbacks will handle scoring."
             fi
         else
-            warn "Skipped Ollama. Cascade fallbacks will handle scoring."
+            # Linux (WP8): the vendor installer is the documented path. It
+            # uses sudo internally, so say so before prompting.
+            info "Will run the official installer: curl -fsSL ${OLLAMA_LINUX_INSTALL_URL} | sh"
+            warn "The Ollama installer uses sudo to place the binary and set up the service."
+            if prompt_yes "Install Ollama now?"; then
+                if curl -fsSL "$OLLAMA_LINUX_INSTALL_URL" | sh; then
+                    ok "Installed Ollama."
+                else
+                    fail "Ollama install failed."
+                    cat >&2 <<EOF
+
+Try the manual command:
+    curl -fsSL ${OLLAMA_LINUX_INSTALL_URL} | sh
+
+Or see https://ollama.com/download/linux for alternatives.
+
+EOF
+                    warn "Continuing without Ollama. Cascade fallbacks (Groq/Cerebras/Gemini/Anthropic) will be used instead."
+                fi
+            else
+                warn "Skipped Ollama. Cascade fallbacks will handle scoring."
+            fi
         fi
     fi
 
@@ -287,28 +345,45 @@ EOF
         ok "Found node ($(node --version))"
     else
         info "Node.js is not installed. Job Cannon uses the Claude Code CLI as a \$0 fallback."
-        if prompt_yes "Install Node.js now?"; then
-            installed=0
-            if command -v brew >/dev/null 2>&1; then
-                info "Using Homebrew: brew install node"
-                if brew install node; then
-                    installed=1
+        if [ "$OS_NAME" = "Darwin" ]; then
+            if prompt_yes "Install Node.js now?"; then
+                installed=0
+                if command -v brew >/dev/null 2>&1; then
+                    info "Using Homebrew: brew install node"
+                    if brew install node; then
+                        installed=1
+                    fi
                 fi
-            fi
-            if [ "$installed" -eq 0 ]; then
-                fail "Could not install Node.js automatically."
-                cat >&2 <<EOF
+                if [ "$installed" -eq 0 ]; then
+                    fail "Could not install Node.js automatically."
+                    cat >&2 <<EOF
 
 Install manually from: https://nodejs.org/en/download/
 Then re-run this script.
 
 EOF
-                warn "Continuing without Node + Claude Code CLI."
+                    warn "Continuing without Node + Claude Code CLI."
+                else
+                    ok "Installed Node.js."
+                fi
             else
-                ok "Installed Node.js."
+                warn "Skipped Node install. Claude Code CLI fallback will not be available."
             fi
         else
-            warn "Skipped Node install. Claude Code CLI fallback will not be available."
+            # Linux (WP8): distro Node packaging varies too much (apt's node
+            # is often <18; nvm vs distro vs NodeSource is a user choice) —
+            # printing the options is safer than auto-running the wrong one.
+            cat <<EOF
+
+Install Node.js 18+ with your preferred method, then re-run this script
+(or run \`npm install -g @anthropic-ai/claude-code\` yourself):
+  - sudo apt install nodejs npm         (Ubuntu 24.04+; older releases ship Node <18 -- use NodeSource or nvm)
+  - sudo dnf install nodejs npm         (Fedora)
+  - sudo pacman -S nodejs npm           (Arch)
+  - https://nodejs.org/en/download/     (NodeSource / official builds / nvm)
+
+EOF
+            warn "Continuing without Node + Claude Code CLI (optional \$0 fallback)."
         fi
     fi
 

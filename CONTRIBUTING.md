@@ -11,11 +11,13 @@ Automated bootstrappers handle tool detection (Python 3.13+, Git, uv),
 dependency install, optional Ollama + Claude Code CLI setup, and app
 launch — recommended for first-time setup:
 
-- **macOS:** `bash install.sh` (flags: `--minimal`, `--no-launch`, `--yes`)
+- **macOS / Linux:** `bash install.sh` (flags: `--minimal`, `--no-launch`, `--yes`)
 - **Windows:** `.\install.ps1` (flags: `-Minimal`, `-NoLaunch`, `-Yes`)
 
-> Note: `install.sh` targets macOS. Linux users follow
-> [docs/SETUP.md](docs/SETUP.md) for manual steps.
+> On Linux, the optional Ollama step uses the official vendor installer
+> (`curl -fsSL https://ollama.com/install.sh | sh`, prompts first — it
+> needs sudo) and the optional Node.js step prints your distro's install
+> options rather than auto-running one. Manual path: [docs/SETUP.md](docs/SETUP.md).
 
 For a manual setup or if you prefer to run commands yourself:
 
