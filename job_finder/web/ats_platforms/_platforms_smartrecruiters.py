@@ -135,11 +135,11 @@ def _posting_to_job(posting: dict, slug: str) -> dict:
     source_id = str(posting_id) if posting_id is not None else None
 
     # ── posted_date (F-02: optional, cheap key lookup) ────────────────────────
-    # SmartRecruiters exposes ``releasedDate`` (ISO-8601) on list-endpoint
-    # results; fall back to ``postingStatusUpdatedOn`` if absent.
-    posted_date: str | None = (
-        posting.get("releasedDate") or posting.get("postingStatusUpdatedOn") or None
-    )
+    # SmartRecruiters exposes ``releasedDate`` (ISO-8601, first publication) on
+    # list-endpoint results. No fallback to ``postingStatusUpdatedOn`` (#360):
+    # that field is last-status-change, not first-posted — a wrong date is
+    # worse than no date (D-08).
+    posted_date: str | None = posting.get("releasedDate") or None
 
     description = _fetch_smartrecruiters_description(slug, posting_id) if posting_id else ""
 
