@@ -546,6 +546,8 @@ def _upsert_one_ats_api_job(
             salary_period=job_dict.get("salary_period") or "unknown",
             description=job_dict.get("description") or "",
             posted_date=job_dict.get("posted_date"),
+            # ATS platform APIs return audited first-posted timestamps (#363).
+            posted_date_precision="exact" if job_dict.get("posted_date") else None,
         )
         from job_finder.db import upsert_job
         from job_finder.parsed_job import DenylistedCompanyError, ParsedJob

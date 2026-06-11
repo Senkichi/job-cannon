@@ -93,7 +93,13 @@ def test_m078_creates_schema(tmp_path):
                 "SELECT name FROM sqlite_master WHERE type='trigger' AND name LIKE 'tg_jobs_%'"
             ).fetchall()
         }
-        assert len(triggers) == 16  # 8 invariants × (_ins + _upd)
+        # m078 owns exactly 16 (8 invariants × _ins + _upd); later migrations
+        # (e.g. m095's I-14 pair) add their own — assert m078's as a subset.
+        m078_triggers = {
+            f"{base}_{suffix}" for base in m078._TRIGGER_BASE.values() for suffix in ("ins", "upd")
+        }
+        assert len(m078_triggers) == 16
+        assert m078_triggers <= triggers
 
         indexes = {
             r[0]
@@ -214,9 +220,9 @@ def test_i12_posted_date_not_future(tmp_path):
     conn = _head_conn(tmp_path)
     try:
         with pytest.raises(sqlite3.IntegrityError, match="I-12"):
-            _insert(conn, "i12", posted_date="2999-01-01T00:00:00")
+            _insert(conn, "i12", posted_date="2999-01-01T00:00:00", posted_date_precision="exact")
         # A past date is fine.
-        _insert(conn, "i12ok", posted_date="2020-01-01T00:00:00")
+        _insert(conn, "i12ok", posted_date="2020-01-01T00:00:00", posted_date_precision="exact")
     finally:
         conn.close()
 
@@ -371,8 +377,15 @@ def test_m078_down_removes_everything(tmp_path):
 
         cols = {r[1] for r in conn.execute("PRAGMA table_info(jobs)").fetchall()}
         assert "unresolved_reasons" not in cols
+        # Only m078's own triggers are removed — later migrations' (m095 I-14)
+        # survive m078_down.
+        m078_trigger_names = tuple(
+            f"{base}_{suffix}" for base in m078._TRIGGER_BASE.values() for suffix in ("ins", "upd")
+        )
+        placeholders = ", ".join("?" for _ in m078_trigger_names)
         triggers = conn.execute(
-            "SELECT COUNT(*) FROM sqlite_master WHERE type='trigger' AND name LIKE 'tg_jobs_%'"
+            f"SELECT COUNT(*) FROM sqlite_master WHERE type='trigger' AND name IN ({placeholders})",
+            m078_trigger_names,
         ).fetchone()[0]
         assert triggers == 0
         idx = conn.execute(
@@ -410,8 +423,15 @@ def test_preflight_halts_on_violator_and_creates_nothing(tmp_path):
         # Nothing was created.
         cols = {r[1] for r in conn.execute("PRAGMA table_info(jobs)").fetchall()}
         assert "unresolved_reasons" not in cols
+        # Only m078's own triggers are removed — later migrations' (m095 I-14)
+        # survive m078_down.
+        m078_trigger_names = tuple(
+            f"{base}_{suffix}" for base in m078._TRIGGER_BASE.values() for suffix in ("ins", "upd")
+        )
+        placeholders = ", ".join("?" for _ in m078_trigger_names)
         triggers = conn.execute(
-            "SELECT COUNT(*) FROM sqlite_master WHERE type='trigger' AND name LIKE 'tg_jobs_%'"
+            f"SELECT COUNT(*) FROM sqlite_master WHERE type='trigger' AND name IN ({placeholders})",
+            m078_trigger_names,
         ).fetchone()[0]
         assert triggers == 0
         idx = conn.execute(

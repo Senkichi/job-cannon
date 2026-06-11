@@ -114,9 +114,10 @@ def merge_primary_posting_fields(
     salary_min = None if has_salary else posting.get("salary_min")
     salary_max = None if has_salary else posting.get("salary_max")
 
-    # posted_date: NULL-fill only — the upsert COALESCE lets a non-NULL
-    # incoming value win, so suppress it when the row already has one.
-    posted_date = None if row["posted_date"] else _parse_posted_date(posting.get("posted_date"))
+    # posted_date: offered unconditionally as 'exact' (#363) — the upsert's
+    # precision precedence decides; an ATS first-posted timestamp may correct
+    # a stored email-proxy date but never churns an equally-exact one.
+    posted_date = _parse_posted_date(posting.get("posted_date"))
 
     posting_url = posting.get("source_url") or posting.get("url")
     source_label = posting.get("company_source")
@@ -141,6 +142,7 @@ def merge_primary_posting_fields(
             salary_period=posting.get("salary_period") or "unknown",
             description=posting.get("description") or None,
             posted_date=posted_date,
+            posted_date_precision="exact" if posted_date else None,
             # A canonical change re-applies unresolved_reasons from the parsed
             # object; carry the row's existing flags through so this merge
             # cannot clear a pending /admin/review item.

@@ -100,14 +100,11 @@ def run_data_backfills_once(db_path: str, config: dict) -> None:
                 if updated:
                     logger.info("Backfill locations_raw: %d jobs updated", updated)
 
-                # 2. Backfill posted_date from first_seen
-                updated = conn.execute(
-                    "UPDATE jobs SET posted_date = first_seen "
-                    "WHERE posted_date IS NULL AND first_seen IS NOT NULL"
-                ).rowcount
-                conn.commit()
-                if updated:
-                    logger.info("Backfill posted_date: %d jobs updated", updated)
+                # (Retired) posted_date = first_seen synthesis. Removed in #363:
+                # fabricating posting dates from detection time violates D-08
+                # and would fake 100% posted_date coverage on every fresh DB.
+                # Recency display falls back to first_seen explicitly instead
+                # (#365), so the synthesis is also redundant.
 
                 # 3. SerpAPI enrichment for jobs missing jd_full
                 serpapi_key = get_secret("sources.serpapi.api_key", config=config)

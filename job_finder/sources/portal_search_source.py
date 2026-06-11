@@ -215,6 +215,9 @@ def _fetch_himalayas(keywords: list[str]) -> list[Job]:
                     salary_max=_safe_int(item.get("maxSalary")),
                     description=_truncate(_strip_html(item.get("description")), max_len=8000),
                     posted_date=_unix_to_datetime(item.get("pubDate")),
+                    # Feed pubDate is a machine first-published timestamp (#363).
+                    # Job.__post_init__ clears the marker if pubDate fails to parse.
+                    posted_date_precision="exact",
                 )
             )
 
@@ -702,6 +705,7 @@ def fetch_serp_portals(
                 salary_max=job.salary_max,
                 description=job.description,
                 posted_date=job.posted_date,
+                posted_date_precision=job.posted_date_precision,
             )
         )
 

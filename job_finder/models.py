@@ -34,6 +34,12 @@ class Job:
     salary_period: str = "unknown"
     description: str | None = None
     posted_date: datetime | None = None
+    # Provenance of posted_date (#363): 'exact' (ATS/API first-posted
+    # timestamp), 'approximate' (relative-string parse), 'proxy' (detection-
+    # time stand-in, e.g. an alert email's Date header). None when unset —
+    # the upsert boundary treats a dated job without a marker as 'proxy'
+    # (lowest trust), so only sources audited as exact need to say so.
+    posted_date_precision: str | None = None
     fetched_date: datetime = field(default_factory=datetime.now)
 
     # Scoring (populated by scorer)
@@ -65,6 +71,11 @@ class Job:
                 self.posted_date = datetime.fromisoformat(self.posted_date)
             except ValueError:
                 self.posted_date = None
+
+        # Pairing invariant (I-14): precision describes posted_date, so it
+        # cannot outlive a date that failed to parse (or was never set).
+        if self.posted_date is None:
+            self.posted_date_precision = None
 
     # Dedup key
     @staticmethod

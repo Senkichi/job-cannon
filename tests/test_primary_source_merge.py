@@ -96,9 +96,23 @@ def test_merge_first_seen_salary_wins(tmp_path):
     conn.close()
 
 
-def test_merge_posted_date_fills_null_only(tmp_path):
+def test_merge_exact_posted_date_corrects_proxy(tmp_path):
+    """An ATS first-posted timestamp overwrites a stored email-proxy date (#363)."""
     conn = _migrated_db(tmp_path)
-    key = _seed(conn, posted_date="2026-01-15T00:00:00")
+    key = _seed(conn, posted_date="2026-01-15T00:00:00", posted_date_precision="proxy")
+
+    merge_primary_posting_fields(conn, {"dedup_key": key}, _posting())
+
+    row = _row(conn, key)
+    assert row["posted_date"] == "2026-05-01T00:00:00"
+    assert row["posted_date_precision"] == "exact"
+    conn.close()
+
+
+def test_merge_posted_date_never_churns_equal_precision(tmp_path):
+    """A stored exact date is kept against another exact sighting (stability)."""
+    conn = _migrated_db(tmp_path)
+    key = _seed(conn, posted_date="2026-01-15T00:00:00", posted_date_precision="exact")
 
     merge_primary_posting_fields(conn, {"dedup_key": key}, _posting())
 

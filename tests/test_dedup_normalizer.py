@@ -51,6 +51,7 @@ def mem_db():
             user_interest TEXT DEFAULT 'unreviewed',
             pipeline_status TEXT DEFAULT 'discovered',
             posted_date TEXT DEFAULT NULL,
+            posted_date_precision TEXT DEFAULT NULL,
             notes TEXT DEFAULT '',
             haiku_score REAL DEFAULT NULL,
             haiku_summary TEXT DEFAULT NULL,

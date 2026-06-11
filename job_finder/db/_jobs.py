@@ -41,7 +41,7 @@ if TYPE_CHECKING:
 JOBS_ALL_COLUMNS = (
     "dedup_key, title, company, location, sources, source_urls, source_id, "
     "salary_min, salary_max, salary_currency, salary_period, description, first_seen, last_seen, score, "
-    "score_breakdown, user_interest, pipeline_status, posted_date, notes, "
+    "score_breakdown, user_interest, pipeline_status, posted_date, posted_date_precision, notes, "
     "fit_analysis, classification, sub_scores_json, scoring_model, "
     "jd_full, is_stale, "
     "company_id, comp_data_json, enrichment_tier, "
@@ -54,8 +54,19 @@ JOBS_ALL_COLUMNS = (
 # needs plus salary_min/salary_max for "changed" detection (Phase 47.02).
 _UPSERT_MERGE_COLUMNS = (
     "sources, source_urls, locations_raw, description, jd_full, pipeline_status, "
-    "salary_min, salary_max, posted_date"
+    "salary_min, salary_max, posted_date, posted_date_precision"
 )
+
+# Posted-date provenance precedence (#363). A more trustworthy incoming date
+# overwrites a less trustworthy stored one; equal trust keeps the existing
+# value (stability — repeated sightings from the same source class never
+# churn the date). Unranked/None (no date) is 0 so any dated incoming value
+# fills an empty slot, preserving the long-standing NULL-fill behavior.
+_PRECISION_RANK = {"exact": 3, "approximate": 2, "proxy": 1}
+
+
+def _precision_rank(precision: str | None) -> int:
+    return _PRECISION_RANK.get(precision or "", 0)
 
 
 # ---------------------------------------------------------------------------
@@ -362,6 +373,9 @@ def upsert_job(
     # point for posted_date (and, via the INSERT branch, first_seen) — strip
     # to naive UTC here so no tz suffix ever reaches storage.
     pd_str = to_naive_utc_iso(parsed.posted_date) if parsed.posted_date else None
+    # A dated job without an explicit provenance marker is treated as 'proxy'
+    # (lowest trust) — only sources audited as exact/approximate say so.
+    pd_precision = (parsed.posted_date_precision or "proxy") if pd_str else None
 
     if existing:
         # ── UPDATE branch ────────────────────────────────────────────────────
@@ -437,8 +451,14 @@ def upsert_job(
         if norm_salary_max is not None and norm_salary_max != existing["salary_max"]:
             canonical_changed = True
 
-        # Posted-date arrival / change
-        if pd_str is not None and pd_str != existing["posted_date"]:
+        # Posted-date precedence (#363): incoming wins only when strictly more
+        # trustworthy than what's stored. Legacy rows with a date but no
+        # precision marker rank as 'proxy'.
+        existing_pd_rank = _precision_rank(
+            existing["posted_date_precision"] or ("proxy" if existing["posted_date"] else None)
+        )
+        pd_wins = pd_str is not None and _precision_rank(pd_precision) > existing_pd_rank
+        if pd_wins and pd_str != existing["posted_date"]:
             canonical_changed = True
 
         # Preserve unresolved_reasons unless a canonical field changed. A touch
@@ -470,7 +490,8 @@ def upsert_job(
                     workplace_type = COALESCE(NULLIF(?, 'UNSPECIFIED'), workplace_type, 'UNSPECIFIED'),
                     primary_country_code = COALESCE(?, primary_country_code),
                     company_id = COALESCE(?, company_id),
-                    posted_date = COALESCE(?, posted_date){unresolved_clause}
+                    posted_date = CASE WHEN ? = 1 THEN ? ELSE posted_date END,
+                    posted_date_precision = CASE WHEN ? = 1 THEN ? ELSE posted_date_precision END{unresolved_clause}
                 WHERE dedup_key = ?""",
                 (
                     json.dumps(sources),
@@ -494,7 +515,10 @@ def upsert_job(
                     workplace_type_col,
                     primary_country_code,
                     company_id,
+                    1 if pd_wins else 0,
                     pd_str,
+                    1 if pd_wins else 0,
+                    pd_precision,
                     *unresolved_value,
                     matched_dedup_key,
                 ),
@@ -558,8 +582,8 @@ def upsert_job(
                      first_seen, last_seen, score, score_breakdown, locations_raw,
                      jd_full, scoring_provider,
                      locations_structured, workplace_type, primary_country_code,
-                     company_id, posted_date, unresolved_reasons)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                     company_id, posted_date, posted_date_precision, unresolved_reasons)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     parsed.dedup_key,
                     parsed.title,
@@ -585,6 +609,7 @@ def upsert_job(
                     primary_country_code,
                     company_id,
                     pd_str,
+                    pd_precision,
                     json.dumps(list(parsed.unresolved_reasons)),
                 ),
             )
