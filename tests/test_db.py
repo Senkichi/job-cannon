@@ -187,6 +187,41 @@ class TestPersistJobExpiryState:
         result = get_job(migrated_conn, "acme|live-test")
         assert result["expiry_status"] == "live"
 
+    def test_live_verdict_refreshes_last_seen_and_clears_stale(self, migrated_conn):
+        """'live' is positive liveness evidence: last_seen catches up, is_stale clears."""
+        from job_finder.db import get_job, persist_job_expiry_state
+
+        _insert_job(migrated_conn, "acme|live-refresh")
+        migrated_conn.execute(
+            "UPDATE jobs SET last_seen = '2026-01-01T00:00:00', is_stale = 1 "
+            "WHERE dedup_key = 'acme|live-refresh'"
+        )
+        migrated_conn.commit()
+
+        persist_job_expiry_state(migrated_conn, "acme|live-refresh", "live", "2026-04-09T12:00:00")
+        result = get_job(migrated_conn, "acme|live-refresh")
+        assert result["last_seen"] == "2026-04-09T12:00:00"
+        assert result["is_stale"] == 0
+
+    def test_non_live_verdicts_do_not_touch_last_seen(self, migrated_conn):
+        """'expired'/'inconclusive' carry no liveness evidence: last_seen/is_stale untouched."""
+        from job_finder.db import get_job, persist_job_expiry_state
+
+        for verdict in ("expired", "inconclusive"):
+            key = f"acme|{verdict}-noref"
+            _insert_job(migrated_conn, key)
+            migrated_conn.execute(
+                "UPDATE jobs SET last_seen = '2026-01-01T00:00:00', is_stale = 1 "
+                "WHERE dedup_key = ?",
+                (key,),
+            )
+            migrated_conn.commit()
+
+            persist_job_expiry_state(migrated_conn, key, verdict, "2026-04-09T12:00:00")
+            result = get_job(migrated_conn, key)
+            assert result["last_seen"] == "2026-01-01T00:00:00"
+            assert result["is_stale"] == 1
+
     def test_writes_inconclusive_status(self, migrated_conn):
         """persist_job_expiry_state persists 'inconclusive' status."""
         from job_finder.db import get_job, persist_job_expiry_state

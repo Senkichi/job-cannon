@@ -65,16 +65,6 @@ _INV1_UNREAD_ALLOWLIST: frozenset[str] = frozenset(
         "linkedin_jobs",
         # 'glassdoor', 'indeed', 'ziprecruiter' appear as string literals in
         # gmail_source.py (parser names) and therefore pass without allowlisting.
-        # --- Stale-detection thresholds ---
-        # stale_detector.py uses module-level constants (_STALE_THRESHOLD_DAYS,
-        # _ARCHIVE_THRESHOLD_DAYS) rather than reading from the config dict.
-        # The config promises configurable thresholds but the code hardcodes them.
-        "stale_threshold_days",
-        "archive_threshold_days",
-        # --- Staleness-orchestrator cascade timeout ---
-        # expiry_checker.py uses a hardcoded _TIMEOUT constant instead of
-        # reading staleness.cascade_request_timeout_seconds from config.
-        "cascade_request_timeout_seconds",
         # --- ATS scan schedule ---
         # ats.scan_days / ats.scan_hour are written by settings.py but the
         # scheduler factories use a hardcoded schedule and never read these

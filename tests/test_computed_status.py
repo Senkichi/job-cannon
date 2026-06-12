@@ -1,4 +1,5 @@
-"""Tests for Phase 49.05 — m082 computed_status VIRTUAL generated column (I-15)."""
+"""Tests for the computed_status VIRTUAL generated column (m082, precedence
+flipped by m096: a verified 'expired' outranks the clock-inferred 'stale')."""
 
 from __future__ import annotations
 
@@ -8,14 +9,14 @@ import pytest
 
 
 def _derive_computed_status(pipeline_status, is_stale, expiry_status) -> str:
-    """Python mirror of the m082 CASE expression (test oracle)."""
+    """Python mirror of the m096 CASE expression (test oracle)."""
     active = ("applied", "phone_screen", "interviewing", "offer", "rejected", "withdrawn")
     if pipeline_status in active:
         return pipeline_status
-    if is_stale == 1:
-        return "stale"
     if expiry_status == "expired":
         return "expired"
+    if is_stale == 1:
+        return "stale"
     return pipeline_status if pipeline_status is not None else "active"
 
 
@@ -57,6 +58,7 @@ def _insert(conn, dedup_key, pipeline_status, is_stale, expiry_status):
         ("interviewing", 1, "expired"),  # active wins over stale/expired
         ("discovered", 1, None),  # → stale
         ("discovered", 0, "expired"),  # → expired
+        ("discovered", 1, "expired"),  # → expired (m096: verified beats inferred)
         ("discovered", 0, None),  # → discovered (COALESCE pipeline_status)
         (None, 0, None),  # → active
         (None, 1, None),  # → stale

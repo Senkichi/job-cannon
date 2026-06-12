@@ -138,8 +138,9 @@ def register_ingestion(scheduler, app) -> None:
 # ---------------------------------------------------------------------------
 # Unified staleness check (nightly 2:00 AM). Replaces the old trio
 # (stale_detection 2:00, expiry_check 2:30, liveness_check 3:00). Runs
-# three phases in order: B (batch ATS reconciliation), A (time-based
-# stale / archive), C (parallel HTTP cascade).
+# three phases in order: B (batch ATS reconciliation), C (parallel HTTP
+# cascade), A (time-based stale / archive — last, so it judges against
+# the liveness evidence B and C just refreshed).
 # See job_finder.web.expiry_checker.run_staleness_check.
 # ---------------------------------------------------------------------------
 
