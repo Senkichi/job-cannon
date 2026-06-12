@@ -28,7 +28,8 @@
        hx-include #filter-form.
      • All filter input `name`s: status, location, country, workplace_type,
        unresolved, posted_within, freshness, sort_by, sort_dir, hide_stale,
-       show_hidden, date_from, date_to.
+       show_hidden, date_from, date_to, date_basis (hidden — Posted/Seen
+       label toggle on the Posted-within control).
      • The whole {% block extra_scripts %} (re-sort, archive, freshness, persistence,
        collapse scroll-back) is carried over unchanged except for two added
        popover toggles.
@@ -104,9 +105,18 @@
     </div>
 
     <!-- TIER 1 · Posted within (highest-value filter — always visible) -->
-    <label class="inline-flex items-center gap-1.5 rounded-md border border-slate-600 bg-slate-800 pl-2.5 pr-1.5 py-1">
+    <div class="inline-flex items-center gap-1.5 rounded-md border border-slate-600 bg-slate-800 pl-2.5 pr-1.5 py-1">
       <svg class="w-4 h-4 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 7V3m8 4V3M3 11h18M5 5h14a2 2 0 012 2v12a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2z"/></svg>
-      <span class="text-[11px] uppercase tracking-wider text-slate-500">Posted</span>
+      {# Date-basis toggle: clicking the label flips the cutoff column between
+         best-known posting date ('posted', COALESCE fallback — default) and
+         pure detection time ('seen'). Hidden input rides the filter form;
+         change is triggered programmatically (matches hx-trigger from:input). #}
+      {% set basis_seen = filters.get('date_basis') == 'seen' %}
+      <input type="hidden" name="date_basis" id="filter-date-basis" value="{{ 'seen' if basis_seen else 'posted' }}">
+      <button type="button" id="date-basis-toggle" onclick="toggleDateBasis()"
+              title="Filtering by {{ 'first-seen date' if basis_seen else 'posting date' }} — click to switch"
+              class="text-[11px] uppercase tracking-wider underline decoration-dotted decoration-slate-600 underline-offset-2 cursor-pointer transition-colors hover:text-slate-300 {{ 'text-indigo-300' if basis_seen else 'text-slate-500' }}">{{ 'Seen' if basis_seen else 'Posted' }}</button>
+      <label for="filter-posted-within" class="sr-only">Posted within</label>
       {# Option VALUES kept exactly (today/3d/1w/1m) — they round-trip to the backend. #}
       <select name="posted_within" id="filter-posted-within"
               class="appearance-none bg-transparent text-slate-100 text-[13px] font-medium py-0.5 pl-1 pr-1 focus:outline-none cursor-pointer">
@@ -116,7 +126,7 @@
         <option value="1w" {% if filters.get('posted_within') == '1w' %}selected{% endif %}>Last week</option>
         <option value="1m" {% if filters.get('posted_within') == '1m' %}selected{% endif %}>Last month</option>
       </select>
-    </label>
+    </div>
 
     <!-- TIER 1 · Sort + direction (pushed to the right) -->
     <div class="flex items-center gap-1.5 ml-auto">
@@ -514,9 +524,29 @@ document.getElementById('filter-posted-within').addEventListener('change', funct
   document.querySelectorAll('.freshness-toggle').forEach(function(b) { b.classList.remove('bg-indigo-600', 'border-indigo-500', 'text-white'); b.classList.add('bg-slate-700', 'border-slate-600', 'text-slate-200'); });
 });
 
-/* Filter persistence in localStorage — UNCHANGED. */
+/* Date-basis toggle: the "Posted"/"Seen" label flips what column the
+   posted-within filter cuts on. Programmatic change on the hidden input is
+   picked up by the form's hx-trigger (change from:input) and by saveFilters. */
+function syncDateBasisLabel() {
+  var input = document.getElementById('filter-date-basis');
+  var btn = document.getElementById('date-basis-toggle');
+  if (!input || !btn) return;
+  var seen = input.value === 'seen';
+  btn.textContent = seen ? 'Seen' : 'Posted';
+  btn.title = 'Filtering by ' + (seen ? 'first-seen date' : 'posting date') + ' — click to switch';
+  btn.classList.toggle('text-indigo-300', seen);
+  btn.classList.toggle('text-slate-500', !seen);
+}
+function toggleDateBasis() {
+  var input = document.getElementById('filter-date-basis');
+  input.value = input.value === 'seen' ? 'posted' : 'seen';
+  syncDateBasisLabel();
+  htmx.trigger(input, 'change');
+}
+
+/* Filter persistence in localStorage. */
 var FILTER_STORAGE_KEY = 'jc-job-filters';
-var PERSISTED_FILTERS = ['hide_stale', 'show_hidden', 'sort_by', 'sort_dir', 'posted_within'];
+var PERSISTED_FILTERS = ['hide_stale', 'show_hidden', 'sort_by', 'sort_dir', 'posted_within', 'date_basis'];
 function saveFilters() {
   var form = document.getElementById('filter-form');
   var state = {};
@@ -541,6 +571,7 @@ function restoreFilters() {
       else { el.value = state[name]; }
       if (!firstRestored) firstRestored = el;
     });
+    syncDateBasisLabel();
     if (firstRestored) htmx.trigger(firstRestored, 'change');
   } catch (e) { /* ignore corrupt storage */ }
 }

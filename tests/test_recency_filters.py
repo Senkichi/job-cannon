@@ -79,6 +79,44 @@ class TestPostedWithinUsesRecency:
         assert "Old Posting" not in titles
 
 
+class TestDateBasisToggle:
+    """date_basis='seen' switches posted_within to pure first_seen cutoffs."""
+
+    def test_seen_basis_includes_freshly_detected_old_posting(self, conn):
+        """Old posted_date + fresh detection: hidden under 'posted', shown under 'seen'."""
+        _insert(
+            conn, "Old But New Here", posted_date=_now() - timedelta(days=60), first_seen=_now()
+        )
+        posted = [j["title"] for j in get_filtered_jobs(conn, posted_within="1w")]
+        seen = [j["title"] for j in get_filtered_jobs(conn, posted_within="1w", date_basis="seen")]
+        assert "Old But New Here" not in posted
+        assert "Old But New Here" in seen
+
+    def test_seen_basis_excludes_fresh_repost_detected_long_ago(self, conn):
+        """Fresh posted_date + old detection: shown under 'posted', hidden under 'seen'."""
+        _insert(conn, "Fresh Repost", posted_date=_now(), first_seen=_now() - timedelta(days=90))
+        posted = [j["title"] for j in get_filtered_jobs(conn, posted_within="1w")]
+        seen = [j["title"] for j in get_filtered_jobs(conn, posted_within="1w", date_basis="seen")]
+        assert "Fresh Repost" in posted
+        assert "Fresh Repost" not in seen
+
+    def test_unknown_basis_falls_back_to_posted(self, conn):
+        """Allowlist guard: arbitrary values never reach SQL, behave as 'posted'."""
+        _insert(conn, "Fresh Repost", posted_date=_now(), first_seen=_now() - timedelta(days=90))
+        rows = get_filtered_jobs(
+            conn, posted_within="1w", date_basis="first_seen; DROP TABLE jobs--"
+        )
+        assert [r["title"] for r in rows] == ["Fresh Repost"]
+        assert conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0] == 1
+
+    def test_route_accepts_date_basis_param(self, client):
+        """?date_basis=seen round-trips _get_filter_kwargs → get_filtered_jobs."""
+        resp = client.get("/jobs/?date_basis=seen&posted_within=1w")
+        assert resp.status_code == 200
+        # Toggle label renders the non-default state
+        assert b"Seen" in resp.data
+
+
 class TestRecencySort:
     def test_recency_sort_orders_by_best_known_date(self, conn):
         _insert(conn, "Newest Posted", posted_date=_now() - timedelta(days=1))

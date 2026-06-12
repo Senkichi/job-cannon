@@ -160,6 +160,10 @@ def _get_filter_kwargs() -> dict:
         "salary_min": _safe_int(args.get("salary_min", ""), "salary_min"),
         "source": args.get("source") or None,
         "posted_within": args.get("posted_within") or None,
+        # Binary normalize ('seen' or 'posted'); the query layer re-allowlists
+        # anyway. Templates read the raw value from request.args and apply the
+        # same == 'seen' comparison.
+        "date_basis": "seen" if args.get("date_basis") == "seen" else "posted",
         "freshness": args.get("freshness") or None,
         "date_from": args.get("date_from") or None,
         "date_to": args.get("date_to") or None,
