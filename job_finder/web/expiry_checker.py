@@ -17,10 +17,12 @@ Architecture:
   positives, and the per-job 30-second timeout dominated runtime.
 - Unified orchestrator (run_staleness_check) runs three phases in order:
     Phase B: batch ATS reconciliation (ats_reconciler.reconcile_all_companies)
-    Phase A: time-based stale marking (stale_detector.run_stale_detection)
     Phase C: parallel HTTP cascade over jobs not yet resolved by Phase B
-  Order matters: B refreshes last_seen for ATS-live jobs so A doesn't mis-mark
-  them stale.
+    Phase A: time-based stale marking (stale_detector.run_stale_detection)
+  Order matters: B and C both refresh last_seen for verified-live jobs
+  (B inline, C via persist_job_expiry_state's live path), so A — the only
+  phase that acts on the clock instead of direct evidence — must run last,
+  judging against the freshest evidence available.
 """
 
 import json
@@ -44,6 +46,16 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 _TIMEOUT = 10  # seconds for HTTP requests inside the cascade
+
+# Default python-requests UA gets bot-walled (challenge pages, 403/999) by
+# LinkedIn, Workday, and most aggregators, inflating INCONCLUSIVE and
+# false-LIVE counts. A browser UA keeps the checks on the normal page path.
+_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+    )
+}
 
 # Signal result constants
 EXPIRED = "expired"
@@ -95,7 +107,7 @@ def _extract_posting_id(url: str, ats_platform: str) -> str | None:
 # ---------------------------------------------------------------------------
 
 
-def _check_ats_api(slug: str, posting_id: str, ats_platform: str) -> str:
+def _check_ats_api(slug: str, posting_id: str, ats_platform: str, timeout: int = _TIMEOUT) -> str:
     """Check if a specific job posting is still live via the ATS API."""
     if ats_platform == "lever":
         url = f"https://api.lever.co/v0/postings/{slug}/{posting_id}"
@@ -108,7 +120,7 @@ def _check_ats_api(slug: str, posting_id: str, ats_platform: str) -> str:
         return INCONCLUSIVE
 
     try:
-        resp = requests.get(url, timeout=_TIMEOUT)
+        resp = requests.get(url, timeout=timeout, headers=_HEADERS)
         if resp.status_code in (404, 410):
             return EXPIRED
         if resp.status_code == 200:
@@ -281,7 +293,7 @@ def quick_liveness_check(url: str, timeout: int = 8) -> str:
         return EXPIRED
 
     try:
-        resp = requests.get(url, timeout=timeout, allow_redirects=True)
+        resp = requests.get(url, timeout=timeout, allow_redirects=True, headers=_HEADERS)
         if resp.status_code in (404, 410):
             return EXPIRED
         if resp.status_code == 200:
@@ -335,6 +347,7 @@ def _check_job_expiry(
     Short-circuits on first definitive answer. Returns (result, evidence).
     """
     title = job.get("title", "")
+    timeout = config.get("staleness", {}).get("cascade_request_timeout_seconds", 8)
 
     source_urls_raw = job.get("source_urls", "[]")
     if isinstance(source_urls_raw, str):
@@ -347,7 +360,7 @@ def _check_job_expiry(
 
     # --- Signal 0: Direct URL liveness check ---
     if source_urls:
-        url_result = quick_liveness_check(source_urls[0])
+        url_result = quick_liveness_check(source_urls[0], timeout=timeout)
         if url_result == EXPIRED:
             return EXPIRED, "url_check expired_markers"
         if url_result == LIVE:
@@ -365,7 +378,7 @@ def _check_job_expiry(
                 break
 
         if posting_id:
-            result = _check_ats_api(slug, posting_id, platform)
+            result = _check_ats_api(slug, posting_id, platform, timeout=timeout)
             if result == EXPIRED:
                 return EXPIRED, f"{platform}_api 404"
             if result == LIVE:
@@ -548,12 +561,14 @@ def run_staleness_check(db_path: str, config: dict) -> dict:
 
     Runs three phases in order:
         Phase B: batch ATS reconciliation (one HTTP call per company)
-        Phase A: time-based stale marking + passive-stage archive
         Phase C: parallel HTTP cascade for jobs not resolved by Phase B
+        Phase A: time-based stale marking + passive-stage archive
 
-    Order matters: Phase B refreshes last_seen for ATS-confirmed-live jobs
-    so Phase A doesn't erroneously mark them stale for lack of a recent
-    ingestion sighting.
+    Order matters: Phases B and C both refresh last_seen for verified-live
+    jobs (B inline, C via persist_job_expiry_state). Phase A is the only
+    phase that infers from the clock rather than direct evidence, so it
+    runs last — a job HTTP-verified live tonight must not be stale-marked
+    or clock-archived tonight.
     """
     staleness_cfg = config.get("staleness", {})
     if not staleness_cfg.get("enabled", True):
@@ -581,21 +596,22 @@ def run_staleness_check(db_path: str, config: dict) -> dict:
     else:
         logger.info("run_staleness_check: Phase B disabled via config")
 
-    # --- Phase A: time-based stale / archive ---
-    try:
-        from job_finder.web.stale_detector import run_stale_detection
-
-        summary["phase_a"] = run_stale_detection(db_path)
-    except Exception:
-        logger.exception("run_staleness_check: Phase A failed")
-        summary["phase_a"] = {"error": True}
-
     # --- Phase C: parallel HTTP cascade ---
     try:
         summary["phase_c"] = _run_phase_c_cascade(db_path, config)
     except Exception:
         logger.exception("run_staleness_check: Phase C failed")
         summary["phase_c"] = {"error": True}
+
+    # --- Phase A: time-based stale / archive (last: judges on the evidence
+    # B and C just refreshed) ---
+    try:
+        from job_finder.web.stale_detector import run_stale_detection
+
+        summary["phase_a"] = run_stale_detection(db_path, config)
+    except Exception:
+        logger.exception("run_staleness_check: Phase A failed")
+        summary["phase_a"] = {"error": True}
 
     logger.info("run_staleness_check complete: %s", summary)
     return summary
