@@ -17,7 +17,11 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from job_finder.web._runtime import reset_for_testing, runtime_shutdown
+from job_finder.web._runtime import (
+    reset_for_testing,
+    runtime_shutdown,
+    schedule_force_exit,
+)
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -163,6 +167,68 @@ def test_runtime_shutdown_no_scheduler():
         patch("job_finder.web.scheduler.get_spawned_ollama_proc", return_value=None),
     ):
         runtime_shutdown()  # must not raise
+
+
+# ---------------------------------------------------------------------------
+# Force-exit watchdog (Ctrl+C must win against non-daemon pool workers)
+# ---------------------------------------------------------------------------
+
+
+def test_runtime_shutdown_arms_force_exit_watchdog():
+    """runtime_shutdown must arm the watchdog BEFORE touching the scheduler,
+    so a wedged teardown step cannot outlive the backstop."""
+    order: list[str] = []
+
+    mock_scheduler = MagicMock()
+    mock_scheduler.shutdown = MagicMock(side_effect=lambda **kw: order.append("scheduler"))
+
+    with (
+        patch("job_finder.web.scheduler.get_scheduler", return_value=mock_scheduler),
+        patch("job_finder.web.scheduler.get_spawned_ollama_proc", return_value=None),
+        patch(
+            "job_finder.web._runtime.schedule_force_exit",
+            side_effect=lambda *a, **kw: order.append("watchdog"),
+        ) as mock_arm,
+    ):
+        runtime_shutdown()
+
+    mock_arm.assert_called_once()
+    assert order == ["watchdog", "scheduler"]
+
+
+def test_schedule_force_exit_noop_under_pytest():
+    """Inside a pytest worker (PYTEST_CURRENT_TEST set) the watchdog must
+    refuse to arm — a live os._exit timer would kill the whole worker."""
+    assert schedule_force_exit(0.01) is None
+
+
+def test_schedule_force_exit_arms_daemon_timer_and_fires(monkeypatch):
+    """Outside pytest the watchdog arms a daemon Timer that calls os._exit(0),
+    and a second call is idempotent (first armed timer wins)."""
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+
+    fired = threading.Event()
+    with patch("job_finder.web._runtime.os._exit", side_effect=lambda code: fired.set()):
+        timer = schedule_force_exit(0.05)
+        assert timer is not None
+        assert timer.daemon is True
+        assert timer.name == "jc-force-exit"
+        # Idempotent: second arm returns the same timer.
+        assert schedule_force_exit(0.05) is timer
+        assert fired.wait(timeout=5), "watchdog did not fire os._exit within 5s"
+
+
+def test_reset_for_testing_cancels_armed_watchdog(monkeypatch):
+    """reset_for_testing must cancel a pending watchdog so it never fires
+    after the test that armed it."""
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+
+    with patch("job_finder.web._runtime.os._exit") as mock_exit:
+        timer = schedule_force_exit(30.0)
+        assert timer is not None
+        reset_for_testing()
+        assert timer.finished.is_set(), "cancel() must resolve the timer"
+        mock_exit.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
