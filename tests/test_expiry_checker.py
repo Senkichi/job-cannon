@@ -613,6 +613,30 @@ class TestRunStalenessCheck:
         assert "phase_b" in result
         assert "phase_c" in result
 
+    def test_phase_order_is_b_then_c_then_a(self, tmp_db_path):
+        """Phase A (clock-based) must run LAST so it judges against the
+        liveness evidence Phases B and C just refreshed."""
+        from job_finder.web.expiry_checker import run_staleness_check
+
+        self._setup_db(tmp_db_path)
+
+        call_order: list[str] = []
+        with (
+            patch("job_finder.web.ats_reconciler.reconcile_all_companies") as mock_b,
+            patch("job_finder.web.expiry_checker._run_phase_c_cascade") as mock_c,
+            patch("job_finder.web.stale_detector.run_stale_detection") as mock_a,
+        ):
+            mock_b.side_effect = lambda *a, **k: (call_order.append("b"), {})[1]
+            mock_c.side_effect = lambda *a, **k: (call_order.append("c"), {})[1]
+            mock_a.side_effect = lambda *a, **k: (call_order.append("a"), {})[1]
+            config = {
+                **self._base_config(),
+                "staleness": {"batch_ats_enabled": True, "cascade_parallel_workers": 2},
+            }
+            run_staleness_check(tmp_db_path, config)
+
+        assert call_order == ["b", "c", "a"]
+
 
 class TestCareersBackoff:
     """_record_careers_outcome tracks failures and sets skip-until timestamps."""
@@ -701,6 +725,52 @@ class TestAutoReopen:
         ).fetchone()
         assert event["evidence"] == "re_appeared"
         assert event["source"] == "ingestion"
+
+        conn.close()
+
+    def test_reopen_clears_frozen_expiry_state(self, tmp_db_path):
+        """Reopened jobs shed their expiry verdict so Phase B/C re-verify them.
+
+        Both staleness phases exclude expiry_status='expired' rows; without
+        the clear, a reopened job would never be liveness-checked again.
+        """
+        import sqlite3
+
+        from job_finder.db import upsert_job
+        from job_finder.models import Job
+        from job_finder.parsed_job import ParsedJob
+        from job_finder.web.db_migrate import run_migrations
+
+        run_migrations(tmp_db_path)
+        conn = sqlite3.connect(tmp_db_path)
+        conn.row_factory = sqlite3.Row
+
+        job = Job(
+            title="Data Scientist",
+            company="Acme Corp",
+            location="Remote",
+            source="linkedin",
+            source_url="https://linkedin.com/jobs/1",
+        )
+        upsert_job(conn, ParsedJob.from_job(job))
+        conn.execute(
+            "UPDATE jobs SET pipeline_status = 'archived', expiry_status = 'expired', "
+            "expiry_checked_at = '2026-05-01T00:00:00', is_stale = 1 WHERE dedup_key = ?",
+            (job.dedup_key,),
+        )
+        conn.commit()
+
+        upsert_job(conn, ParsedJob.from_job(job))
+
+        row = conn.execute(
+            "SELECT pipeline_status, expiry_status, expiry_checked_at, is_stale "
+            "FROM jobs WHERE dedup_key = ?",
+            (job.dedup_key,),
+        ).fetchone()
+        assert row["pipeline_status"] == "discovered"
+        assert row["expiry_status"] is None
+        assert row["expiry_checked_at"] is None
+        assert row["is_stale"] == 0
 
         conn.close()
 
