@@ -13,7 +13,7 @@ packages = ["job_finder"]
 
 [project]
 name = "job-cannon"
-version = "5.0.0"
+version = "5.1.0"
 description = "Personal job search command center — Flask, Gmail ingestion, AI scoring, pipeline tracking"
 requires-python = ">=3.12"
 authors = [{ name = "Senkichi", email = "Senkichi@users.noreply.github.com" }]
@@ -343,7 +343,7 @@ reportUnusedFunction = "none"
 # ── Commitizen (Version Bumping + Changelog) ──────────────────
 [tool.commitizen]
 name = "cz_conventional_commits"
-version = "5.0.0"
+version = "5.1.0"
 version_files = ["pyproject.toml:project.version"]
 tag_format = "v$version"
 update_changelog_on_bump = true

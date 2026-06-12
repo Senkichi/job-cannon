@@ -4,10 +4,68 @@ All notable changes to this project are documented here. The format is
 based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 this project follows [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [5.1.0] — 2026-06-11
+
+The first PyPI release. Release polish (demo mode, installers, screenshots),
+autoheal default-on, primary-source resolution, and a posted-date
+reliability wave.
+
+### Added
+
+- **Demo mode** — `job-cannon --demo` boots against a throwaway database
+  seeded with ~30 fictional sample jobs on the next free port. Try the app
+  without configuring Gmail or any provider. (#348)
+- **Bootstrap one-liners** — pipe-safe `bootstrap.ps1` / `bootstrap.sh`
+  end-user installers (PowerShell `irm | iex`, `bash -c "$(curl …)"`) that
+  install pipx if missing, then `pipx install job-cannon`. (#355) The
+  contributor `install.sh` gained Linux parity. (#356)
+- **Windows installer** — PyInstaller-frozen app wrapped in an Inno Setup
+  per-user installer (`JobCannon-Setup.exe`), built by a release workflow
+  and attached to GitHub Releases with checksums. (#357)
+- **Company tracking** — track-company action on any job plus a
+  suggested-companies card sourced from your high-scoring history. (#354)
+- **No-provider banner + budget-skip eventing** — the dashboard warns when
+  no AI provider is reachable, and budget-gated skips surface as activity
+  events instead of silence. (#349)
+- **Screenshots + demo GIF** — captured via `scripts/capture_screenshots.py`
+  against demo mode; embedded in the README. (#350)
+- **2FA enrollment walkthrough** — the wizard now walks through enabling
+  2-Step Verification before the App-Passwords step, matching Google's
+  current UI. (#353)
+- **Empty-board onboarding state** — an empty database now shows
+  getting-started guidance, distinct from the "filters excluded everything"
+  state. (#352)
+- **Autoheal Phase D** — episodic attempt semantics with rollback, email
+  dual-parse + careers generic-shadow guards, per-company careers re-keying
+  with structural break detection, an upstream contribution channel
+  (review-first, nothing auto-uploads), and `heal_enabled` flipped to
+  default-on. Migrations m090–m091. (#337–#339, #341, #344, #345)
+- **Primary-source resolution** — Apply buttons prefer the primary ATS
+  posting over aggregator copies: precedence-ranked `direct_url`,
+  strict-gated data merge, a scheduled company-batched resolver, a
+  quick-tier LLM tie-breaker, and staleness decay that clears expired
+  direct URLs. (#340, #342, #343, #346)
+- **`posted_date` provenance** — `posted_date_precision` column with
+  precedence-based upsert, Workday "Posted N Days Ago" parsing, and
+  recency filters/sort based on `COALESCE(posted_date, first_seen)`.
+  (#369–#371)
+- **Zero-key free-portal path** — the wizard surfaces the no-API-key
+  portal-search source, default on. (#335)
+- **Real provider cost accounting** — Groq / Cerebras / OpenRouter /
+  Gemini adapters compute actual `cost_usd` from token usage. (#334)
+- **Migration safety** — downgrade guard, automatic pre-migration database
+  backup, and a friendly failure page instead of a stack trace. (#333)
+- **macOS validation checklist** — `docs/TESTING-MACOS.md`, a ~20-minute
+  tester checklist (install, tray, Keychain, IMAP, local-ai). (#358)
 
 ### Changed
 
+- **Python floor lowered to 3.12** (was 3.13) for broader distro
+  compatibility. (#331)
+- **README restructured** for a mixed audience — end-user quick start
+  first, contributor detail later, FAQ added, stale counts softened. (#351)
+- **Tray mode prints a startup banner and opens the browser** instead of
+  starting silently. (#332)
 - Renamed vestigial tier routing strings `haiku` / `sonnet` / `opus` to
   `low` / `mid` / `high` across config, dispatcher, DB `enrichment_tier`
   values (migration 50), and UI. Renamed `scoring.haiku_threshold` to
@@ -16,6 +74,18 @@ this project follows [Semantic Versioning](https://semver.org/).
   routes; consolidated `user_activity` batch-score actions (migration 51).
   Dashboard batch scoring is a single control. `config.yaml` legacy keys
   auto-migrate on load via ruamel.yaml round-trip.
+
+### Fixed
+
+- **Poisoned `posted_date` values** — naive-UTC enforced at the upsert
+  boundary (m093), provably-wrong dates (`posted_date > first_seen`)
+  cleared (m094), and Greenhouse / SmartRecruiters now read first-posted
+  fields instead of last-updated. (#366–#368)
+- **Windows user-data path docs** — five doc sites claimed
+  `%APPDATA%\JobCannon`; the app actually uses `%LOCALAPPDATA%\JobCannon`
+  (platformdirs `roaming=False`). (#358)
+- **Tray ignored `--port`** and the `/__jc_health` endpoint was reachable
+  in production mode; both fixed during installer work. (#357)
 
 ## [5.0.0] — 2026-06-10
 
