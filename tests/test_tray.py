@@ -194,6 +194,121 @@ def test_shutdown_all_swallows_werkzeug_error():
 
 
 # ---------------------------------------------------------------------------
+# Windows console ctrl handler (Ctrl+C while the pystray pump owns main thread)
+# ---------------------------------------------------------------------------
+
+
+def _win32api_or_skip():
+    try:
+        import win32api  # type: ignore[import]
+
+        return win32api
+    except ImportError:
+        pytest.skip("pywin32 not installed — skipping console ctrl handler test")
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows-only test")
+def test_run_installs_then_removes_console_ctrl_handler():
+    """The pump phase must register a console ctrl handler (the only quit path
+    that works while the main thread is blocked in the native message pump)
+    and unregister it on the way out."""
+    win32api = _win32api_or_skip()
+
+    calls: list[tuple[object, bool]] = []
+
+    def _spy_set(handler, add):
+        calls.append((handler, add))
+        return None  # never actually (un)register during the test
+
+    mock_icon = MagicMock()
+    mock_icon.run.return_value = None  # pump exits immediately (Quit path)
+
+    with (
+        patch.object(win32api, "SetConsoleCtrlHandler", side_effect=_spy_set),
+        patch("job_finder.tray.pystray.Icon", return_value=mock_icon),
+        patch("job_finder.web._runtime.runtime_shutdown"),
+    ):
+        t = _make_tray()
+        t._load_icon = MagicMock()
+        t.run()
+
+    assert len(calls) == 2, f"expected install + remove, got {calls}"
+    (h_add, add_flag), (h_rm, rm_flag) = calls
+    assert add_flag is True and rm_flag is False
+    assert h_add is h_rm, "the SAME handler must be unregistered"
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows-only test")
+def test_console_ctrl_handler_tears_down_and_stops_pump():
+    """The handler must run _shutdown_all, stop the icon, and CLAIM the event
+    (return True) — there is no working CPython SIGINT path to fall through to
+    while the pump owns the main thread."""
+    win32api = _win32api_or_skip()
+    import win32con  # type: ignore[import]
+
+    captured: list = []
+
+    with (
+        patch.object(
+            win32api, "SetConsoleCtrlHandler", side_effect=lambda h, a: captured.append(h)
+        ),
+        patch("job_finder.web._runtime.runtime_shutdown"),
+    ):
+        t = _make_tray()
+        t.icon = MagicMock()
+        t._shutdown_all = MagicMock()
+        handler = t._install_win32_ctrl_handler()
+
+    assert handler is not None and captured == [handler]
+
+    for event in (win32con.CTRL_C_EVENT, win32con.CTRL_CLOSE_EVENT):
+        t._shutdown_all.reset_mock()
+        t.icon.stop.reset_mock()
+        assert handler(event) is True, f"event {event} must be claimed"
+        t._shutdown_all.assert_called_once()
+        t.icon.stop.assert_called_once()
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows-only test")
+def test_pre_setup_fallback_removes_handler_before_terminal_serving():
+    """icon.run() raising pre-setup must unregister the pump-phase handler
+    BEFORE the terminal fallback starts serving — a still-registered handler
+    would claim Ctrl+C away from Werkzeug's KeyboardInterrupt path."""
+    win32api = _win32api_or_skip()
+
+    calls: list[tuple[str, object]] = []
+
+    def _spy_set(handler, add):
+        calls.append(("install" if add else "remove", handler))
+        return None
+
+    mock_icon = MagicMock()
+    mock_icon.run.side_effect = RuntimeError("loop failed pre-setup")
+
+    with (
+        patch.object(win32api, "SetConsoleCtrlHandler", side_effect=_spy_set),
+        patch("job_finder.tray.pystray.Icon", return_value=mock_icon),
+        patch("job_finder.web._runtime.runtime_shutdown"),
+    ):
+        t = _make_tray()
+        t._load_icon = MagicMock()
+
+        def _assert_handler_gone(*a, **kw):
+            assert [c[0] for c in calls] == ["install", "remove"], (
+                "handler must be unregistered before terminal fallback serves"
+            )
+
+        t.app.run.side_effect = _assert_handler_gone
+        t.run()
+
+    t.app.run.assert_called_once()
+    # Exactly one install/remove pair — the except path nulls the local so the
+    # finally does not double-unregister.
+    assert [c[0] for c in calls] == ["install", "remove"]
+    assert calls[0][1] is calls[1][1]
+
+
+# ---------------------------------------------------------------------------
 # Scheduler menu helpers
 # ---------------------------------------------------------------------------
 

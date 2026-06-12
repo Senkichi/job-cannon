@@ -23,6 +23,17 @@ Three invariants make this safe to merge alongside the existing terminal path:
    If ``icon.run()`` fails *after* Flask started, stay headless rather than tear
    down a live server (which would interrupt in-flight scoring jobs and drop
    HTTP connections from users who already opened the URL).
+
+Ctrl+C on Windows (the "Ctrl+C is dead in tray mode" bug): while
+``icon.run()`` owns the main thread it is blocked inside pystray's native
+Win32 message pump, and CPython only delivers Python-level signal handlers
+(including the default SIGINT → KeyboardInterrupt) between bytecodes on the
+main thread — so a tray-mode process launched from a terminal ignores Ctrl+C
+entirely. The fix is ``_install_win32_ctrl_handler``: Windows invokes console
+control handlers on a *fresh injected thread*, which runs fine while the pump
+is wedged. The handler tears everything down and posts a stop to the pump.
+(POSIX tray backends have the analogous limitation — GLib/AppKit own the main
+thread — but tray mode is Windows-first; POSIX terminal users run --terminal.)
 """
 
 from __future__ import annotations
@@ -165,6 +176,55 @@ class TrayApp:
             except Exception as exc:
                 logger.warning("Werkzeug shutdown raised: %s", exc)
 
+    def _install_win32_ctrl_handler(self):
+        """Register a Windows console control handler for the pump phase.
+
+        Console handlers run on a thread Windows injects into the process, so
+        this is the ONLY quit path that works while the main thread is blocked
+        in pystray's native message pump (where Python signal handlers — and
+        therefore Ctrl+C — can never fire). Claims every event: Ctrl+C and
+        Ctrl+Break tear down and stop the pump; close/logoff/shutdown do the
+        same, after which Windows terminates the process.
+
+        Returns the registered handler (kept so it can be unregistered), or
+        None when pywin32 is unavailable (non-Windows, or stripped installs).
+        """
+        try:
+            import win32api  # type: ignore[import]  # pywin32 transitive dep
+        except ImportError:
+            return None
+
+        def _handler(ctrl_type):
+            self._shutdown_all()
+            icon = self.icon
+            if icon is not None:
+                try:
+                    icon.stop()  # PostMessage-based in the win32 backend: thread-safe
+                except Exception as exc:
+                    logger.warning("icon.stop() from console handler raised: %s", exc)
+            return True
+
+        win32api.SetConsoleCtrlHandler(_handler, True)
+        return _handler
+
+    @staticmethod
+    def _remove_win32_ctrl_handler(handler) -> None:
+        """Unregister a handler returned by ``_install_win32_ctrl_handler``.
+
+        Must happen before any path that relies on normal Python SIGINT
+        delivery (terminal fallback, headless ``_block_until_signal``) —
+        a still-registered handler would claim Ctrl+C and stop a pump that
+        is no longer the thing serving requests.
+        """
+        if handler is None:
+            return
+        try:
+            import win32api  # type: ignore[import]
+
+            win32api.SetConsoleCtrlHandler(handler, False)
+        except Exception as exc:
+            logger.warning("Console handler unregister raised: %s", exc)
+
     def _run_flask(self) -> None:
         """Serve via Werkzeug. ``self.app`` was built in ``__init__`` — we do
         NOT call ``create_app()`` again (invariant 1)."""
@@ -208,9 +268,16 @@ class TrayApp:
             self.flask_thread.start()
             setup_fired = True
 
+        # Installed only for the pump phase: while icon.run() owns the main
+        # thread, this injected-thread handler is the only working Ctrl+C path.
+        ctrl_handler = self._install_win32_ctrl_handler()
         try:
             self.icon.run(setup=_on_setup)
         except Exception as exc:
+            # Both fallback paths below rely on normal Python signal delivery,
+            # which the pump-phase handler would otherwise pre-empt.
+            self._remove_win32_ctrl_handler(ctrl_handler)
+            ctrl_handler = None
             if not setup_fired:
                 logger.warning(
                     "Tray icon event loop failed before Flask started (%s); "
@@ -229,6 +296,7 @@ class TrayApp:
         finally:
             # Always clean up exactly once — Quit, fallback, headless signal, or
             # unhandled exit all converge here.
+            self._remove_win32_ctrl_handler(ctrl_handler)
             self._shutdown_all()
 
     def _run_terminal_mode_with_existing_app(self) -> None:

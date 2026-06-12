@@ -431,7 +431,14 @@ def _install_terminal_shutdown(app) -> None:
         runtime_shutdown()
         sys.exit(0)
 
-    for sig in (signal.SIGINT, signal.SIGTERM):
+    # SIGBREAK — Windows-only Ctrl+Break. Without a handler the OS default
+    # terminates the process with no cleanup; with one, Ctrl+Break gets the
+    # same graceful teardown as Ctrl+C (the win32 console handler below
+    # returns False for CTRL_BREAK_EVENT, so CPython converts it to SIGBREAK).
+    _signals = [signal.SIGINT, signal.SIGTERM]
+    if hasattr(signal, "SIGBREAK"):
+        _signals.append(signal.SIGBREAK)
+    for sig in _signals:
         try:
             signal.signal(sig, _signal_handler)
         except (OSError, ValueError):
