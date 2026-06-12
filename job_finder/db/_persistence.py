@@ -57,6 +57,13 @@ def persist_job_expiry_state(
     the scoring preflight (per-job liveness check) and the nightly batch
     expiry runner.
 
+    A 'live' verdict is positive evidence the posting exists — equivalent
+    to a feed re-sighting — so it also refreshes last_seen and clears
+    is_stale, mirroring what ats_reconciler does for board-confirmed jobs.
+    Without this, Phase C live-verified jobs were still clock-archived by
+    the Phase A stale detector (1,170 confirmed-live jobs archived in the
+    30 days before the 2026-06-11 audit).
+
     Retries on 'database is locked' (3 attempts, exponential backoff).
     On 2026-05-01 the day-1 monthly hygiene jobs collided with the daily
     agentic_backfill at 03:30, exhausting the standalone_connection's 30s
@@ -71,13 +78,20 @@ def persist_job_expiry_state(
         expiry_status: One of 'expired', 'live', or 'inconclusive'.
         checked_at: ISO 8601 timestamp string of when the check ran.
     """
+    if expiry_status == "live":
+        sql = (
+            "UPDATE jobs SET expiry_status = ?, expiry_checked_at = ?, "
+            "last_seen = ?, is_stale = 0 WHERE dedup_key = ?"
+        )
+        params = (expiry_status, checked_at, checked_at, dedup_key)
+    else:
+        sql = "UPDATE jobs SET expiry_status = ?, expiry_checked_at = ? WHERE dedup_key = ?"
+        params = (expiry_status, checked_at, dedup_key)
+
     last_err: sqlite3.OperationalError | None = None
     for attempt in range(3):
         try:
-            conn.execute(
-                "UPDATE jobs SET expiry_status = ?, expiry_checked_at = ? WHERE dedup_key = ?",
-                (expiry_status, checked_at, dedup_key),
-            )
+            conn.execute(sql, params)
             conn.commit()
             return
         except sqlite3.OperationalError as e:
