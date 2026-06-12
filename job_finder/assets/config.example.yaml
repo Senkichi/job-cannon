@@ -369,8 +369,10 @@ server:
 # --- Unified staleness orchestrator (nightly 2:00 AM) ---
 # Consolidates expiry_check / liveness_check into one run that does:
 #   B) batch ATS reconciliation (one API call per company with an ATS slug)
-#   A) time-based stale marking + passive-stage archive
 #   C) parallel HTTP cascade for remaining unchecked jobs
+#   A) time-based stale marking + passive-stage archive
+# C runs before A so a same-night HTTP live verdict refreshes last_seen
+# before the clock-based detector judges the job.
 # See job_finder.web.expiry_checker.run_staleness_check for details.
 staleness:
   # Master toggle. Also honored by the deprecated expiry.enabled key for
@@ -389,6 +391,12 @@ staleness:
   cascade_parallel_workers: 10
   # Phase C: per-request HTTP timeout (seconds).
   cascade_request_timeout_seconds: 8
+  # Phase A: days without any liveness evidence (feed re-sighting, ATS board
+  # presence, or HTTP live verdict) before a discovered/reviewing job is
+  # marked stale (hidden from the default view) and then auto-archived.
+  # Jobs in active pipeline stages (applied onward) are never touched.
+  stale_threshold_days: 14
+  archive_threshold_days: 30
 
 # --- Filtering ---
 filters:

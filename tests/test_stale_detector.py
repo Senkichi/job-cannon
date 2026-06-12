@@ -124,3 +124,87 @@ class TestBatchArchive:
         ).fetchone()
         assert row["is_stale"] == 1
         assert row["pipeline_status"] == "discovered"  # Not archived, just stale
+
+
+class TestPassiveStageScoping:
+    """is_stale is only meaningful pre-application: marked on passive stages,
+    cleared everywhere else."""
+
+    def test_active_stage_jobs_never_marked_stale(self, migrated_db):
+        """Applied/phone_screen jobs seen 15+ days ago are NOT marked stale."""
+        path, conn = migrated_db
+        _insert_job(conn, "job_applied", "applied", _days_ago(20))
+        _insert_job(conn, "job_phone", "phone_screen", _days_ago(20))
+
+        result = run_stale_detection(path)
+
+        assert result["stale_marked"] == 0
+        rows = conn.execute("SELECT is_stale FROM jobs").fetchall()
+        assert all(r["is_stale"] == 0 for r in rows)
+
+    def test_stale_flag_cleared_when_job_leaves_passive_stage(self, migrated_db):
+        """A stale discovered job that the user applies to sheds its stale flag."""
+        path, conn = migrated_db
+        _insert_job(conn, "job_now_applied", "applied", _days_ago(20))
+        conn.execute("UPDATE jobs SET is_stale = 1 WHERE dedup_key = 'job_now_applied'")
+        conn.commit()
+
+        result = run_stale_detection(path)
+
+        assert result["stale_cleared"] == 1
+        row = conn.execute(
+            "SELECT is_stale FROM jobs WHERE dedup_key = 'job_now_applied'"
+        ).fetchone()
+        assert row["is_stale"] == 0
+
+    def test_reseen_job_cleared(self, migrated_db):
+        """A stale job re-seen recently is cleared (original re-sighting rule)."""
+        path, conn = migrated_db
+        _insert_job(conn, "job_reseen", "discovered", _days_ago(2))
+        conn.execute("UPDATE jobs SET is_stale = 1 WHERE dedup_key = 'job_reseen'")
+        conn.commit()
+
+        result = run_stale_detection(path)
+
+        assert result["stale_cleared"] == 1
+        row = conn.execute("SELECT is_stale FROM jobs WHERE dedup_key = 'job_reseen'").fetchone()
+        assert row["is_stale"] == 0
+
+
+class TestConfigurableThresholds:
+    """staleness.stale_threshold_days / archive_threshold_days override defaults."""
+
+    def test_custom_stale_threshold(self, migrated_db):
+        """stale_threshold_days=5 marks a job seen 7 days ago (default 14 would not)."""
+        path, conn = migrated_db
+        _insert_job(conn, "job_week", "discovered", _days_ago(7))
+
+        config = {"staleness": {"stale_threshold_days": 5}}
+        result = run_stale_detection(path, config)
+
+        assert result["stale_marked"] == 1
+
+    def test_custom_archive_threshold(self, migrated_db):
+        """archive_threshold_days=10 archives a job seen 12 days ago, with
+        threshold-accurate evidence."""
+        path, conn = migrated_db
+        _insert_job(conn, "job_old", "discovered", _days_ago(12))
+
+        config = {"staleness": {"archive_threshold_days": 10}}
+        result = run_stale_detection(path, config)
+
+        assert result["archived"] == 1
+        event = conn.execute(
+            "SELECT evidence FROM pipeline_events WHERE job_id = 'job_old'"
+        ).fetchone()
+        assert event["evidence"] == "not_seen_10_days"
+
+    def test_defaults_without_config(self, migrated_db):
+        """No config → 14/30 defaults: a 7-day-old sighting is neither stale nor archived."""
+        path, conn = migrated_db
+        _insert_job(conn, "job_fresh", "discovered", _days_ago(7))
+
+        result = run_stale_detection(path)
+
+        assert result["stale_marked"] == 0
+        assert result["archived"] == 0
