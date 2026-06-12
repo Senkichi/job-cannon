@@ -217,6 +217,7 @@ def get_filtered_jobs(
     country: str | None = None,
     workplace_type: str | None = None,
     unresolved: str = "hide",
+    date_basis: str = "posted",
 ) -> list[dict]:
     """Return jobs matching the given filters, sorted and limited.
 
@@ -225,6 +226,11 @@ def get_filtered_jobs(
     'classification'/'classification_rank'/'sub_score_sum' keys) map to the
     classification-rank CASE + sub_score_sum composite order defined above.
     Hidden statuses excluded by default unless status set or show_hidden=True.
+
+    date_basis ('posted' | 'seen', default 'posted') picks the column the
+    posted_within cutoff compares against: best-known posting date
+    (COALESCE(posted_date, first_seen), per #365/#371) vs. pure detection
+    time (first_seen). Unknown values fall back to 'posted'.
 
     Plan 34-03 Commit A: migrated from COALESCE(sonnet_score, haiku_score,
     score) to classification-based ordering; min_score/max_score translate
@@ -235,6 +241,14 @@ def get_filtered_jobs(
     # fallback (#365). Display marks the fallback cohort; filters and the
     # 'recency' sort share this single expression.
     _RECENCY_SQL = "COALESCE(posted_date, first_seen)"
+
+    # date_basis switches what column posted_within cuts on: 'posted'
+    # (default) keeps the best-known-posting-date COALESCE above; 'seen'
+    # filters purely on detection time. Allowlisted via this binary pick so
+    # the raw value never reaches the SQL string (same invariant as sort_by).
+    # Freshness (business-day) cutoffs and the 'recency' sort stay on
+    # _RECENCY_SQL — the sort dropdown already exposes first_seen explicitly.
+    _within_col = "first_seen" if date_basis == "seen" else _RECENCY_SQL
 
     # SECURITY-CRITICAL: the `allowed_sort_cols` set literal and the f-string
     # composer below MUST stay co-located in the same file (per S7d split
@@ -316,7 +330,7 @@ def get_filtered_jobs(
             # 30 days is close enough for a display filter without adding dateutil).
             _within_cutoff = _local_day_start_as_utc_iso(30)
         if _within_cutoff is not None:
-            conditions.append(f"{_RECENCY_SQL} >= ?")
+            conditions.append(f"{_within_col} >= ?")
             params.append(_within_cutoff)
 
     if freshness:
