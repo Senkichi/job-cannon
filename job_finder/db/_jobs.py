@@ -540,7 +540,12 @@ def upsert_job(
             )
 
         # Auto-reopen: if an archived job re-appears in ingestion, treat
-        # re-appearance as proof the job is live again.
+        # re-appearance as proof the job is live again. The stale expiry
+        # verdict must be cleared with it — Phase B/C of the staleness
+        # orchestrator both exclude expiry_status='expired' rows, so a
+        # reopened job carrying a frozen 'expired' would never be
+        # re-verified (249 such rows at the 2026-06-11 audit). NULLing
+        # expiry_checked_at puts it at the front of the Phase C queue.
         if existing["pipeline_status"] == "archived":
             update_pipeline_status(
                 conn,
@@ -549,6 +554,12 @@ def upsert_job(
                 source="ingestion",
                 evidence="re_appeared",
             )
+            conn.execute(
+                "UPDATE jobs SET expiry_status = NULL, expiry_checked_at = NULL, "
+                "is_stale = 0 WHERE dedup_key = ?",
+                (matched_dedup_key,),
+            )
+            conn.commit()
 
         if canonical_changed:
             kind: Literal["updated", "touched", "unchanged"] = "updated"
