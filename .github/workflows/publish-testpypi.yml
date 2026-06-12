@@ -94,9 +94,15 @@ jobs:
         shell: bash
         run: job-cannon --help
 
-      - name: Verify package import
+      # `python` here is the runner's system interpreter — pipx installs into
+      # an isolated venv, so the import MUST run with the venv's interpreter
+      # (bin/ on POSIX, Scripts/ on Windows).
+      - name: Verify package import (inside the pipx venv)
         shell: bash
-        run: python -c "import job_finder"
+        run: |
+          VENV_PY="$(pipx environment --value PIPX_LOCAL_VENVS)/job-cannon/bin/python"
+          [ -f "$VENV_PY" ] || VENV_PY="$(pipx environment --value PIPX_LOCAL_VENVS)/job-cannon/Scripts/python.exe"
+          "$VENV_PY" -c "import job_finder"
 
   # ── Smoke [local-ai] on Windows only (D-07; Phase 39 SC4) ────
   smoke-local-ai-windows:
@@ -131,9 +137,13 @@ jobs:
         shell: bash
         run: job-cannon --help
 
-      - name: Verify llama_cpp importable
+      # Same venv-interpreter rule as the base smoke — llama_cpp lives in the
+      # pipx venv, not on the runner's system python.
+      - name: Verify llama_cpp importable (inside the pipx venv)
         shell: bash
-        run: python -c "import llama_cpp; print(llama_cpp.__version__)"
+        run: |
+          VENV_PY="$(pipx environment --value PIPX_LOCAL_VENVS)/job-cannon/Scripts/python.exe"
+          "$VENV_PY" -c "import llama_cpp; print(llama_cpp.__version__)"
 
   # ── Publish to TestPyPI (OIDC trusted publishing) ────────────
   publish-testpypi:
