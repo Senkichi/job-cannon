@@ -94,7 +94,7 @@ from job_finder.web.careers_crawler._static_tier import (
 # re-exposed at the package namespace (e.g. so test files can patch
 # `job_finder.web.careers_crawler._try_playwright_active`). Listing them
 # in `__all__` tells ruff that these "unused" imports are intentional
-# re-exports — the documented alternative to per-line `# noqa: F401`
+# re-exports — the documented alternative to per-line `noqa: F401`
 # annotations on every multi-line import block.
 # Grouped by source module:
 #   _title_filters:  _CITY_SUFFIX_RE, _LOCATION_SUFFIX_RE, _NAV_PATH_PREFIXES, _clean_title
