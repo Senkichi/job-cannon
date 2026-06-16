@@ -82,6 +82,7 @@ def extract_primary(
 __all__ = [
     "extract_primary",
     "extract_with_fallback",
+    "has_job_urls",
     "parse_glassdoor_alert",
     "parse_greenhouse_alert",
     "parse_indeed_alert",

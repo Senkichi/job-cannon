@@ -160,8 +160,12 @@ class TestFetchJobsDedup:
         """Parse failures record message_id for dedup guard in pipeline_runner."""
         search_results = [{"id": "msg1"}]
 
-        # Return a message with a body long enough to trigger _should_archive_failure
-        long_body = "x" * 600  # >500 chars, no meta indicators
+        # A genuine extraction failure: the email STRUCTURALLY carried a
+        # recognised job-listing URL (jobs were expected) but the parser
+        # returned none. The job URL is what makes _should_archive_failure
+        # treat this as a real failure rather than a deliberately-skipped
+        # non-job notification.
+        long_body = "x" * 600 + " https://www.linkedin.com/jobs/view/4012345678"
 
         def _parser(body: str, date) -> list:
             return []  # zero jobs = parse failure
@@ -180,3 +184,64 @@ class TestFetchJobsDedup:
         assert len(source.parse_failures) == 1
         assert source.parse_failures[0]["message_id"] == "msg1"
         assert source.parse_failures[0]["sender"] == "test@example.com"
+
+
+class TestShouldArchiveFailure:
+    """_should_archive_failure distinguishes genuine extraction failures from
+    deliberately-skipped non-job notification emails.
+
+    Regression guard for false-positive archival: Glassdoor company-follow
+    digests, LinkedIn "your job alert has been created" confirmations, and
+    marketing blasts legitimately contain zero job listings and must NOT be
+    archived as parse failures. Only zero-job results on emails that actually
+    carried a recognised job-listing URL count as failures.
+    """
+
+    _PAD = "lorem ipsum dolor sit amet " * 30  # >500 chars
+
+    def test_real_jobs_not_archived(self) -> None:
+        from job_finder.models import Job
+        from job_finder.sources.gmail_source import _should_archive_failure
+
+        jobs = [
+            Job(
+                title="Eng",
+                company="Acme",
+                location="",
+                source="linkedin",
+                source_url="https://www.linkedin.com/jobs/view/1",
+            )
+        ]
+        assert _should_archive_failure(self._PAD, jobs, "x@y.com") is False
+
+    def test_short_body_not_archived(self) -> None:
+        from job_finder.sources.gmail_source import _should_archive_failure
+
+        assert _should_archive_failure("too short", [], "x@y.com") is False
+
+    def test_non_job_notification_not_archived(self) -> None:
+        """No recognised job URL => non-job notification => not a failure."""
+        from job_finder.sources.gmail_source import _should_archive_failure
+
+        brand_follow = (
+            "Check out recent updates from Achieve and stay on top of your "
+            "work game. Since you follow Achieve " + self._PAD
+        )
+        assert _should_archive_failure(brand_follow, [], "noreply@glassdoor.com") is False
+
+    def test_genuine_failure_with_job_url_archived(self) -> None:
+        """Job URL present but zero jobs extracted => genuine failure => archive."""
+        from job_finder.sources.gmail_source import _should_archive_failure
+
+        drifted = self._PAD + " https://www.linkedin.com/jobs/view/4012345678"
+        assert _should_archive_failure(drifted, [], "jobs-noreply@linkedin.com") is True
+
+    def test_digest_meta_email_not_archived(self) -> None:
+        """Secondary guard preserved: a digest preamble is excluded even when
+        the body contains job URLs."""
+        from job_finder.sources.gmail_source import _should_archive_failure
+
+        digest = (
+            "Your job alert digest " + self._PAD + " https://www.linkedin.com/jobs/view/4012345678"
+        )
+        assert _should_archive_failure(digest, [], "jobs-noreply@linkedin.com") is False
