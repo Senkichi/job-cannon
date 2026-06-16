@@ -599,13 +599,31 @@ class TestIndeedParser:
 import os
 import sqlite3
 
-# A realistic non-meta email body that is long enough to trigger archival (> 500 chars)
+# A realistic genuine-failure email body: long, non-meta, and it STRUCTURALLY
+# carries a recognised job-listing URL (so jobs were expected) yet the parser
+# returned none — i.e. probable template/format drift. The job URL is what makes
+# this a real failure rather than a deliberately-skipped non-job notification.
 _LONG_NONMETA_HTML_BODY = (
     """<html><body>"""
     + (
         "<p>This is a job alert email with various content but no parseable job cards. "
         "The parser returned zero jobs for this email even though it is not a meta-email. "
+        '<a href="https://www.linkedin.com/jobs/view/4012345678">Senior Engineer</a> '
         "This should trigger parse failure archival so we can debug what changed.</p>"
+    )
+    * 5
+    + """</body></html>"""
+)
+
+# A long, non-meta email that contains NO recognised job-listing URL — a non-job
+# notification (brand-follow digest / alert confirmation / marketing). Legitimately
+# zero jobs; must NOT be archived as a parse failure.
+_LONG_NONJOB_NOTIFICATION_BODY = (
+    """<html><body>"""
+    + (
+        "<p>Check out recent updates from Achieve and stay on top of your work game. "
+        "Since you follow Achieve we thought you would want to see their latest news "
+        "and company updates. Visit your profile to manage the companies you follow.</p>"
     )
     * 5
     + """</body></html>"""
@@ -646,6 +664,17 @@ class TestParseFailureArchival:
         sender = "alert@indeed.com"
         result = _should_archive_failure(_META_HTML_BODY, [], sender)
         assert result is False, "Meta-email should NOT trigger archival"
+
+    def test_no_archive_on_non_job_notification(self):
+        """A long non-meta email with no recognised job-listing URL is a non-job
+        notification (brand-follow digest / alert confirmation / marketing) and
+        must NOT be archived — regression guard against false-positive archival."""
+        from job_finder.sources.gmail_source import _should_archive_failure
+
+        result = _should_archive_failure(
+            _LONG_NONJOB_NOTIFICATION_BODY, [], "noreply@glassdoor.com"
+        )
+        assert result is False, "Non-job notification (no job URL) should NOT archive"
 
     def test_no_archive_on_short_body(self):
         """Short body (< 500 chars) does NOT trigger archival."""

@@ -15,7 +15,7 @@ from googleapiclient.discovery import build
 
 import job_finder.web.autoheal.override_loader as _override_loader
 from job_finder.models import Job
-from job_finder.parsers import extract_primary, extract_with_fallback
+from job_finder.parsers import extract_primary, extract_with_fallback, has_job_urls
 from job_finder.parsers.glassdoor_parser import parse_glassdoor_alert
 from job_finder.parsers.greenhouse_parser import parse_greenhouse_alert
 from job_finder.parsers.indeed_parser import parse_indeed_alert, parse_indeed_match_alert
@@ -99,12 +99,28 @@ _ARCHIVE_META_INDICATORS = [
 
 
 def _should_archive_failure(body: str, jobs: list, sender: str) -> bool:
-    """Return True if this parser result should trigger failure archival.
+    """Return True if this parser result is a genuine extraction failure.
 
-    Archival is triggered when:
-    - Parser found zero jobs (jobs is empty)
-    - Body is non-meta (not a digest/confirmation email)
-    - Body is long enough to be a real email (>= 500 chars after stripping)
+    A zero-job result is only a *failure* when the email actually carried job
+    listings we expected to extract. Many job-board emails are non-job
+    notifications the parsers deliberately skip — Glassdoor company-follow /
+    brand-update digests, LinkedIn "your job alert has been created"
+    confirmations, marketing/onboarding blasts — and they legitimately contain
+    zero job listings. Archiving those is a false positive (it pollutes the
+    parse-failures dir and emits misleading "Parse failure archived" logs).
+
+    The distinguishing signal is structural: does the body contain at least one
+    recognised job-listing URL? This is the same ``has_job_urls`` predicate
+    ``extract_with_fallback`` already uses to decide whether there is anything
+    to extract — so archival now agrees with the rest of the pipeline:
+    no job URLs => nothing was expected => not a failure.
+
+    Archival is therefore triggered when ALL hold:
+    - Parser found zero jobs (``jobs`` is empty).
+    - Body is long enough to be a real email (>= 500 chars after stripping).
+    - Body contains a recognised job-listing URL (jobs were expected but the
+      parser returned none — probable template/format drift).
+    - Body is not a known digest/confirmation meta-email.
 
     Args:
         body: Raw email body string.
@@ -117,6 +133,8 @@ def _should_archive_failure(body: str, jobs: list, sender: str) -> bool:
     if jobs:
         return False
     if not body or len(body.strip()) < 500:
+        return False
+    if not has_job_urls(body):
         return False
     preamble = body[:200].lower()
     return not any(indicator in preamble for indicator in _ARCHIVE_META_INDICATORS)
