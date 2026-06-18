@@ -10,6 +10,11 @@ profile:
   # Preferred work locations (use "Remote" for remote jobs)
   target_locations:
     - Remote
+  # ISO 3166-1 alpha-2 country code for your home country (e.g. "US", "GB").
+  # Used by the deterministic location_fit override (P3.1) to evaluate remote
+  # eligibility and on-site proximity. Optional — when absent, location_fit
+  # falls back to the LLM for all cases except clear city/region target matches.
+  home_country: "US"
   # Minimum acceptable salary in USD (jobs below 85% of this are auto-excluded)
   min_salary: 100000
   # Industries you're interested in (used by AI scoring)

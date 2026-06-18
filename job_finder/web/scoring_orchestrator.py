@@ -31,7 +31,7 @@ import sqlite3
 import threading
 from collections.abc import Callable
 
-from job_finder.db import persist_job_assessment
+from job_finder.db import JobAssessment, persist_job_assessment
 
 logger = logging.getLogger(__name__)
 
@@ -141,6 +141,116 @@ def clear_candidate_context_cache() -> None:
         _CONTEXT_CACHE.clear()
 
 
+def _apply_location_fit_override(
+    assessment: JobAssessment,
+    job: dict,
+    conn: sqlite3.Connection,
+    config: dict,
+) -> JobAssessment:
+    """Apply the P3.1 deterministic location_fit override to a JobAssessment.
+
+    Reads ``locations_structured``, ``workplace_type``, and
+    ``primary_country_code`` directly from the jobs row (these three columns
+    are NOT in JOBS_ALL_COLUMNS, so the job dict passed by the caller does not
+    carry them). Delegates to ``compute_location_fit`` for the rule table.
+
+    Returns a new ``JobAssessment`` (immutability — frozen dataclass) with:
+    - ``sub_scores['location_fit']`` replaced by the deterministic verdict
+    - ``rationale['gaps']`` prepended with a note recording the override
+
+    Returns the original ``assessment`` unchanged when:
+    - the DB row is missing (dedup_key not found)
+    - ``compute_location_fit`` returns ``None`` (LLM judgment wins)
+    - the location_fit score is already the same value (no-op)
+
+    D-6 (facts beat judgment), P3.1.
+    """
+    from job_finder.web.location_canonical import from_json as _locs_from_json
+    from job_finder.web.location_fit import compute_location_fit
+
+    dedup_key = job.get("dedup_key")
+    if not dedup_key:
+        return assessment
+
+    try:
+        row = conn.execute(
+            "SELECT locations_structured, workplace_type, primary_country_code "
+            "FROM jobs WHERE dedup_key = ?",
+            (dedup_key,),
+        ).fetchone()
+    except Exception:
+        logger.warning(
+            "_apply_location_fit_override: DB read failed for dedup_key=%s",
+            dedup_key,
+        )
+        return assessment
+
+    if row is None:
+        return assessment
+
+    try:
+        import dataclasses
+
+        locations_structured = [
+            dataclasses.asdict(loc) if not isinstance(loc, dict) else loc
+            for loc in _locs_from_json(row[0] or "[]")
+        ]
+    except Exception:
+        locations_structured = []
+
+    workplace_type = row[1]
+    primary_country_code = row[2]
+
+    cfg_profile = config.get("profile") or {}
+    target_locations: list[str] = cfg_profile.get("target_locations") or []
+    home_country: str | None = cfg_profile.get("home_country") or None
+
+    verdict = compute_location_fit(
+        locations_structured=locations_structured,
+        workplace_type=workplace_type,
+        primary_country_code=primary_country_code,
+        target_locations=target_locations,
+        home_country=home_country,
+    )
+
+    if verdict is None:
+        # LLM judgment is authoritative — no override.
+        return assessment
+
+    new_score, reason = verdict
+    llm_score = assessment.sub_scores.get("location_fit")
+
+    if llm_score == new_score:
+        # Scores agree — no observable change, avoid a spurious rationale entry.
+        return assessment
+
+    logger.info(
+        "_apply_location_fit_override: dedup_key=%s location_fit %s→%s (%s)",
+        dedup_key,
+        llm_score,
+        new_score,
+        reason,
+    )
+
+    new_sub_scores = {**assessment.sub_scores, "location_fit": new_score}
+
+    # Amend rationale.gaps to surface the override decision (D-6 audit trail).
+    rationale = dict(assessment.rationale)
+    override_note = (
+        f"[location_fit override P3.1] {reason} (LLM: {llm_score} → deterministic: {new_score})"
+    )
+    existing_gaps: list = list(rationale.get("gaps") or [])
+    rationale = {**rationale, "gaps": [override_note, *existing_gaps]}
+
+    return JobAssessment(
+        sub_scores=new_sub_scores,
+        classification=assessment.classification,
+        rationale=rationale,
+        provider=assessment.provider,
+        degenerate=assessment.degenerate,
+    )
+
+
 def score_and_persist_job(
     job: dict,
     conn: sqlite3.Connection,
@@ -205,6 +315,12 @@ def score_and_persist_job(
     assessment = result.data
     provider = result.provider
     model = getattr(result, "model", None)
+
+    # P3.1 — deterministic location_fit override (D-6: facts beat judgment).
+    # Runs post-LLM, pre-persist: no schema change, no prompt change, no eval
+    # gate needed. The override replaces the LLM-emitted location_fit sub-score
+    # when structured location facts decide the outcome unambiguously.
+    assessment = _apply_location_fit_override(assessment, job, conn, config)
 
     classification = persist_job_assessment(
         conn,
