@@ -59,6 +59,15 @@ logger = logging.getLogger(__name__)
 
 onboarding_bp = Blueprint("onboarding", __name__, url_prefix="/onboarding")
 
+# Issue #400: redirect already-completed users out of the wizard. The app-level
+# gate_onboarding whitelists /onboarding/* (so an incomplete user is never
+# trapped); this blueprint-level guard enforces the inverse — a completed user
+# requesting ANY wizard route (welcome..done, GET or POST) is bounced to /jobs.
+# Single point of enforcement at the blueprint boundary makes "completed user
+# inside the wizard" unrepresentable; the done-POST overwrite guard remains as
+# defense in depth.
+onboarding_bp.before_request(state.gate_completed_onboarding)
+
 # T-42-07 / V12: cap resume upload at 10 MB. Enforced by checking Content-Length manually
 # in the resume_upload handler because Flask's MAX_CONTENT_LENGTH is app-level, not
 # blueprint-level, and modifying app-level would break other blueprints' uploads.

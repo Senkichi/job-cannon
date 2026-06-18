@@ -27,6 +27,28 @@ from job_finder.web.providers.detection import DetectionExtras
 
 
 @pytest.fixture(autouse=True)
+def _mid_onboarding(app):
+    """Walk the wizard as an in-progress user (Issue #400).
+
+    The standard `app`/`client` fixtures seed onboarding_complete=1, and the
+    blueprint-level gate_completed_onboarding now redirects a completed user
+    out of every wizard route. These tests exercise wizard rendering/navigation,
+    a state only reachable mid-onboarding, so reset the flag to 0.
+    """
+    conn = sqlite3.connect(app.config["DB_PATH"])
+    try:
+        conn.execute(
+            "INSERT INTO onboarding_state (id, onboarding_complete, wizard_data) "
+            "VALUES (1, 0, '{}') "
+            "ON CONFLICT(id) DO UPDATE SET onboarding_complete = 0"
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _no_live_detection():
     """Prevent real CLI probes during route tests."""
     with (

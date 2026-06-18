@@ -85,8 +85,25 @@ def test_banner_not_render_with_no_cache(client, tmp_path):
     assert b"Update available" not in resp.data
 
 
-def test_banner_not_render_on_onboarding_welcome(client, tmp_path):
+def test_banner_not_render_on_onboarding_welcome(client, app, tmp_path):
     """Test 5: banner does NOT render on /onboarding/welcome (path-prefix suppression)."""
+    # Issue #400: the wizard's welcome route only renders mid-onboarding; a
+    # completed install is redirected to /jobs by gate_completed_onboarding.
+    # Reset the flag so the page renders and the banner-suppression assertion
+    # is actually exercised.
+    import sqlite3
+
+    conn = sqlite3.connect(app.config["DB_PATH"])
+    try:
+        conn.execute(
+            "INSERT INTO onboarding_state (id, onboarding_complete, wizard_data) "
+            "VALUES (1, 0, '{}') "
+            "ON CONFLICT(id) DO UPDATE SET onboarding_complete = 0"
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
     cache = {
         "checked_at": "2026-05-16T12:00:00Z",
         "latest_version": "v5.0.1",
