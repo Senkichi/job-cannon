@@ -346,6 +346,48 @@ def test_done_get_renders_summary_from_wizard_data(configured_app):
     assert "x@y.com" in body
 
 
+@pytest.mark.parametrize(
+    "submitted,expected",
+    [
+        ("heavy", "heavy"),
+        ("light", "light"),
+        ("evil_value", "standard"),  # invalid → sanitized to standard
+        (None, "standard"),  # absent form field → default standard
+    ],
+)
+def test_done_post_persists_inline_cadence_choice(configured_app, submitted, expected):
+    """Issue #442: the cadence is chosen inline on the done/review form, and the
+    POST writes that (sanitized) value to scheduler.cadence_preset — not whatever
+    happened to be stashed in wizard_data."""
+    wizard_payload = {
+        "provider": {"name": "ollama"},
+        "imap": {"email": "x@y.com", "app_password": "xxxx"},
+        "profile_edit": {"target_titles": "Eng", "target_locations": "Remote", "skills": "python"},
+        "resume_profile": {},
+        # Stash a DIFFERENT value to prove the form value wins over wizard_data.
+        "schedule": {"cadence_preset": "standard"},
+    }
+    _seed_wizard_data(configured_app.config["DB_PATH"], wizard_payload)
+    conn = sqlite3.connect(configured_app.config["DB_PATH"])
+    try:
+        conn.execute(
+            "UPDATE onboarding_state SET onboarding_complete=0, wizard_data=? WHERE id=1",
+            (json.dumps(wizard_payload),),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    form = {} if submitted is None else {"cadence_preset": submitted}
+    with patch("job_finder.web.onboarding.blueprint.get_scheduler", return_value=MagicMock()):
+        resp = configured_app.test_client().post("/onboarding/done", data=form)
+    assert resp.status_code == 302
+
+    cfg_path: Path = configured_app._test_cfg_path
+    written = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
+    assert written["scheduler"]["cadence_preset"] == expected
+
+
 def test_done_post_blocked_when_onboarding_already_complete(configured_app):
     """Regression (2026-05-18): POST /onboarding/done must refuse to overwrite config
     when onboarding_complete=1. A re-entry (manual nav back to /welcome, browser

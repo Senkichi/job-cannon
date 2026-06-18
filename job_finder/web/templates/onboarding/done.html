@@ -7,7 +7,6 @@
 <div class="bg-slate-900/60 border border-slate-700 rounded p-4 mb-6 space-y-2 text-sm">
   <div><span class="text-slate-400">Provider:</span> <span class="text-slate-200">{{ summary.provider or '—' }}</span></div>
   <div><span class="text-slate-400">Gmail:</span> <span class="text-slate-200">{{ summary.email or 'skipped' }}</span></div>
-  <div><span class="text-slate-400">Schedule:</span> <span class="text-slate-200">{{ summary.cadence or '—' }}</span></div>
   <div>
     <span class="text-slate-400">Target titles:</span>
     <span class="text-slate-200">{{ (summary.target_titles or '—').split('\n') | map('trim') | select | join(', ') }}</span>
@@ -54,6 +53,21 @@
 </div>
 
 <form method="post" action="{{ url_for('onboarding.done') }}">
+  <div class="mb-6 space-y-2">
+    <p class="text-sm text-slate-400">How often should we check for new jobs? You can change this anytime in Settings.</p>
+    <label class="flex items-start gap-3 p-3 rounded border border-slate-700 hover:border-indigo-500 cursor-pointer">
+      <input type="radio" name="cadence_preset" value="light" class="mt-1"{% if cadence_preset == 'light' %} checked{% endif %}>
+      <div><div class="text-slate-200 font-medium">Light</div><div class="text-slate-400 text-xs">Once a day at 8 AM</div></div>
+    </label>
+    <label class="flex items-start gap-3 p-3 rounded border border-slate-700 hover:border-indigo-500 cursor-pointer">
+      <input type="radio" name="cadence_preset" value="standard" class="mt-1"{% if cadence_preset == 'standard' %} checked{% endif %}>
+      <div><div class="text-slate-200 font-medium">Standard (recommended)</div><div class="text-slate-400 text-xs">Three times a day at midnight, 8 AM, 4 PM</div></div>
+    </label>
+    <label class="flex items-start gap-3 p-3 rounded border border-slate-700 hover:border-indigo-500 cursor-pointer">
+      <input type="radio" name="cadence_preset" value="heavy" class="mt-1"{% if cadence_preset == 'heavy' %} checked{% endif %}>
+      <div><div class="text-slate-200 font-medium">Heavy</div><div class="text-slate-400 text-xs">Every 4 hours starting at midnight</div></div>
+    </label>
+  </div>
   <button type="submit" class="bg-green-600 hover:bg-green-500 text-white px-6 py-2 rounded font-medium">Finish</button>
 </form>
 {% endblock %}

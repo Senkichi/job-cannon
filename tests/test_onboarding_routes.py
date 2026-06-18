@@ -1,11 +1,14 @@
 """Integration tests for the onboarding blueprint routes (STRANGE-WIZ-02 + STRANGE-WIZ-05).
 
-Parametrized GET smoke covers all 8 routes (success criterion 2 — each renders with a
-unique marker string). Targeted tests cover resume upload security (T-42-03/T-42-07),
-IMAP failure re-render (D-08), and wizard_data write semantics (D-13).
+Parametrized GET smoke covers the 6 wizard-chain routes (success criterion 2 — each
+renders with a unique marker string). The Settings-only /schedule route (folded out of
+the chain in Issue #442) is covered separately. Targeted tests cover resume upload
+security (T-42-03/T-42-07), IMAP failure re-render (D-08), and wizard_data write
+semantics (D-13).
 """
 
 import io
+import re
 import sqlite3
 from unittest.mock import patch
 
@@ -63,15 +66,16 @@ def _no_live_provider_detection():
         yield
 
 
-# The 7 routes + their marker strings (success criterion 2). Issue #441 merged
-# provider_credentials into provider_select, so it no longer has its own route.
+# The 6 wizard-chain routes + their marker strings (success criterion 2). Issue
+# #441 merged provider_credentials into provider_select; Issue #442 folded
+# schedule out of the chain (it's now a Settings-only route covered by
+# test_schedule_route_is_navigable_without_step_indicator below).
 _ROUTE_TO_MARKER = [
     ("/onboarding/welcome", "WIZARD_STEP_WELCOME_MARKER"),
     ("/onboarding/provider_select", "WIZARD_STEP_PROVIDER_SELECT_MARKER"),
     ("/onboarding/resume_upload", "WIZARD_STEP_RESUME_UPLOAD_MARKER"),
     ("/onboarding/profile_edit", "WIZARD_STEP_PROFILE_EDIT_MARKER"),
     ("/onboarding/imap_credentials", "WIZARD_STEP_IMAP_CREDENTIALS_MARKER"),
-    ("/onboarding/schedule", "WIZARD_STEP_SCHEDULE_MARKER"),
     ("/onboarding/done", "WIZARD_STEP_DONE_MARKER"),
 ]
 
@@ -103,22 +107,31 @@ def test_welcome_renders_system_check_results(client):
 def test_step_indicator_renders(client):
     """Step indicator passes step_num and step_label to _base.html.
 
-    Issue #441 collapsed provider_credentials into provider_select, so the
-    denominator dropped from 8 to 7 and schedule/done renumbered to 6/7.
+    Issue #441 collapsed provider_credentials into provider_select (8→7); Issue
+    #442 folded schedule out of the wizard chain (7→6), so done is now the final
+    step 6 of 6 and the schedule screen carries no indicator at all.
     """
     resp = client.get("/onboarding/welcome")
     body = resp.get_data(as_text=True)
-    assert "Step 1 of 7" in body
+    assert "Step 1 of 6" in body
     assert "Welcome" in body
-
-    resp = client.get("/onboarding/schedule")
-    body = resp.get_data(as_text=True)
-    assert "Step 6 of 7" in body
-    assert "Schedule" in body
 
     resp = client.get("/onboarding/done")
     body = resp.get_data(as_text=True)
-    assert "Step 7 of 7" in body
+    assert "Step 6 of 6" in body
+
+
+def test_schedule_route_is_navigable_without_step_indicator(client):
+    """Issue #442: /schedule stays reachable (Settings-only) but is no longer a
+    wizard step — it returns 200 with its marker and NO 'Step N of' indicator."""
+    resp = client.get("/onboarding/schedule")
+    assert resp.status_code == 200
+    body = resp.get_data(as_text=True)
+    assert "WIZARD_STEP_SCHEDULE_MARKER" in body
+    # The rendered indicator (`Step N of M`) is omitted when no step context is
+    # passed (see onboarding/_base.html). A static HTML comment "Step indicator"
+    # always remains, so match the live "Step <n> of <m>" text specifically.
+    assert re.search(r"Step \d+ of \d+", body) is None
 
 
 def test_welcome_post_redirects_to_provider_select(client):
@@ -390,8 +403,9 @@ def test_imap_credentials_post_failure_rerenders_with_error(client, monkeypatch)
     assert "user@gmail.com" in body  # preserved
 
 
-def test_imap_credentials_post_success_redirects_to_schedule(client, monkeypatch, app):
-    """POST /onboarding/imap_credentials with valid creds → 302 to /onboarding/schedule + wizard_data persisted."""
+def test_imap_credentials_post_success_redirects_to_done(client, monkeypatch, app):
+    """Issue #442: POST /onboarding/imap_credentials with valid creds → 302 to
+    /onboarding/done (the schedule step was folded out of the chain) + wizard_data persisted."""
     from job_finder.web.onboarding.imap_test import ImapTestResult
 
     monkeypatch.setattr(
@@ -404,7 +418,7 @@ def test_imap_credentials_post_success_redirects_to_schedule(client, monkeypatch
         data={"email": "user@gmail.com", "app_password": "good pass word here"},
     )
     assert resp.status_code == 302
-    assert "/onboarding/schedule" in resp.headers["Location"]
+    assert "/onboarding/done" in resp.headers["Location"]
 
     import json
 
@@ -427,13 +441,15 @@ def test_imap_skip_button_bypasses_required_field_validation(client):
 
 
 def test_imap_skip_persists_credentials_unverified(client, app):
-    """D-08: skip-for-now saves creds but marks verified=False."""
+    """D-08: skip-for-now saves creds but marks verified=False.
+
+    Issue #442: skip now advances to /onboarding/done (schedule folded out)."""
     resp = client.post(
         "/onboarding/imap_credentials",
         data={"email": "user@gmail.com", "app_password": "xxxx", "skip": "1"},
     )
     assert resp.status_code == 302
-    assert "/onboarding/schedule" in resp.headers["Location"]
+    assert "/onboarding/done" in resp.headers["Location"]
 
     import json
 
@@ -568,6 +584,40 @@ def test_done_get_renders_summary(client, app):
     assert "ollama" in body
     assert "x@y.com" in body
     assert "light" in body
+
+
+def test_done_get_renders_editable_cadence_defaulting_to_standard(client):
+    """Issue #442: with no prior schedule choice, the done review screen renders
+    an inline editable cadence control with `standard` pre-selected."""
+    resp = client.get("/onboarding/done")
+    assert resp.status_code == 200
+    body = resp.get_data(as_text=True)
+    # The editable control is a radio group named cadence_preset, inside the form.
+    assert 'name="cadence_preset"' in body
+    # standard is the checked default; light/heavy are not.
+    assert 'value="standard" class="mt-1" checked' in body
+    assert 'value="light" class="mt-1" checked' not in body
+    assert 'value="heavy" class="mt-1" checked' not in body
+
+
+def test_done_get_preselects_prior_cadence_choice(client, app):
+    """Issue #442: a cadence already stashed in wizard_data (e.g. the user visited
+    the Settings-only schedule route) is pre-selected on the done review screen."""
+    conn = sqlite3.connect(app.config["DB_PATH"])
+    try:
+        conn.execute(
+            'UPDATE onboarding_state SET wizard_data=\'{"schedule":{"cadence_preset":"heavy"}}\' '
+            "WHERE id=1"
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    resp = client.get("/onboarding/done")
+    assert resp.status_code == 200
+    body = resp.get_data(as_text=True)
+    assert 'value="heavy" class="mt-1" checked' in body
+    assert 'value="standard" class="mt-1" checked' not in body
 
 
 def test_done_page_includes_alert_setup_sections(client):
