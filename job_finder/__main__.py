@@ -115,6 +115,41 @@ def _build_parser() -> argparse.ArgumentParser:
         "No config.yaml, no API keys, no background jobs. Your real data is untouched. "
         "Runs alongside a real instance (picks the next free port automatically).",
     )
+
+    # Subcommands. The parser stays backward-compatible: with NO subcommand
+    # (``args.command is None``) the bare ``job-cannon`` invocation launches the
+    # server exactly as before. Only an explicit subcommand diverges.
+    subparsers = parser.add_subparsers(dest="command")
+    healthcheck = subparsers.add_parser(
+        "healthcheck",
+        help="Print a machine-readable health verdict (JSON) and exit 0/1/2 "
+        "(ok/degraded/down). For OS-scheduler liveness probes.",
+        description="Out-of-process health verdict. Reads the on-disk liveness "
+        "marker and the database directly — it does NOT start the app, a "
+        "scheduler, or acquire the pidfile lock.",
+    )
+    healthcheck.add_argument(
+        "--json",
+        action="store_true",
+        default=True,
+        help="Emit the verdict as JSON on stdout (default, and the only format).",
+    )
+    healthcheck.add_argument(
+        "--heartbeat-max-age-hours",
+        type=float,
+        default=26.0,
+        metavar="HOURS",
+        help="Age beyond which the daily health heartbeat is treated as stale "
+        "(degrades the verdict). Default: 26 (matches the in-process check).",
+    )
+    healthcheck.add_argument(
+        "--user-data-dir",
+        type=str,
+        default=None,
+        metavar="PATH",
+        help="Override the user-data directory (else JOB_CANNON_USER_DATA_DIR "
+        "or the platformdirs default).",
+    )
     return parser
 
 
@@ -572,6 +607,15 @@ def main() -> None:
     # load_config() if those flags are passed. This is what makes
     # `pipx install job-cannon && job-cannon --help` work without config.yaml.
     args = _build_parser().parse_args()
+
+    # SHORT-CIRCUIT: `healthcheck` is an out-of-process probe — it must NOT build
+    # the Flask app, start a scheduler, or acquire the pidfile lock. Route it
+    # here, before any of that machinery (mirrors --print-example-config). It
+    # reads the on-disk liveness marker + DB directly and exits 0/1/2.
+    if getattr(args, "command", None) == "healthcheck":
+        from job_finder.web.healthcheck import run_healthcheck
+
+        sys.exit(run_healthcheck(args))
 
     # SHORT-CIRCUIT: --print-example-config also needs no config or Flask.
     if args.print_example_config:
