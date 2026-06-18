@@ -89,10 +89,32 @@ JD_STORAGE_MAX_CHARS = 50_000
 DEFAULT_PROFILE_PATH = "experience_profile.json"
 
 # --- Company denylist (single source of truth) ---
-# Placeholder company names that should not produce company records
-# and should be excluded from scoring.
-COMPANY_DENYLIST: frozenset[str] = frozenset(
+# Company names that should not produce company records and should be excluded
+# from scoring. Two classes live here:
+#   1. Placeholder / scam names that are never a real employer.
+#   2. Aggregators / re-posters that re-list OTHER employers' jobs under their
+#      own brand (#213). Their postings legitimately score apply/consider — the
+#      underlying job is real — but the row is mis-attributed to the aggregator
+#      and routes the user to a paywalled re-listing instead of the employer's
+#      own ATS. Demote them before scoring spend.
+#
+# IMPORTANT: entries here MUST be in NORMALIZED form (i.e. the output of
+# job_finder.normalizers.normalize_company), because get_company_denylist()
+# re-normalizes both this set and config entries, and the matching sites
+# (should_exclude, cleanup_denylist_companies) compare against normalize_company
+# of the stored brand. Normalization strips legal-entity suffixes, so write the
+# bare name ("virtual vocations", not "virtual vocations inc") — the suffixed
+# variant the SERP sources actually store will normalize down to it.
+#
+# This is a conservative seed of unambiguous aggregators/re-posters. It is
+# EXTENSIBLE per-user via config.yaml `filters.company_denylist` (taste-dependent
+# staffing mills belong there, not here). Note SynergisticIT appears in the wild
+# both spaced and unspaced ("SynergisticIT" -> "synergisticit",
+# "Synergistic it" -> "synergistic it"); normalize_company does not collapse the
+# space, so both variants are listed.
+_RAW_COMPANY_DENYLIST: frozenset[str] = frozenset(
     {
+        # Placeholder / scam names
         "unknown",
         "medical jobs",
         "clinical jobs",
@@ -100,8 +122,27 @@ COMPANY_DENYLIST: frozenset[str] = frozenset(
         "jobgether",
         "mercor",
         "crossing hurdles",
+        # Aggregators / re-posters (#213)
+        "virtual vocations",
+        "prosidian consulting",
+        "synergisticit",
+        "synergistic it",
     }
 )
+
+
+def _normalize_denylist(entries) -> frozenset[str]:
+    """Normalize denylist entries via normalize_company for suffix-variant parity.
+
+    Imported lazily to avoid a config<->normalizers import cycle at module load.
+    """
+    from job_finder.normalizers import normalize_company
+
+    return frozenset(normalize_company(e) for e in entries if e and normalize_company(e))
+
+
+# Normalized form used by all matching sites. Built once at import.
+COMPANY_DENYLIST: frozenset[str] = _normalize_denylist(_RAW_COMPANY_DENYLIST)
 
 
 def get_company_allowlist(config: dict) -> frozenset[str]:
@@ -126,14 +167,21 @@ def get_company_denylist(config: dict) -> frozenset[str]:
 
     Config entries are additive — the hardcoded defaults are always included.
 
+    Both the hardcoded seed and config entries are normalized via
+    normalize_company so the returned set matches the same canonical form the
+    matching sites (should_exclude) compute from the stored brand. This closes
+    the #213 legal-entity-suffix gap: a config or seed entry of
+    "Virtual Vocations" now matches stored rows of "Virtual Vocations Inc"
+    (both normalize to "virtual vocations").
+
     Args:
         config: Full config dict (may contain filters.company_denylist list).
 
     Returns:
-        frozenset of lowercased, stripped company name strings to exclude.
+        frozenset of normalized (normalize_company) company name strings to exclude.
     """
     config_entries = config.get("filters", {}).get("company_denylist", [])
-    extra = frozenset(e.lower().strip() for e in config_entries if e)
+    extra = _normalize_denylist(config_entries)
     return COMPANY_DENYLIST | extra
 
 

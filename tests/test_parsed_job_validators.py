@@ -227,26 +227,45 @@ class TestI10CompanyDenylist:
         assert isinstance(result, ParsedJob)
 
     def test_from_job_denylisted_company_raises(self):
-        """A company in the denylist raises DenylistedCompanyError."""
+        """A company in the denylist raises DenylistedCompanyError.
+
+        get_company_denylist returns NORMALIZED entries (normalize_company),
+        and from_job compares normalize_company(company) against them (#213).
+        normalize_company('Fake Company LLC') strips 'Company' and 'LLC' as
+        legal-entity tokens, yielding 'fake'.
+        """
         job = _make_job(company="Fake Company LLC")
         with (
             patch("job_finder.parsed_job.load_config", return_value={}),
             patch(
                 "job_finder.parsed_job.get_company_denylist",
-                return_value=frozenset({"fake company llc"}),
+                return_value=frozenset({"fake"}),
             ),
         ):
             with pytest.raises(DenylistedCompanyError):
                 ParsedJob.from_job(job)
 
     def test_from_job_denylist_check_is_case_insensitive(self):
-        """Denylist comparison is case-insensitive (company lowercased)."""
+        """Denylist comparison is case-insensitive (normalize_company lowercases)."""
         job = _make_job(company="FAKE COMPANY LLC")
         with (
             patch("job_finder.parsed_job.load_config", return_value={}),
             patch(
                 "job_finder.parsed_job.get_company_denylist",
-                return_value=frozenset({"fake company llc"}),
+                return_value=frozenset({"fake"}),
+            ),
+        ):
+            with pytest.raises(DenylistedCompanyError):
+                ParsedJob.from_job(job)
+
+    def test_from_job_denylist_matches_suffix_variant(self):
+        """#213: a suffix-free denylist entry rejects a company stored WITH a suffix."""
+        job = _make_job(company="Fake Company Inc")
+        with (
+            patch("job_finder.parsed_job.load_config", return_value={}),
+            patch(
+                "job_finder.parsed_job.get_company_denylist",
+                return_value=frozenset({"fake"}),
             ),
         ):
             with pytest.raises(DenylistedCompanyError):

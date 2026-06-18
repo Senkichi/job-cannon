@@ -8,8 +8,19 @@ and a configurable salary floor.
 import logging
 
 from job_finder.config import COMPANY_DENYLIST, get_company_denylist
+from job_finder.normalizers import normalize_company
 
 logger = logging.getLogger(__name__)
+
+
+def _normalize_company_sql(company: str | None) -> str:
+    """NULL-safe normalize_company wrapper for use as a SQLite UDF.
+
+    SQLite passes None for NULL company columns; normalize_company expects a str.
+    """
+    if not company:
+        return ""
+    return normalize_company(company)
 
 
 def should_exclude(
@@ -43,7 +54,10 @@ def should_exclude(
     salary_max = job_row.get("salary_max")
 
     title_lower = title.lower()
-    company_normalized = company.lower().strip()
+    # Normalize the stored brand the same way the denylist is normalized, so
+    # legal-entity-suffix variants match (#213): "Virtual Vocations Inc" and a
+    # denylist entry of "Virtual Vocations" both reduce to "virtual vocations".
+    company_normalized = normalize_company(company)
 
     # 1. Title keyword exclusions (case-insensitive substring match)
     for keyword in exclusions.get("title_keywords", []):
@@ -52,12 +66,14 @@ def should_exclude(
         if keyword.lower() in title_lower:
             return True, f"Title contains excluded keyword: '{keyword}'"
 
-    # 2. Company exclusions (config + denylist, case-insensitive, whitespace-trimmed)
-    excluded_companies = [c.lower().strip() for c in exclusions.get("companies", []) if c]
-    # Merge in the denylist (hardcoded defaults + optional config entries)
+    # 2. Company exclusions (config + denylist), compared on normalize_company so
+    #    suffix variants ("Acme, Inc." == "Acme") and aggregator re-posters fire.
+    #    User-supplied exclusions.companies are normalized to the same form.
+    excluded_companies = {normalize_company(c) for c in exclusions.get("companies", []) if c}
+    # Merge in the denylist (hardcoded defaults + optional config entries, already normalized)
     denylist = get_company_denylist(config) if config else COMPANY_DENYLIST
-    excluded_companies_set = set(excluded_companies) | denylist
-    if company_normalized in excluded_companies_set:
+    excluded_companies_set = excluded_companies | denylist
+    if company_normalized and company_normalized in excluded_companies_set:
         return True, f"Excluded company: '{company.strip()}'"
 
     # 3. Salary floor check (only when min_salary provided and salary_max disclosed)
@@ -92,10 +108,28 @@ def count_scorable(conn, config: dict) -> int:
     Replicates the three exclusion checks from should_exclude() in SQL so the
     count matches what the batch scorer will actually attempt to score:
     1. Title keyword exclusions (case-insensitive substring)
-    2. Company denylist + config exclusions (case-insensitive, trimmed)
+    2. Company denylist + config exclusions (matched on normalize_company)
     3. Salary floor (salary_max < min_salary * 0.85)
+
+    The company check registers normalize_company as a SQLite UDF so the SQL
+    predicate uses the exact same canonical form as should_exclude (#213).
+    Without this, a denylist of normalized bare names ("virtual vocations")
+    would miss the suffixed brands the SERP sources actually store
+    ("Virtual Vocations Inc"), and the dashboard "N unscored" tile would drift
+    from what the scorer dismisses.
     """
     try:
+        # Register normalize_company as a UDF for normalized-brand comparison.
+        # deterministic=True lets SQLite cache/optimize; harmless if the binding
+        # already exists (re-registration is idempotent).
+        try:
+            conn.create_function(
+                "normalize_company", 1, _normalize_company_sql, deterministic=True
+            )
+        except TypeError:
+            # Older SQLite builds without the deterministic kwarg.
+            conn.create_function("normalize_company", 1, _normalize_company_sql)
+
         conditions = [
             "classification IS NULL",
             "jd_full IS NOT NULL",
@@ -111,11 +145,12 @@ def count_scorable(conn, config: dict) -> int:
                 conditions.append("LOWER(title) NOT LIKE ?")
                 params.append(f"%{keyword.lower()}%")
 
-        excluded_companies = {c.lower().strip() for c in exclusions.get("companies", []) if c}
+        excluded_companies = {normalize_company(c) for c in exclusions.get("companies", []) if c}
         excluded_companies |= get_company_denylist(config)
+        excluded_companies.discard("")
         if excluded_companies:
             placeholders = ",".join("?" * len(excluded_companies))
-            conditions.append(f"LOWER(TRIM(company)) NOT IN ({placeholders})")
+            conditions.append(f"normalize_company(company) NOT IN ({placeholders})")
             params.extend(sorted(excluded_companies))
 
         min_salary = config.get("profile", {}).get("min_salary")

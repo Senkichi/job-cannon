@@ -348,10 +348,15 @@ class ParsedJob:
             if "title_cross_field_bleed" not in unresolved_reasons:
                 unresolved_reasons.append("title_cross_field_bleed")
 
-        # I-10: company denylist — raises DenylistedCompanyError
+        # I-10: company denylist — raises DenylistedCompanyError.
+        # Match on normalize_company (not raw .lower().strip()) so legal-entity
+        # suffix variants and aggregator re-posters fire (#213): a denylist
+        # entry of "Virtual Vocations" rejects a stored brand of
+        # "Virtual Vocations Inc" — both normalize to "virtual vocations".
+        # get_company_denylist returns already-normalized entries.
         config = load_config()
         denylist = get_company_denylist(config)
-        if job.company.lower().strip() in denylist:
+        if normalize_company(job.company) in denylist:
             raise DenylistedCompanyError(f"Company {job.company!r} is in the configured denylist")
 
         # I-07: location shape — raises LocationShapeError

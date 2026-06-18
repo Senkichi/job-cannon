@@ -202,6 +202,96 @@ class TestExclusionFilter:
         )
         assert excluded is True
 
+    # --- #213: aggregator/re-poster seeds + legal-entity-suffix parity ---
+
+    @pytest.mark.parametrize(
+        "company",
+        [
+            "Virtual Vocations",
+            "Virtual Vocations Inc",  # the suffixed form 102/103 rows actually store
+            "VIRTUAL VOCATIONS INC.",
+            "ProSidian Consulting, LLC",
+            "SynergisticIT",
+            "Synergistic it",
+        ],
+    )
+    def test_seeded_aggregator_excluded(self, company):
+        """#213: seeded aggregators/re-posters are excluded regardless of legal-entity
+        suffix or case — the bug was the exact-lowercase compare missing 'Inc' variants."""
+        job = {"title": "Senior Data Scientist", "company": company, "salary_max": None}
+        excluded, reason = should_exclude(job, {"title_keywords": [], "companies": []})
+        assert excluded is True
+        assert "Excluded company" in reason
+
+    def test_suffix_variant_config_entry_matches_stored_suffix(self):
+        """A config denylist entry without a suffix matches a stored brand WITH one.
+
+        This is the load-bearing #213 fix: previously 'virtual vocations' in the
+        denylist would NOT fire on a stored 'Virtual Vocations Inc' row.
+        """
+        config = {"filters": {"company_denylist": ["Globex"]}}
+        job = {"title": "Data Scientist", "company": "Globex, Inc.", "salary_max": None}
+        excluded, reason = should_exclude(
+            job, {"title_keywords": [], "companies": []}, config=config
+        )
+        assert excluded is True
+
+    def test_user_exclusion_company_suffix_variant_matches(self):
+        """exclusions.companies is also normalized: 'Initech' excludes 'Initech LLC'."""
+        job = {"title": "Data Scientist", "company": "Initech LLC", "salary_max": None}
+        excluded, reason = should_exclude(job, {"title_keywords": [], "companies": ["Initech"]})
+        assert excluded is True
+
+    def test_legit_company_sharing_a_token_not_excluded(self):
+        """A real employer that merely shares a word with a seed is NOT excluded."""
+        job = {"title": "Data Scientist", "company": "Vocations Academy", "salary_max": None}
+        excluded, reason = should_exclude(job, {"title_keywords": [], "companies": []})
+        assert excluded is False
+        assert reason == ""
+
+    def test_empty_company_not_excluded_by_normalization(self):
+        """A blank/whitespace company must not match an empty normalized denylist entry."""
+        job = {"title": "Data Scientist", "company": "   ", "salary_max": None}
+        excluded, reason = should_exclude(job, {"title_keywords": [], "companies": []})
+        assert excluded is False
+
+
+class TestDenylistConfigRoundTrip:
+    """get_company_denylist normalizes both the seed and config entries (#213)."""
+
+    def test_seed_contains_normalized_aggregators(self):
+        from job_finder.config import COMPANY_DENYLIST
+
+        for name in (
+            "virtual vocations",
+            "prosidian consulting",
+            "synergisticit",
+            "synergistic it",
+        ):
+            assert name in COMPANY_DENYLIST
+
+    def test_seed_entries_are_normalized_form(self):
+        """Every seed entry equals its own normalize_company output (no raw suffixes)."""
+        from job_finder.config import COMPANY_DENYLIST
+        from job_finder.normalizers import normalize_company
+
+        for entry in COMPANY_DENYLIST:
+            assert entry == normalize_company(entry), f"{entry!r} is not in normalized form"
+
+    def test_config_entry_normalized_on_merge(self):
+        from job_finder.config import get_company_denylist
+
+        merged = get_company_denylist({"filters": {"company_denylist": ["Umbrella Corp."]}})
+        assert "umbrella" in merged  # 'Corp.' suffix stripped + lowercased
+        assert "umbrella corp." not in merged
+
+    def test_config_is_additive_to_seed(self):
+        from job_finder.config import COMPANY_DENYLIST, get_company_denylist
+
+        merged = get_company_denylist({"filters": {"company_denylist": ["Custom Spam"]}})
+        assert merged >= COMPANY_DENYLIST
+        assert "custom spam" in merged
+
 
 class TestCountScorable:
     """Tests for count_scorable() — must match what the unified scorer can process.
