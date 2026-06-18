@@ -723,7 +723,11 @@ def _score_new_ats_jobs(
                 scored_count += 1
                 if getattr(result, "status", None) != "ok" or result.data is None:
                     continue
-                cls = derive_classification(result.data.sub_scores, job_row.get("legitimacy_note"))
+                cls = derive_classification(
+                    result.data.sub_scores,
+                    job_row.get("legitimacy_note"),
+                    degenerate=getattr(result.data, "degenerate", False),
+                )
                 key = f"classified_{cls}"
                 summary[key] = summary.get(key, 0) + 1
             except Exception as job_err:

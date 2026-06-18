@@ -62,12 +62,18 @@ class JobAssessment:
           resume_priority_skills (each a list[str]); serialized to the reused
           fit_analysis column per D-08.
       provider: cascade-attribution string (e.g., "ollama", "anthropic") or None.
+      degenerate: issue #227 quality-floor flag. True only when EVERY provider
+          in the cascade returned a no-signal (uniform axes + empty rationale)
+          assessment, so the dispatcher accepted one flagged rather than
+          raising. derive_classification routes a degenerate assessment to
+          "low_signal" instead of fabricating an apply/consider verdict.
     """
 
     sub_scores: dict
     classification: str
     rationale: dict
     provider: str | None = None
+    degenerate: bool = False
 
 
 def derive_classification(
@@ -78,17 +84,29 @@ def derive_classification(
     low_signal_threshold: int = 1500,
     apply_mean_floor: float = DEFAULT_APPLY_MEAN_FLOOR,
     apply_min_strong_axes: int = DEFAULT_APPLY_MIN_STRONG_AXES,
+    *,
+    degenerate: bool = False,
 ) -> str:
     """Python-derived 5-way classification — NOT LLM-emitted (CONTEXT D-06, anti-pattern 3).
 
     Rule precedence (per spec D-2.5; positive-evidence rule per issue #210):
       1. legitimacy_note truthy            -> "reject"
-      2. enrichment exhausted + short jd   -> "low_signal"
-      3. flat-neutral vector (all == 3)    -> "low_signal"
-      4. any sub-score == 1                -> "reject"
-      5. positive evidence                 -> "apply"
-      6. all sub-scores >= 2               -> "consider"
-      7. otherwise                         -> "skip"
+      2. degenerate (issue #227)           -> "low_signal"
+      3. enrichment exhausted + short jd   -> "low_signal"
+      4. flat-neutral vector (all == 3)    -> "low_signal"
+      5. any sub-score == 1                -> "reject"
+      6. positive evidence                 -> "apply"
+      7. all sub-scores >= 2               -> "consider"
+      8. otherwise                         -> "skip"
+
+    The ``degenerate`` branch (issue #227) handles the all-providers-degenerate
+    case: when every provider in the cascade returned a uniform no-signal axis
+    vector, the dispatcher accepts one flagged ``degenerate=True``. Such a
+    vector carries no real signal, so it must NOT be allowed to classify as
+    ``apply`` (uniform 5s) or ``consider``. It sits AFTER the legitimacy reject
+    (a flagged scam is still a reject) and is independent of the
+    enrichment/jd-length low_signal rule — a degenerate score is no-signal even
+    with a long JD. Composes with the upstream quality floor as belt-and-braces.
 
     The low_signal branch surfaces genuinely-no-signal jobs (enrichment cascade
     exhausted AND jd_full below threshold) honestly instead of rolling them
@@ -139,12 +157,17 @@ def derive_classification(
         apply_min_strong_axes: minimum count of strong axes (>= 4) for an
             "apply" verdict. Configurable via scoring.apply_min_strong_axes
             (default 3).
+        degenerate: issue #227 flag from JobAssessment.degenerate. True only
+            when the cascade quality floor accepted an all-providers-degenerate
+            result. Routes to low_signal (no-signal vector, never apply).
 
     Returns:
         One of "reject", "low_signal", "apply", "consider", "skip".
     """
     if legitimacy_note:
         return "reject"
+    if degenerate:
+        return "low_signal"
     if enrichment_tier in _TERMINAL_ENRICHMENT_TIERS and jd_full_length < low_signal_threshold:
         return "low_signal"
 

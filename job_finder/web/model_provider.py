@@ -180,7 +180,16 @@ def _ensure_usage_current(conn: sqlite3.Connection) -> None:
 
 @dataclass(frozen=True, slots=True)
 class ModelResult:
-    """Result from a provider adapter call."""
+    """Result from a provider adapter call.
+
+    ``degenerate`` (issue #227): True when a *scoring* result passed schema
+    validation but carries no real signal — a uniform six-axis vector with
+    every rationale array empty. The cascade rejects such results and advances
+    to the next provider; only when EVERY provider returns degenerate is one
+    accepted with this flag set, so downstream ``derive_classification`` can
+    route it to ``low_signal`` instead of fabricating an ``apply`` verdict.
+    Defaults False for all non-scoring tiers and for genuine results.
+    """
 
     data: dict
     cost_usd: float
@@ -189,6 +198,7 @@ class ModelResult:
     model: str
     provider: str
     schema_valid: bool
+    degenerate: bool = False
 
 
 class BaseProvider(ABC):
@@ -467,6 +477,79 @@ def _sanitized_result(result: ModelResult, schema: dict | None, provider_name: s
     return replace(result, data=sanitized)
 
 
+# Issue #227 quality floor: the six ordinal axis keys that define a scoring
+# result. The degenerate predicate only fires when ALL six are present (i.e.
+# this is a scoring-tier result, not a quick/triage/extraction payload).
+_SCORING_AXIS_KEYS: frozenset[str] = frozenset(
+    {
+        "title_fit",
+        "location_fit",
+        "comp_fit",
+        "domain_match",
+        "seniority_match",
+        "skills_match",
+    }
+)
+
+# The four rationale arrays a genuine scoring result populates. A degenerate
+# result leaves every one of them empty (post-_sanitize_output backfill).
+_RATIONALE_ARRAY_KEYS: tuple[str, ...] = (
+    "strengths",
+    "gaps",
+    "talking_points",
+    "resume_priority_skills",
+)
+
+
+def _axis_score(raw: object) -> int | None:
+    """Extract the integer axis value, unwrapping variant {'score': N} shape."""
+    if isinstance(raw, dict) and "score" in raw:
+        raw = raw["score"]
+    try:
+        return int(raw)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+
+
+def is_degenerate_assessment(data: dict | None) -> bool:
+    """True when a scoring result is no-signal: uniform axes + empty rationale.
+
+    Issue #227 quality floor. A "degenerate" assessment is one that passed
+    schema validation yet carries no discriminating signal:
+
+      - all six ordinal axes are present AND identical (uniform vector — all 3s
+        is the classic no-signal shape, but uniform 5s / 4s with no supporting
+        rationale is equally meaningless), AND
+      - all four rationale arrays are empty.
+
+    BOTH conditions are required. A uniform vector *with* a populated rationale
+    is a legitimate (if rare) judgment and is accepted; a varied vector with an
+    empty rationale is also accepted (the model gave real ordinal signal). Only
+    the joint no-signal shape is rejected.
+
+    Returns False for any non-scoring payload (missing axis keys) so the gate
+    never fires on quick/triage/extraction results.
+    """
+    if not isinstance(data, dict):
+        return False
+    if not _SCORING_AXIS_KEYS.issubset(data.keys()):
+        return False
+
+    axis_values = [_axis_score(data.get(k)) for k in _SCORING_AXIS_KEYS]
+    if any(v is None for v in axis_values):
+        # Uncoercible axis — not our concern here; schema validation / the
+        # fail-closed coercion in job_scorer handle malformed vectors.
+        return False
+    if len(set(axis_values)) != 1:
+        return False  # axes vary → real signal
+
+    rationale = data.get("rationale")
+    if not isinstance(rationale, dict):
+        # No rationale object at all alongside a uniform vector → no signal.
+        return True
+    return all(not rationale.get(k) for k in _RATIONALE_ARRAY_KEYS)
+
+
 def _augment_with_errors(messages: list[dict], errors: list[str]) -> list[dict]:
     """Return a NEW messages list with schema errors appended to the last message.
 
@@ -720,6 +803,18 @@ def call_model(
     # Track last-call time per provider for inter-request throttling
     _last_call: dict[str, float] = {}
 
+    # Issue #227 quality floor: a schema-valid but degenerate (no-signal)
+    # scoring result is rejected so the cascade tries the next provider. We
+    # retain the LAST such result here as a last-resort fallback: if EVERY
+    # provider returns degenerate, we accept it flagged (degenerate=True) so
+    # derive_classification routes it to low_signal rather than fabricating an
+    # apply verdict. Cheaper than failing the whole score, and honest.
+    degenerate_fallback: ModelResult | None = None
+    # Per-provider degenerate-rejection counter for this call (logged at the
+    # end). Makes a model regression that starts emitting no-signal vectors
+    # visible in logs rather than silently absorbed.
+    _degenerate_rejections: dict[str, int] = {}
+
     for entry in chain:
         entry_provider = entry["provider"]
         entry_model = entry["model"]
@@ -795,6 +890,25 @@ def call_model(
                     result = _sanitized_result(result, output_schema, entry_provider)
                     errors = _validate_schema(result.data, output_schema)
                 if not errors:
+                    # Issue #227 quality floor: schema-valid but degenerate
+                    # (uniform axes + empty rationale) scoring output is treated
+                    # exactly like a schema failure — advance the cascade. We
+                    # stash it so an all-degenerate cascade can still return a
+                    # flagged result instead of raising.
+                    if is_degenerate_assessment(result.data):
+                        _degenerate_rejections[entry_provider] = (
+                            _degenerate_rejections.get(entry_provider, 0) + 1
+                        )
+                        logger.warning(
+                            "Cascade: %s returned degenerate (no-signal) assessment "
+                            "for tier=%s purpose=%s job_id=%s — rejecting, advancing cascade",
+                            entry_provider,
+                            tier,
+                            purpose,
+                            job_id,
+                        )
+                        degenerate_fallback = replace(result, degenerate=True)
+                        break  # advance to next provider, like schema-invalid
                     _increment_usage(entry_provider)
                     try:
                         _maybe_record_cost(result, conn, job_id, purpose)
@@ -847,6 +961,33 @@ def call_model(
             except Exception as exc:
                 logger.warning("Cascade: %s error: %s", entry_provider, exc)
                 break  # Unknown errors — don't retry
+
+    # Issue #227: no provider returned a genuine result. If at least one
+    # returned a schema-valid-but-degenerate assessment, accept the last one
+    # flagged rather than raising — a no-signal score routed to low_signal is
+    # more useful than a hard scoring failure, and free providers sit in the
+    # chain so the marginal cost was ~$0.
+    if degenerate_fallback is not None:
+        logger.warning(
+            "call_model: ALL providers returned degenerate scoring output "
+            "(tier=%s purpose=%s job_id=%s, rejections=%s); accepting "
+            "provider=%s flagged degenerate=True (routes to low_signal)",
+            tier,
+            purpose,
+            job_id,
+            _degenerate_rejections,
+            degenerate_fallback.provider,
+        )
+        _increment_usage(degenerate_fallback.provider)
+        try:
+            _maybe_record_cost(degenerate_fallback, conn, job_id, purpose)
+        except Exception as cost_exc:
+            logger.warning(
+                "Cascade: %s cost recording failed (non-fatal): %s",
+                degenerate_fallback.provider,
+                cost_exc,
+            )
+        return degenerate_fallback
 
     raise ProviderCascadeExhaustedError(
         f"All providers in cascade exhausted or unavailable for tier: {tier!r}. "

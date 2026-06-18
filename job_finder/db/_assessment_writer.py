@@ -126,6 +126,7 @@ def persist_job_assessment(
         low_signal_threshold=threshold,
         apply_mean_floor=apply_mean_floor,
         apply_min_strong_axes=apply_min_strong_axes,
+        degenerate=getattr(assessment, "degenerate", False),
     )
 
     # Serialize sub_scores with stable key order for diff-friendliness.

@@ -237,6 +237,34 @@ def test_flat_neutral_is_low_signal_across_all_tiers(tier):
     assert cls == "low_signal"
 
 
+# ---------------------------------------------------------------------------
+# Issue #227: degenerate flag routes to low_signal (belt-and-braces with the
+# upstream cascade quality floor).
+# ---------------------------------------------------------------------------
+
+_ALL_FIVES = dict.fromkeys(
+    (
+        "title_fit",
+        "location_fit",
+        "comp_fit",
+        "domain_match",
+        "seniority_match",
+        "skills_match",
+    ),
+    5,
+)
+
+
+def test_degenerate_uniform_high_vector_routes_low_signal_not_apply():
+    """A degenerate all-5s vector (no-signal) must classify low_signal, not apply."""
+    cls = derive_classification(
+        sub_scores=dict(_ALL_FIVES),
+        legitimacy_note=None,
+        degenerate=True,
+    )
+    assert cls == "low_signal"
+
+
 def test_flat_neutral_legitimacy_note_still_wins():
     """legitimacy_note precedence holds over the flat-neutral branch."""
     cls = derive_classification(
@@ -267,6 +295,16 @@ def test_strong_vector_is_apply():
         enrichment_tier=None,
         jd_full_length=8000,
         low_signal_threshold=1500,
+    )
+    assert cls == "apply"
+
+
+def test_non_degenerate_same_vector_classifies_apply():
+    """The same all-5s vector WITHOUT the degenerate flag is a normal apply."""
+    cls = derive_classification(
+        sub_scores=dict(_ALL_FIVES),
+        legitimacy_note=None,
+        degenerate=False,
     )
     assert cls == "apply"
 
@@ -359,3 +397,25 @@ def test_apply_thresholds_are_configurable():
         )
         == "apply"
     )
+
+
+def test_legitimacy_reject_beats_degenerate():
+    """A flagged scam is still a reject — legitimacy precedence wins over degenerate."""
+    cls = derive_classification(
+        sub_scores=dict(_ALL_FIVES),
+        legitimacy_note="scam pattern",
+        degenerate=True,
+    )
+    assert cls == "reject"
+
+
+def test_degenerate_independent_of_jd_length():
+    """A degenerate score is no-signal even with a long JD (unlike the enrichment rule)."""
+    cls = derive_classification(
+        sub_scores=dict(_ALL_FIVES),
+        legitimacy_note=None,
+        enrichment_tier="free",
+        jd_full_length=50_000,
+        degenerate=True,
+    )
+    assert cls == "low_signal"

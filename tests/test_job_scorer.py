@@ -453,6 +453,110 @@ class TestSchemaContract:
 
 
 # ---------------------------------------------------------------------------
+# Tests: issue #227 quality floor — fail-closed coercion + degenerate flag
+# ---------------------------------------------------------------------------
+
+
+class TestQualityFloorCoercion:
+    """_coerce_assessment fails closed on partial/uncoercible vectors (#227)."""
+
+    def test_coerce_raises_on_missing_axis(self):
+        """A missing required axis raises instead of producing a partial vector."""
+        from job_finder.web.job_scorer import _IncompleteAssessmentError
+
+        data = _good_response_data()
+        del data["domain_match"]
+        with pytest.raises(_IncompleteAssessmentError, match="domain_match"):
+            _coerce_assessment(data, provider="ollama")
+
+    def test_coerce_raises_on_uncoercible_axis(self):
+        """A non-int-coercible axis raises rather than being silently dropped."""
+        from job_finder.web.job_scorer import _IncompleteAssessmentError
+
+        data = _good_response_data()
+        data["title_fit"] = "not-a-number"
+        with pytest.raises(_IncompleteAssessmentError, match="title_fit"):
+            _coerce_assessment(data, provider="ollama")
+
+    def test_partial_vector_does_not_classify_apply(self):
+        """A partial high-score vector must NOT survive into an apply verdict.
+
+        Pre-#227 bug: dropping an axis left a partial dict that
+        derive_classification read with all(v >= 3 ...) passing vacuously over
+        the surviving axes → spurious apply. Now coercion fails closed first.
+        """
+        from job_finder.web.job_scorer import _IncompleteAssessmentError
+
+        # All-5s but one axis missing — the dangerous case.
+        # (skills_match deliberately absent)
+        data = dict.fromkeys(
+            (
+                "title_fit",
+                "location_fit",
+                "comp_fit",
+                "domain_match",
+                "seniority_match",
+            ),
+            5,
+        )
+        data["rationale"] = {
+            "strengths": ["x"],
+            "gaps": [],
+            "talking_points": [],
+            "resume_priority_skills": [],
+        }
+        with pytest.raises(_IncompleteAssessmentError):
+            _coerce_assessment(data, provider="ollama")
+
+    def test_score_job_returns_error_on_incomplete_assessment(self, mock_conn, config):
+        """score_job catches incomplete coercion and returns status='error'."""
+        partial = _good_response_data()
+        del partial["seniority_match"]
+        bad = ModelResult(
+            data=partial,
+            cost_usd=0.0,
+            input_tokens=1,
+            output_tokens=1,
+            model="qwen2.5:14b",
+            provider="ollama",
+            schema_valid=True,
+        )
+        with patch("job_finder.web.job_scorer.call_model", return_value=bad):
+            result = score_job(_good_job(), mock_conn, config, _TEST_CTX)
+        assert result.status == "error"
+        assert result.data is None
+        assert "incomplete assessment" in (result.error or "")
+
+    def test_complete_vector_accepted(self):
+        """A complete vector still coerces fine and is not flagged degenerate."""
+        assessment = _coerce_assessment(_good_response_data(), provider="ollama")
+        assert len(assessment.sub_scores) == 6
+        assert assessment.degenerate is False
+
+    def test_degenerate_flag_threaded_through(self):
+        """_coerce_assessment(degenerate=True) sets JobAssessment.degenerate."""
+        assessment = _coerce_assessment(_good_response_data(), provider="ollama", degenerate=True)
+        assert assessment.degenerate is True
+
+    def test_score_job_propagates_degenerate_flag(self, mock_conn, config):
+        """A flagged degenerate ModelResult yields a degenerate JobAssessment."""
+        flagged = ModelResult(
+            data=_good_response_data(),
+            cost_usd=0.0,
+            input_tokens=1,
+            output_tokens=1,
+            model="qwen2.5:14b",
+            provider="ollama",
+            schema_valid=True,
+            degenerate=True,
+        )
+        with patch("job_finder.web.job_scorer.call_model", return_value=flagged):
+            result = score_job(_good_job(), mock_conn, config, _TEST_CTX)
+        assert result.status == "ok"
+        assert result.data.degenerate is True
+
+
+# ---------------------------------------------------------------------------
 # Tests: module-level invariants
 # ---------------------------------------------------------------------------
 

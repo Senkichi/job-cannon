@@ -205,7 +205,20 @@ def _build_user_message(job: dict) -> str:
     )
 
 
-def _coerce_assessment(data: dict, provider: str | None) -> JobAssessment:
+class _IncompleteAssessmentError(ValueError):
+    """A dispatcher payload was missing or uncoercible on a required axis.
+
+    Issue #227 (mechanism 2 — fail-closed coercion). Raised by
+    ``_coerce_assessment`` instead of silently dropping an axis and producing
+    a partial sub-score vector that ``derive_classification`` could then read
+    as ``apply``. ``score_job`` catches this and returns status="error" so the
+    job is left unscored rather than wrongly classified.
+    """
+
+
+def _coerce_assessment(
+    data: dict, provider: str | None, *, degenerate: bool = False
+) -> JobAssessment:
     """Coerce dispatcher-returned dict into a JobAssessment.
 
     The v3 schema emits the 6 sub-score fields at the TOP LEVEL of `data`
@@ -216,15 +229,28 @@ def _coerce_assessment(data: dict, provider: str | None) -> JobAssessment:
     classification is Python-derived at persist time (anti-pattern 3
     defense; see db.derive_classification).
 
-    Defensive int-coercion: the dispatcher's _sanitize_output should have
-    already coerced strings→ints, but we re-enforce here so downstream
-    derive_classification and persist_job_assessment see integers.
+    Fail-closed coercion (issue #227, mechanism 2): every one of the six axes
+    is REQUIRED. A missing or uncoercible axis raises
+    ``_IncompleteAssessmentError`` rather than being silently dropped. The
+    previous behaviour produced a *partial* sub-score vector, which
+    ``derive_classification`` could then read with ``all(v >= 3 ...)`` passing
+    vacuously over the surviving axes → a spurious ``apply``. Making the
+    partial vector unrepresentable here closes that hole regardless of which
+    upstream schema is in play. The baseline schema already rejects partial
+    vectors at the dispatcher, so this is latent insurance against variant
+    schemas — but cheap and correct insurance.
+
+    ``degenerate`` is threaded through from the cascade (ModelResult.degenerate)
+    so persistence can route an all-providers-degenerate result to low_signal.
     """
     sub_scores: dict[str, int] = {}
     for key in _SUB_SCORE_KEYS:
         raw = data.get(key)
         if raw is None:
-            continue
+            raise _IncompleteAssessmentError(
+                f"assessment missing required axis {key!r} "
+                f"(present axes: {sorted(k for k in _SUB_SCORE_KEYS if data.get(k) is not None)})"
+            )
         # Variant v4d2 emits each axis as {"evidence": "...", "score": <int>}.
         # Unwrap the score; everything downstream (derive_classification,
         # persistence) only needs the integer.
@@ -232,10 +258,10 @@ def _coerce_assessment(data: dict, provider: str | None) -> JobAssessment:
             raw = raw["score"]
         try:
             sub_scores[key] = int(raw)
-        except (TypeError, ValueError):
-            # Schema validation would have already rejected this in the
-            # dispatcher; skip silently to avoid cascading failure here.
-            continue
+        except (TypeError, ValueError) as exc:
+            raise _IncompleteAssessmentError(
+                f"assessment axis {key!r} is not coercible to int (got {raw!r})"
+            ) from exc
     rationale = data.get("rationale") or {}
     # classification is the sentinel — persist_job_assessment overwrites
     # it with derive_classification(sub_scores, row.legitimacy_note).
@@ -244,6 +270,7 @@ def _coerce_assessment(data: dict, provider: str | None) -> JobAssessment:
         classification="",
         rationale=rationale,
         provider=provider,
+        degenerate=degenerate,
     )
 
 
@@ -325,7 +352,28 @@ def score_job(
             error="dispatcher returned empty or schema-invalid data",
         )
 
-    assessment = _coerce_assessment(result.data, result.provider)
+    try:
+        assessment = _coerce_assessment(
+            result.data,
+            result.provider,
+            degenerate=getattr(result, "degenerate", False),
+        )
+    except _IncompleteAssessmentError as exc:
+        # Fail-closed (issue #227): a partial/uncoercible vector must not be
+        # persisted as a complete score. Leave the job unscored.
+        log.warning(
+            "score_job: incomplete assessment for dedup_key=%s from provider=%s: %s",
+            job.get("dedup_key"),
+            result.provider,
+            exc,
+        )
+        return ScoringResult(
+            status="error",
+            data=None,
+            provider=result.provider,
+            model=result.model,
+            error=f"incomplete assessment: {exc}",
+        )
     return ScoringResult(
         status="ok",
         data=assessment,
