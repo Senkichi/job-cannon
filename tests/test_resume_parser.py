@@ -22,6 +22,7 @@ from job_finder.web.onboarding.resume_parser import (
     EXPERIENCE_PROFILE_SCHEMA,
     _call_llm,
     _empty_profile,
+    _extract_email,
     _extract_text,
     parse_resume,
 )
@@ -341,6 +342,67 @@ def test_call_llm_prompt_instructs_skill_inference_when_no_skills_section(
         assert "(inferred)" in system_prompt and "no" in system_prompt.lower(), (
             "System prompt should explicitly tell the model not to add '(inferred)' markers."
         )
+
+
+# --- Email extraction for the IMAP prefill (Issue #399) ---
+
+
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        ("Jane Doe\njane.doe@gmail.com\n555-1212", "jane.doe@gmail.com"),
+        ("Contact: J.DOE+jobs@Example.CO.UK", "j.doe+jobs@example.co.uk"),
+        ("No address here at all", ""),
+        ("", ""),
+        ("incomplete@domain", ""),  # no TLD → not matched
+    ],
+)
+def test_extract_email(text, expected):
+    """_extract_email lifts the first plausible address, lowercased."""
+    assert _extract_email(text) == expected
+
+
+def test_parse_resume_attaches_extracted_email(
+    in_memory_db, stub_config, valid_profile_data, tmp_path
+):
+    """Issue #399: the parsed profile carries an `email` lifted from resume text."""
+    with (
+        patch(
+            "job_finder.web.onboarding.resume_parser._extract_text",
+            return_value="Jane Doe\njane.doe@gmail.com\nSoftware Engineer",
+        ),
+        patch("job_finder.web.onboarding.resume_parser.call_model") as mock_call,
+    ):
+        mock_call.return_value = _make_result(valid_profile_data)
+
+        fake_pdf = tmp_path / "resume.pdf"
+        fake_pdf.write_bytes(b"%PDF-1.4\n")
+
+        result = parse_resume(fake_pdf, conn=in_memory_db, config=stub_config)
+
+        assert result["email"] == "jane.doe@gmail.com"
+        # Original profile fields are preserved alongside the new email.
+        assert result["skills"] == ["Python", "Flask", "SQL"]
+
+
+def test_parse_resume_email_survives_empty_llm_profile(in_memory_db, stub_config, tmp_path):
+    """Even when the LLM yields nothing, a resume email still reaches the profile."""
+    with (
+        patch(
+            "job_finder.web.onboarding.resume_parser._extract_text",
+            return_value="jane.doe@gmail.com",
+        ),
+        patch("job_finder.web.onboarding.resume_parser.call_model") as mock_call,
+    ):
+        mock_call.return_value = None  # empty LLM profile
+
+        fake_pdf = tmp_path / "resume.pdf"
+        fake_pdf.write_bytes(b"%PDF-1.4\n")
+
+        result = parse_resume(fake_pdf, conn=in_memory_db, config=stub_config)
+
+        assert result["email"] == "jane.doe@gmail.com"
+        assert result["positions"] == []  # empty-profile scaffold present
 
 
 def test_parse_resume_successful_flow(in_memory_db, stub_config, valid_profile_data, tmp_path):
