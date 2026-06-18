@@ -244,7 +244,12 @@ def resume_upload():
     """
     if request.method == "POST":
         if request.form.get("skip"):
-            state.write_wizard_data(_db(), {"resume_profile": {}})
+            # Skipping is a deliberate choice, not a parse failure — clear any stale
+            # flag from a prior failed upload so profile_edit shows no notice.
+            state.write_wizard_data(
+                _db(),
+                {"resume_profile": {}, "resume_parse_failed": False},
+            )
             return redirect(url_for("onboarding.profile_edit"))
 
         uploaded = request.files.get("resume")
@@ -303,7 +308,19 @@ def resume_upload():
                 except OSError:
                     logger.warning("could not unlink resume temp file %s", tmp_path)
 
-        state.write_wizard_data(_db(), {"resume_profile": profile})
+        # The user uploaded a file expecting autofill (the skills field promises
+        # "auto-filled from your resume if uploaded"). If parsing yielded no skills,
+        # flag it so profile_edit can surface a non-blocking notice instead of
+        # silently rendering an empty form (Issue #397). The skip path writes an
+        # empty profile too, but deliberately sets no flag — skipping is not a failure.
+        resume_parse_failed = not (profile.get("skills") or [])
+        state.write_wizard_data(
+            _db(),
+            {
+                "resume_profile": profile,
+                "resume_parse_failed": resume_parse_failed,
+            },
+        )
         return redirect(url_for("onboarding.profile_edit"))
 
     return render_template(
@@ -356,12 +373,26 @@ def profile_edit():
     else:
         parsed_skills_text = ""
 
+    # If a resume was uploaded but parsing produced no skills, the autofill promise
+    # went unmet — tell the user plainly rather than rendering an empty field with
+    # no explanation (Issue #397). Suppress once the user has supplied their own
+    # skills so the notice doesn't linger after they've moved on.
+    resume_parse_failed = data.get("resume_parse_failed") and not (
+        existing_edit.get("skills") or parsed_skills_text
+    )
+    notice = (
+        "We couldn't read any skills from your resume — please enter them manually below."
+        if resume_parse_failed
+        else None
+    )
+
     return render_template(
         "onboarding/profile_edit.html",
         target_titles=existing_edit.get("target_titles", ""),
         target_locations=existing_edit.get("target_locations", ""),
         skills=existing_edit.get("skills") or parsed_skills_text,
         min_salary=existing_edit.get("min_salary") or "",
+        notice=notice,
         **_step("profile_edit"),
     )
 
