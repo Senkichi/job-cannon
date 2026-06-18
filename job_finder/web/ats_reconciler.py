@@ -9,7 +9,9 @@ Architecture:
 - Posting-ID set-diff (robust to URL variance: trailing slashes, tracking params).
 - Safety guards:
     * Scan exception or empty result → SKIP company (no mass-expire).
-    * Workday incomplete board (total > fetch cap) → SKIP (completeness gate).
+    * Incomplete board (total > fetch cap) → SKIP (completeness gate).
+      Applies to Workday (#216) and SmartRecruiters (#217), which both cap
+      pagination and could otherwise false-expire the unfetched tail.
     * Unknown platform → SKIP silently (iCIMS, Phenom, UKG, custom — Phase C handles).
     * Scan returned postings but none had parseable IDs → SKIP (scan format drift).
 - Live jobs: last_seen refreshed + is_stale cleared (prevents downstream false-stale).
@@ -19,6 +21,7 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Callable
 
 from job_finder.json_utils import safe_json_load, utc_now_iso
 from job_finder.web.ats_platforms import SCANNERS_BY_NAME
@@ -31,6 +34,9 @@ logger = logging.getLogger(__name__)
 EXPIRED = "expired"
 LIVE = "live"
 INCONCLUSIVE = "inconclusive"
+
+# A completeness-aware live-id fetcher: slug -> (live posting IDs, complete).
+_LiveIdFetcher = Callable[[str], tuple[set[str], bool]]
 
 # Posting-ID extraction patterns. Applied to BOTH sides of the set-diff
 # (scan output source_url, and stored source_urls entries) so the same
@@ -85,9 +91,10 @@ _SIMPLE_POSTING_ID_PATTERNS: dict[str, re.Pattern] = {
 }
 
 # Platforms safe to batch-reconcile.
-# Workday is included but uses a completeness-gated path in reconcile_company
-# (_workday_live_id_set) instead of run_platform_scan, so boards too large to
-# fully paginate are skipped rather than falsely expiring unseen postings.
+# Workday and SmartRecruiters are included but use a completeness-gated path in
+# reconcile_company (_workday_live_id_set / _smartrecruiters_live_id_set) instead
+# of run_platform_scan, so boards too large to fully paginate are skipped rather
+# than falsely expiring unseen postings (#216 / #217).
 _RECONCILABLE_PLATFORMS: frozenset[str] = frozenset(
     {"lever", "ashby", "smartrecruiters", "greenhouse", "workday"}
 )
@@ -155,6 +162,61 @@ def _workday_live_id_set(slug: str) -> tuple[set[str], bool]:
     return live_ids, complete
 
 
+def _smartrecruiters_live_id_set(slug: str) -> tuple[set[str], bool]:
+    """Fetch SmartRecruiters postings and derive the set of live posting IDs.
+
+    Uses the completeness-aware list fetch directly — does **not** trigger
+    per-posting description GETs, which are unnecessary for set-diff
+    reconciliation and would waste significant HTTP budget on large boards.
+
+    Returns:
+        ``(live_ids, complete)`` where ``complete`` is ``False`` when the
+        board exceeds the pagination cap (>500 postings, #217) or the scan
+        encountered an error before the first page arrived. IDs are the
+        posting ``id`` field, which matches what
+        ``_extract_posting_id(stored_url, "smartrecruiters")`` returns from
+        stored ``source_urls`` (``jobs.smartrecruiters.com/<slug>/<id>``).
+    """
+    from job_finder.web.ats_platforms._platforms_smartrecruiters import (
+        _fetch_postings_with_completeness,
+    )
+
+    postings, complete = _fetch_postings_with_completeness(slug)
+    live_ids: set[str] = set()
+    for posting in postings:
+        posting_id = posting.get("id")
+        if posting_id is not None:
+            live_ids.add(str(posting_id))
+    return live_ids, complete
+
+
+# Platforms whose live board can be truncated by a pagination cap and which
+# therefore expose a completeness-aware live-id fetch. The reconciler routes
+# these through the gate above (skip when the board could not be fully
+# fetched) instead of the generic run_platform_scan path, making the
+# invariant structural: *expiry may only run against a complete live board*.
+# Workday (#216) and SmartRecruiters (#217) both cap pagination; adding a new
+# completeness-gated platform is a single entry here plus its `_*_live_id_set`.
+#
+# Values are *attribute names*, not function references, so the helper is
+# resolved from the module namespace at call time — this keeps the historical
+# `@patch("...ats_reconciler._workday_live_id_set")` test seam working (a
+# captured reference would bypass the patch).
+_COMPLETENESS_GATED_FETCHERS: dict[str, str] = {
+    "workday": "_workday_live_id_set",
+    "smartrecruiters": "_smartrecruiters_live_id_set",
+}
+
+
+def _resolve_live_id_fetcher(platform: str) -> _LiveIdFetcher:
+    """Return the completeness-aware live-id fetcher for ``platform``.
+
+    Resolved by name from the module globals so unit tests that patch the
+    fetcher attribute (the established Workday test seam) take effect.
+    """
+    return globals()[_COMPLETENESS_GATED_FETCHERS[platform]]
+
+
 def reconcile_company(conn, company_row: dict) -> dict:
     """Reconcile tracked jobs for one company against its live ATS board.
 
@@ -207,13 +269,18 @@ def reconcile_company(conn, company_row: dict) -> dict:
         return result
 
     # Build live_id_set.  Strategy differs by platform:
-    # - Workday: completeness-aware direct fetch (no description GETs needed).
-    # - Others:  standard run_platform_scan, IDs extracted from source_urls.
+    # - Completeness-gated platforms (Workday #216, SmartRecruiters #217):
+    #   direct list fetch that carries a `complete` flag (no description GETs
+    #   needed). The reconciler may only expire against a *complete* live
+    #   board, so a truncated/partial fetch skips the company rather than
+    #   false-expiring the unseen tail.
+    # - Others: standard run_platform_scan, IDs extracted from source_urls.
     live_id_set: set[str] = set()
 
-    if platform == "workday":
+    if platform in _COMPLETENESS_GATED_FETCHERS:
+        fetcher = _resolve_live_id_fetcher(platform)
         try:
-            live_id_set, complete = _workday_live_id_set(slug)
+            live_id_set, complete = fetcher(slug)
         except Exception as e:
             logger.warning("reconcile_company: %s/%s scan raised %s", platform, slug, e)
             result["skipped"] = True
@@ -222,16 +289,16 @@ def reconcile_company(conn, company_row: dict) -> dict:
 
         if not complete:
             logger.warning(
-                "reconcile_company: workday '%s' board incomplete — "
-                "skipping to avoid false-expire",
+                "reconcile_company: %s '%s' board incomplete — skipping to avoid false-expire",
+                platform,
                 slug,
             )
             result["skipped"] = True
-            result["skip_reason"] = "workday_incomplete"
+            result["skip_reason"] = f"{platform}_incomplete"
             return result
 
         if not live_id_set:
-            logger.debug("reconcile_company: workday '%s' scan returned empty", slug)
+            logger.debug("reconcile_company: %s '%s' scan returned empty", platform, slug)
             result["skipped"] = True
             result["skip_reason"] = "scan_empty"
             return result
