@@ -25,6 +25,7 @@ from job_finder.web.location_canonical import to_json as _locations_to_json
 
 from ._jd_full import _is_jd_junk as _jd_is_junk
 from ._jd_full import set_jd_full as _set_jd_full
+from ._locations import merge_locations_raw
 from ._persistence import update_pipeline_status
 
 _logger = logging.getLogger(__name__)
@@ -406,26 +407,21 @@ def upsert_job(
                 urls.append(url)
                 source_merged = True
 
-        # Smart location merge: maintain locations_raw array (Remote/Hybrid first)
+        # Smart location merge: maintain locations_raw array (Remote/Hybrid
+        # first). Delegated to merge_locations_raw — the single source of truth
+        # for this merge, shared with apply_location_observation (D-5).
         existing_locs_raw = existing["locations_raw"]
         try:
-            locs_list = json.loads(existing_locs_raw) if existing_locs_raw else []
+            prior_locs_list = json.loads(existing_locs_raw) if existing_locs_raw else []
         except (json.JSONDecodeError, TypeError):
-            locs_list = []
-        if not isinstance(locs_list, list):
-            locs_list = [locs_list] if locs_list else []
+            prior_locs_list = []
+        if not isinstance(prior_locs_list, list):
+            prior_locs_list = [prior_locs_list] if prior_locs_list else []
+        prior_locs_list = [loc for loc in prior_locs_list if loc]
 
-        seen_keys = {loc.lower() for loc in locs_list if loc}
-        for normalized in _incoming_locs_raw:
-            key = normalized.lower()
-            if key in seen_keys:
-                continue
-            seen_keys.add(key)
+        locs_list = merge_locations_raw(prior_locs_list, _incoming_locs_raw)
+        if locs_list != prior_locs_list:
             canonical_changed = True
-            if re.search(r"\b(remote|hybrid)\b", normalized, re.IGNORECASE):
-                locs_list.insert(0, normalized)
-            else:
-                locs_list.append(normalized)
 
         merged_location = ", ".join(dict.fromkeys(locs_list))
 

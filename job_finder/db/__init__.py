@@ -55,6 +55,10 @@ from ._jobs import load_job_context as load_job_context
 from ._jobs import merge_description as merge_description
 from ._jobs import upsert_job as upsert_job
 
+# Single-writer funnel for the canonical location columns (D-5).
+from ._locations import apply_location_observation as apply_location_observation
+from ._locations import merge_locations_raw as merge_locations_raw
+
 # DB write paths — runs log + per-row persistence + pipeline state machine.
 from ._persistence import invalidate_job_score as invalidate_job_score
 from ._persistence import log_run as log_run

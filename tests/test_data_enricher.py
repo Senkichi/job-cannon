@@ -188,7 +188,14 @@ def temp_db():
             salary_max INTEGER DEFAULT NULL,
             source_urls TEXT DEFAULT '[]',
             company_id INTEGER DEFAULT NULL,
-            enrichment_tier TEXT DEFAULT NULL
+            enrichment_tier TEXT DEFAULT NULL,
+            -- Canonical location columns the apply_location_observation funnel
+            -- writes through (#386). Present so an enrichment-extracted location
+            -- routes through the funnel rather than a direct column write.
+            locations_raw TEXT DEFAULT NULL,
+            locations_structured TEXT DEFAULT NULL,
+            workplace_type TEXT DEFAULT 'UNSPECIFIED',
+            primary_country_code TEXT DEFAULT NULL
         )
     """)
     conn.execute("""
