@@ -315,7 +315,8 @@ class TestFetchPostingsWithCompleteness:
 
     Completeness rules:
       - complete=True  when total_fetched >= total (including genuine empty board).
-      - complete=False when total > _MAX_RESULTS (board too large to fully paginate).
+      - complete=False when total exceeds what the page budget can fetch — but
+        the partial postings still come back non-empty (issue #216).
       - complete=False when a network/HTTP error prevents any page from arriving.
       - complete=False when pagination stops before total_fetched >= total.
     """
@@ -349,23 +350,109 @@ class TestFetchPostingsWithCompleteness:
         assert len(postings) == 3
 
     @patch("job_finder.web.ats_platforms._platforms_workday.requests.post")
-    def test_board_over_cap_is_incomplete(self, mock_post, _mock_detail):
-        """total=500 > _MAX_RESULTS → complete=False; postings list may be empty."""
+    def test_board_over_budget_is_incomplete_but_non_empty(self, mock_post, _mock_detail):
+        """Board larger than the page budget → complete=False AND non-empty (issue #216).
+
+        Regression guard: pre-fix, a board with total > the cap returned an
+        EMPTY postings list (discovery silently zeroed). Now discovery gets
+        the first ``max_pages`` pages, and only completeness is False.
+        """
         from job_finder.web.ats_platforms._platforms_workday import (
+            _PAGE_SIZE,
             _fetch_postings_with_completeness,
         )
 
-        mock_resp = MagicMock(status_code=200)
-        mock_resp.json.return_value = {
-            "total": 500,
-            "jobPostings": [
-                {"title": f"Job {i}", "externalPath": f"/job/Job-{i}_R-{i}"} for i in range(20)
-            ],
-        }
-        mock_post.return_value = mock_resp
+        # total=500 (25 pages of 20) but budget capped at 3 pages → 60 fetched.
+        def _page(_url, **_kwargs):
+            offset = _kwargs["json"]["offset"]
+            resp = MagicMock(status_code=200)
+            resp.json.return_value = {
+                "total": 500,
+                "jobPostings": [
+                    {"title": f"Job {i}", "externalPath": f"/job/Job-{i}_R-{i}"}
+                    for i in range(offset, offset + _PAGE_SIZE)
+                ],
+            }
+            return resp
 
-        _postings, complete = _fetch_postings_with_completeness("acme.wd5/AcmeExternal")
+        mock_post.side_effect = _page
+
+        postings, complete = _fetch_postings_with_completeness(
+            "acme.wd5/AcmeExternal", max_pages=3
+        )
         assert complete is False
+        # Discovery is NOT zeroed: first 3 pages (60 postings) came back.
+        assert len(postings) == 3 * _PAGE_SIZE
+        assert mock_post.call_count == 3
+
+    @patch("job_finder.web.ats_platforms._platforms_workday.requests.post")
+    def test_large_board_within_budget_is_complete(self, mock_post, _mock_detail):
+        """A >200-posting board fully paginates when within the page budget (issue #216)."""
+        from job_finder.web.ats_platforms._platforms_workday import (
+            _PAGE_SIZE,
+            _fetch_postings_with_completeness,
+        )
+
+        total = 250  # 13 pages of 20 (last page is partial) — exceeds the old 200 cap.
+
+        def _page(_url, **_kwargs):
+            offset = _kwargs["json"]["offset"]
+            end = min(offset + _PAGE_SIZE, total)
+            resp = MagicMock(status_code=200)
+            resp.json.return_value = {
+                "total": total,
+                "jobPostings": [
+                    {"title": f"Job {i}", "externalPath": f"/job/Job-{i}_R-{i}"}
+                    for i in range(offset, end)
+                ],
+            }
+            return resp
+
+        mock_post.side_effect = _page
+
+        postings, complete = _fetch_postings_with_completeness(
+            "acme.wd5/AcmeExternal", max_pages=100
+        )
+        assert complete is True
+        assert len(postings) == total
+
+    @patch("job_finder.web.ats_platforms._platforms_workday.requests.post")
+    def test_max_pages_contextvar_override_applied(self, mock_post, _mock_detail):
+        """set_max_pages ContextVar caps pagination when no explicit arg is passed.
+
+        Mirrors how run_ats_scan / reconcile_all_companies thread
+        config.ats.workday_max_pages down to the registry's slug->list scanner.
+        """
+        from job_finder.web.ats_platforms._platforms_workday import (
+            _PAGE_SIZE,
+            _fetch_postings_with_completeness,
+            reset_max_pages,
+            set_max_pages,
+        )
+
+        def _page(_url, **_kwargs):
+            offset = _kwargs["json"]["offset"]
+            resp = MagicMock(status_code=200)
+            resp.json.return_value = {
+                "total": 500,
+                "jobPostings": [
+                    {"title": f"Job {i}", "externalPath": f"/job/Job-{i}_R-{i}"}
+                    for i in range(offset, offset + _PAGE_SIZE)
+                ],
+            }
+            return resp
+
+        mock_post.side_effect = _page
+
+        token = set_max_pages(2)
+        try:
+            postings, complete = _fetch_postings_with_completeness("acme.wd5/AcmeExternal")
+        finally:
+            reset_max_pages(token)
+
+        assert complete is False
+        assert len(postings) == 2 * _PAGE_SIZE
+        assert mock_post.call_count == 2
 
     @patch("job_finder.web.ats_platforms._platforms_workday.requests.post")
     def test_empty_board_is_complete(self, mock_post, _mock_detail):

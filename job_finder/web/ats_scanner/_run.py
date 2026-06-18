@@ -275,6 +275,17 @@ def run_ats_scan(
         config.get("ats", {}).get("high_score_history_threshold", _DEFAULT_HIGH_SCORE_THRESHOLD)
     )
 
+    # Workday per-board pagination budget (issue #216): set the per-run
+    # ContextVar so the registry's slug->list scanner picks it up. Reset in
+    # the finally below so the override never leaks past this run.
+    from job_finder.web.ats_platforms._platforms_workday import (
+        reset_max_pages,
+        set_max_pages,
+    )
+
+    workday_max_pages = config.get("ats", {}).get("workday_max_pages")
+    _workday_budget_token = set_max_pages(workday_max_pages)
+
     summary: dict = {
         "companies_scanned": 0,
         "jobs_discovered": 0,
@@ -290,51 +301,54 @@ def run_ats_scan(
     }
     all_new_job_keys: list[str] = []
 
-    with standalone_connection(db_path) as conn:
-        # Compute total upfront so the progress-callback's (scanned, total)
-        # pair is stable for the full scan (Phase A + Phase C). Phase B and
-        # Phase D aren't per-company iterations and don't tick the tracker.
-        # The route's initial _scannable_count is a Phase-A-only estimate;
-        # the first callback invocation corrects total on the session row.
-        total_companies = _count_phase_a_eligible(
-            conn, high_score_threshold
-        ) + _count_phase_c_eligible(conn, high_score_threshold)
-        tracker = _ProgressTracker(progress_callback, total_companies)
+    try:
+        with standalone_connection(db_path) as conn:
+            # Compute total upfront so the progress-callback's (scanned, total)
+            # pair is stable for the full scan (Phase A + Phase C). Phase B and
+            # Phase D aren't per-company iterations and don't tick the tracker.
+            # The route's initial _scannable_count is a Phase-A-only estimate;
+            # the first callback invocation corrects total on the session row.
+            total_companies = _count_phase_a_eligible(
+                conn, high_score_threshold
+            ) + _count_phase_c_eligible(conn, high_score_threshold)
+            tracker = _ProgressTracker(progress_callback, total_companies)
 
-        # Phase A — ATS-API scan for confirmed-hit + retry-eligible-error companies.
-        _run_ats_api_scan(
-            conn,
-            db_path,
-            target_titles,
-            title_exclusions,
-            summary,
-            all_new_job_keys,
-            high_score_threshold,
-            tracker,
-        )
+            # Phase A — ATS-API scan for confirmed-hit + retry-eligible-error companies.
+            _run_ats_api_scan(
+                conn,
+                db_path,
+                target_titles,
+                title_exclusions,
+                summary,
+                all_new_job_keys,
+                high_score_threshold,
+                tracker,
+            )
 
-        # Phase B — Homepage discovery for companies missing homepage_url. Runs
-        # BEFORE the HTML fallback so newly-discovered homepages are available.
-        _run_homepage_discovery_phase(db_path, config, summary)
+            # Phase B — Homepage discovery for companies missing homepage_url. Runs
+            # BEFORE the HTML fallback so newly-discovered homepages are available.
+            _run_homepage_discovery_phase(db_path, config, summary)
 
-        # Phase C — HTML fallback for miss/error companies that DO have a homepage.
-        _run_html_fallback_scan(
-            conn,
-            db_path,
-            config,
-            target_titles,
-            title_exclusions,
-            summary,
-            all_new_job_keys,
-            high_score_threshold,
-            tracker,
-        )
+            # Phase C — HTML fallback for miss/error companies that DO have a homepage.
+            _run_html_fallback_scan(
+                conn,
+                db_path,
+                config,
+                target_titles,
+                title_exclusions,
+                summary,
+                all_new_job_keys,
+                high_score_threshold,
+                tracker,
+            )
 
-        # Phase D — Auto-scoring for newly discovered jobs across both phases.
-        _score_new_ats_jobs(conn, config, all_new_job_keys, summary)
+            # Phase D — Auto-scoring for newly discovered jobs across both phases.
+            _score_new_ats_jobs(conn, config, all_new_job_keys, summary)
 
-        # Phase E — Activity feed entry so Dashboard Recent Activity shows 'ats_scan'.
-        _log_ats_scan_run(conn, summary)
+            # Phase E — Activity feed entry so Dashboard Recent Activity shows 'ats_scan'.
+            _log_ats_scan_run(conn, summary)
+    finally:
+        reset_max_pages(_workday_budget_token)
 
     logger.info(
         "ATS scan complete: %d companies scanned, %d jobs discovered, %d new, %d scored "

@@ -319,6 +319,12 @@ ats:
   #   >=20 default (skips ~22% of unproductive cohort)
   #   >=22 strict (top 56% of confirmed-hit companies retained)
   high_score_history_threshold: 20
+  # Workday per-board pagination budget (pages of 20 postings). Boards larger
+  # than this still discover their first workday_max_pages*20 postings, but are
+  # marked incomplete so expiry-reconciliation is skipped for the tenant (a
+  # partial board must not mass-expire unseen postings). Default 100 ≈ 2,000
+  # postings; raise for very large tenants. See issue #216.
+  workday_max_pages: 100
   # ATS company identity (URL evidence → live verify → hit)
   # See `.planning/ATS-RECONCILIATION-PLAN.md`. Ingestion stores URL-derived hints as
   # ``pending``; reconciliation promotes to ``hit`` only after API verification.

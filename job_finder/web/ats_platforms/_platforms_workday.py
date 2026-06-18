@@ -28,6 +28,7 @@ from __future__ import annotations
 import logging
 import re
 import time
+from contextvars import ContextVar
 from datetime import UTC, datetime, timedelta
 
 import requests
@@ -39,8 +40,52 @@ from job_finder.web.location_canonical import JobLocation, WorkplaceType, dedupe
 logger = logging.getLogger(__name__)
 
 _PAGE_SIZE = 20
-_MAX_RESULTS = 200
+# Per-board page budget. At _PAGE_SIZE=20 the default of 100 pages covers
+# boards up to 2,000 postings before discovery is marked incomplete. Tenants
+# larger than the budget still return their first ``budget * _PAGE_SIZE``
+# postings (so discovery is non-empty) with ``complete=False`` — the
+# reconciler's completeness gate then declines expiry-reconciliation for that
+# tenant, but discovery is no longer silently zeroed.  Tunable via
+# ``config.ats.workday_max_pages`` threaded through ``run_ats_scan`` /
+# ``reconcile_all_companies`` (issue #216).
+_DEFAULT_MAX_PAGES = 100
 _DETAIL_FETCH_SLEEP_S = 0.1
+
+# Per-run page-budget override, set by the scan / reconcile entry points from
+# ``config.ats.workday_max_pages`` and consumed by ``_fetch_postings`` (the
+# registry's ``slug -> list`` contract leaves no room for an explicit arg).
+# A ContextVar (not a module global) keeps the override thread-local so the
+# APScheduler reconcile thread and a concurrent Flask-triggered scan cannot
+# clobber each other's budget.
+_max_pages_override: ContextVar[int | None] = ContextVar(
+    "workday_max_pages_override", default=None
+)
+
+
+def set_max_pages(max_pages: int | None) -> object:
+    """Set the per-run Workday page budget; returns the reset token.
+
+    Pass the resolved ``config.ats.workday_max_pages`` value at the top of a
+    scan / reconcile run, then ``reset_max_pages(token)`` in a ``finally`` so
+    the override never leaks past the run. ``None`` (or a non-positive value)
+    falls back to ``_DEFAULT_MAX_PAGES``.
+    """
+    return _max_pages_override.set(max_pages)
+
+
+def reset_max_pages(token: object) -> None:
+    """Restore the page-budget ContextVar to its prior value."""
+    _max_pages_override.reset(token)  # type: ignore[arg-type]
+
+
+def _resolve_max_pages(max_pages: int | None) -> int:
+    """Pick the effective page budget: explicit arg → ContextVar → default."""
+    candidate = max_pages if max_pages is not None else _max_pages_override.get()
+    if candidate is None or candidate <= 0:
+        return _DEFAULT_MAX_PAGES
+    return candidate
+
+
 # Pacing for the LIST endpoint between successive page fetches. Pre-F1
 # (commit b99e1d9) the list-endpoint cadence was incidentally paced by
 # the per-matched-posting detail-fetch sleep in the same per-page loop.
@@ -213,22 +258,44 @@ def _parse_posted_date(value: str | None) -> tuple[datetime | None, str | None]:
 # ---------------------------------------------------------------------------
 
 
-def _fetch_postings_with_completeness(slug: str) -> tuple[list[dict], bool]:
+def _fetch_postings_with_completeness(
+    slug: str, max_pages: int | None = None
+) -> tuple[list[dict], bool]:
     """POST + paginate over Workday CXS list endpoint, tracking completeness.
+
+    Pagination runs up to a **page budget** (``max_pages``, default
+    :data:`_DEFAULT_MAX_PAGES`). Boards larger than the budget still return
+    the first ``max_pages * _PAGE_SIZE`` postings — discovery is never
+    silently zeroed for a large tenant (issue #216) — but with
+    ``complete=False`` so the reconciler declines expiry-reconciliation.
 
     Returns ``(postings, complete)`` where ``complete`` is ``True`` only
     when the board was **fully** fetched:
 
-    - First-page error (network / HTTP / JSON) → ``complete=False``.
-    - ``total > _MAX_RESULTS`` → ``complete=False`` (board too large to paginate).
-    - Pagination stops before ``total_fetched >= total`` → ``complete=False``.
-    - Genuine empty board (``total=0``) → ``complete=True``.
+    - First-page error (network / HTTP / JSON) → ``([], False)``.
+    - ``total`` exceeds what the page budget can fetch → ``(partial, False)``.
+      ``partial`` holds every posting that did land (NOT ``[]``) so discovery
+      gets the first N pages instead of nothing.
+    - Pagination stops on a mid-run error before ``total_fetched >= total``
+      → ``(partial, False)``.
+    - Genuine empty board (``total=0``) → ``([], True)``.
 
-    The completeness flag is the gate used by the ATS reconciler to decide
-    whether expiry-reconciliation is safe for a Workday tenant.  A warning
-    is logged whenever the board is incomplete so operators can see which
-    tenants exceed the pagination cap.
+    A ``([], False)`` (error) is therefore distinguishable from a
+    ``([], True)`` (true zero): callers that must not mass-expire on a fetch
+    failure key off ``complete``, not ``len(postings)``.
+
+    Args:
+        slug: ``"subdomain/board"`` Workday slug.
+        max_pages: Per-board page budget. ``None`` resolves from the
+            per-run ContextVar override (set by the scan / reconcile entry
+            points from ``config.ats.workday_max_pages``) and finally
+            :data:`_DEFAULT_MAX_PAGES`.
+
+    A warning is logged whenever the board exceeds the page budget so
+    operators can see which tenants are only partially discovered.
     """
+    effective_max_pages = _resolve_max_pages(max_pages)
+
     parts = slug.split("/", 1)
     if len(parts) != 2:
         logger.warning("scan_workday: invalid slug format '%s'", slug)
@@ -244,8 +311,9 @@ def _fetch_postings_with_completeness(slug: str) -> tuple[list[dict], bool]:
     total_fetched = 0
     saw_total = False
     total = 0
+    pages_fetched = 0
 
-    while offset < _MAX_RESULTS:
+    while pages_fetched < effective_max_pages:
         # Inter-page pacing — does not run on the first iteration; the wait
         # is before the *next* POST, not before the current one.
         if offset > 0:
@@ -280,16 +348,7 @@ def _fetch_postings_with_completeness(slug: str) -> tuple[list[dict], bool]:
 
         total = data.get("total", 0)
         saw_total = True
-
-        if total > _MAX_RESULTS:
-            logger.warning(
-                "scan_workday('%s') board has %d postings (cap %d) — incomplete; "
-                "reconciliation will skip this tenant",
-                slug,
-                total,
-                _MAX_RESULTS,
-            )
-            break
+        pages_fetched += 1
 
         postings = data.get("jobPostings", [])
         if not postings:
@@ -310,6 +369,17 @@ def _fetch_postings_with_completeness(slug: str) -> tuple[list[dict], bool]:
             break
 
     complete = saw_total and total_fetched >= total
+    if saw_total and not complete and total > total_fetched:
+        logger.warning(
+            "scan_workday('%s') board has %d postings; fetched %d in %d pages "
+            "(budget %d pages) — discovery partial, reconciliation will skip "
+            "this tenant",
+            slug,
+            total,
+            total_fetched,
+            pages_fetched,
+            effective_max_pages,
+        )
     return out, complete
 
 
@@ -322,7 +392,9 @@ def _fetch_postings(slug: str) -> list[dict]:
 
     Thin wrapper around :func:`_fetch_postings_with_completeness` — the
     completeness signal is consumed by the ATS reconciler but is not
-    needed by the standard scanner flow.
+    needed by the standard scanner flow. The page budget is read from the
+    per-run ContextVar (``set_max_pages``) since the registry's
+    ``slug -> list`` contract leaves no room for an explicit argument.
     """
     return _fetch_postings_with_completeness(slug)[0]
 
