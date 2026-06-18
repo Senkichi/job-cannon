@@ -13,7 +13,7 @@ user-data directory.
 from __future__ import annotations
 
 from datetime import datetime, timedelta
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import job_finder.web.scheduler._heartbeat as heartbeat_mod
 from job_finder.json_utils import utc_now_iso
@@ -153,16 +153,21 @@ def test_register_heartbeat_writes_boot_heartbeat():
 
 
 def test_register_all_jobs_includes_heartbeat():
-    """init_scheduler -> register_all_jobs wires in the heartbeat job."""
-    from job_finder.web.scheduler import init_scheduler
+    """register_all_jobs wires in the heartbeat job.
+
+    Calls register_all_jobs directly rather than through init_scheduler: the
+    latter's module-level _scheduler singleton (Guard 3) and WERKZEUG_RUN_MAIN
+    env guard (Guard 2) can be left set by another scheduler test sharing the
+    xdist loadscope worker, making init_scheduler return *before* registering
+    anything (observed only under the full parallel suite, not in isolation).
+    Registration itself has no global-state dependency, so this is immune.
+    """
+    from job_finder.web.scheduler._jobs import register_all_jobs
 
     app = MagicMock()
     app.config = {"TESTING": False, "JF_CONFIG": {}, "DB_PATH": ":memory:"}
+    mock_sched = MagicMock()
 
-    with patch("job_finder.web.scheduler.BackgroundScheduler") as MockScheduler:
-        mock_sched = MagicMock()
-        MockScheduler.return_value = mock_sched
+    register_all_jobs(mock_sched, app)
 
-        init_scheduler(app)
-
-        assert len(_heartbeat_calls(mock_sched)) == 1
+    assert len(_heartbeat_calls(mock_sched)) == 1
