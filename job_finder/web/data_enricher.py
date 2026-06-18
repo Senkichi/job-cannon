@@ -46,6 +46,11 @@ from job_finder.config import JD_STORAGE_MAX_CHARS
 from job_finder.db._direct_link import set_direct_url
 from job_finder.db._jd_full import set_jd_full as _set_jd_full
 from job_finder.db._jobs import _reconcile_salary_for_write
+from job_finder.enrichment_states import (
+    EnrichmentTier,
+    backfill_skip_sql,
+    resume_index,
+)
 from job_finder.json_utils import utc_now_iso
 from job_finder.web.direct_link import pick_direct_link
 from job_finder.web.enrichment_sources import merge_apply_urls, parse_source_urls
@@ -105,8 +110,16 @@ def _maybe_reconcile_ats_identity(
 # Constants
 # ---------------------------------------------------------------------------
 
-# Strict cost ordering: free (URL -> ATS -> careers) -> DDG -> SerpAPI -> agentic
-TIER_ORDER = ["free", "ddg", "serpapi", "agentic", "exhausted"]
+# Strict cost ordering: free (URL -> ATS -> careers) -> DDG -> SerpAPI -> agentic.
+# Backed by job_finder.enrichment_states (single source of truth, F1 fix). Kept as a
+# list of raw strings for backward-compatible callers/tests that index by tier name.
+TIER_ORDER = [
+    EnrichmentTier.FREE.value,
+    EnrichmentTier.DDG.value,
+    EnrichmentTier.SERPAPI.value,
+    EnrichmentTier.AGENTIC.value,
+    EnrichmentTier.EXHAUSTED.value,
+]
 
 # Allowlist of jobs table columns that _persist() may write. Prevents AI-extracted
 # dict keys from injecting arbitrary column names into dynamic SQL SET clauses.
@@ -439,10 +452,9 @@ def run_enrichment_backfill(
         # Terminal tiers: 'serpapi' (got JD), 'agentic' (got JD via Playwright),
         # 'exhausted' (all tiers tried and failed). 'mid' is terminal for the
         # enrichment pipeline (fully enriched at balanced tier).
-        base_sql = """SELECT * FROM jobs
+        base_sql = f"""SELECT * FROM jobs
                WHERE (enrichment_tier IS NULL
-                      OR enrichment_tier NOT IN ('exhausted', 'serpapi', 'agentic', 'mid',
-                                                 'agentic_exhausted', 'low', 'high'))
+                      OR {backfill_skip_sql()})
                  AND (jd_full IS NULL OR jd_full = '' OR salary_min IS NULL)
                ORDER BY first_seen DESC"""
         if limit is None:
@@ -587,8 +599,11 @@ def _filter_non_none(d: dict) -> dict:
 def _start_tier_index(current_tier: str | None) -> int:
     """Return the index in TIER_ORDER to start from based on current_tier.
 
-    If current_tier is None or 'free', start from 0 (beginning).
-    Otherwise, start from the tier AFTER current_tier.
+    Thin wrapper over ``job_finder.enrichment_states.resume_index`` (the single
+    source of truth, F1 fix). If current_tier is None, start from 0; a known tier
+    resumes from the NEXT tier; an unknown tier is treated as terminal (fail-closed)
+    and logs a warning. Retained as a module-level name for backward-compatible
+    callers/tests that import ``_start_tier_index``.
 
     Args:
         current_tier: The enrichment_tier value from the job row.
@@ -596,17 +611,7 @@ def _start_tier_index(current_tier: str | None) -> int:
     Returns:
         Index into TIER_ORDER to start enrichment from.
     """
-    if current_tier is None:
-        return 0
-    try:
-        idx = TIER_ORDER.index(current_tier)
-        return idx + 1  # Resume from NEXT tier
-    except ValueError:
-        logger.warning(
-            "Unknown enrichment_tier %r — treating as terminal (fail-closed); no tiers will run",
-            current_tier,
-        )
-        return len(TIER_ORDER)
+    return resume_index(current_tier)
 
 
 def _resolve_from_fragments(

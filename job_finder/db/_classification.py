@@ -12,6 +12,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from job_finder.enrichment_states import LOW_SIGNAL_TERMINAL
+
 # Canonical sub-score key order (matches CONTEXT D-05 and the v3 scoring prompt's
 # JSON schema). Used for JSON serialization stability and for derive_classification.
 _SUB_SCORE_KEYS: tuple[str, ...] = (
@@ -23,13 +25,13 @@ _SUB_SCORE_KEYS: tuple[str, ...] = (
     "skills_match",
 )
 
-# Tiers from which no further automatic enrichment will run. A job at one of
-# these tiers with a short JD has genuinely no signal -> low_signal, not a
-# rubric-noise reject. Keep in sync with the tier writers in agentic_enricher.py
-# (the only writer of 'agentic' / 'agentic_exhausted').
-_TERMINAL_ENRICHMENT_TIERS: frozenset[str] = frozenset(
-    {"exhausted", "agentic", "agentic_exhausted"}
-)
+# Tiers from which no further automatic enrichment will run AND the JD is genuinely
+# unobtainable. A job at one of these tiers with a short JD has no signal ->
+# low_signal, not a rubric-noise reject. Single source of truth lives in
+# job_finder.enrichment_states.LOW_SIGNAL_TERMINAL (F1 fix); aliased here as a
+# string frozenset (StrEnum members compare equal to their string values, so
+# membership tests against raw enrichment_tier strings are unchanged).
+_TERMINAL_ENRICHMENT_TIERS: frozenset[str] = frozenset(LOW_SIGNAL_TERMINAL)
 
 
 @dataclass(frozen=True)
