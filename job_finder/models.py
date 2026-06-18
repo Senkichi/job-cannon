@@ -93,9 +93,9 @@ class Job:
         Returns:
             String in format "{normalized_company}|{normalized_title}"
         """
-        from job_finder.normalizers import normalize_company, normalize_title
+        from job_finder.normalizers import derive_dedup_key
 
-        return f"{normalize_company(company)}|{normalize_title(title)}"
+        return derive_dedup_key(company, title)
 
     @property
     def dedup_key(self) -> str:

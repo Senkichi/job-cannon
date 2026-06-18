@@ -34,15 +34,26 @@ def _migration_version(entry, position_one_indexed):
 
 
 def test_migration_versions_strictly_monotonic_starting_at_1():
-    """Versions form a contiguous 1..N sequence with no gaps or duplicates.
+    """Versions are strictly increasing, unique, and start at 1.
 
     This is the MI-4 enforcement test. Any re-ordering, renumbering, or drop
-    surfaces here as a non-`range(1, N+1)` sequence.
+    surfaces here as a non-monotonic or duplicated sequence.
+
+    Forward gaps ARE permitted: a cohort may allocate a block of numbers and
+    land them out of order (P4.1 ships m100 before its siblings m097–m099), and
+    the runner handles gaps natively — it applies `m for m in MIGRATIONS if
+    m.version > current_version` and stamps user_version to each migration's
+    explicit `.version`. What MI-4 actually forbids is renumbering/dropping a
+    SHIPPED migration (which would make an existing DB's stored user_version a
+    wrong index), and that surfaces as a duplicate or a backwards step here.
     """
     versions = [_migration_version(m, i) for i, m in enumerate(MIGRATIONS, start=1)]
-    expected = list(range(1, len(versions) + 1))
-    assert versions == expected, (
-        f"Migration versions are not 1..N contiguous: got {versions}, expected {expected}"
+    assert versions[0] == 1, f"Migrations must start at version 1: got {versions[:3]}"
+    assert versions == sorted(versions), (
+        f"Migration versions are not sorted ascending: got {versions}"
+    )
+    assert len(versions) == len(set(versions)), (
+        f"Migration versions contain duplicates: got {versions}"
     )
 
 

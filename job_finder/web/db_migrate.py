@@ -8,10 +8,10 @@ version (`m{NNN:03d}_*.py`). Helpers (`_apply_migration`, the backup gate,
 the post-migration dedup hook) live in private modules under that package.
 
 This module is the public entry point: it loads the discovered MIGRATIONS,
-applies pending migrations, and runs the post-migration retroactive-dedup
-hook + the historical comp_data_json fixup. It also re-exports the helper
-names that tests at `tests/test_migration.py` import directly (the back-
-compat surface — see `__all__`).
+applies pending migrations, and runs the standing dedup re-key hook
+(`_run_rekey_if_stale`) + the historical comp_data_json fixup. It also
+re-exports the helper names that tests at `tests/test_migration.py` import
+directly (the back-compat surface — see `__all__`).
 
 Safety story
 ------------
@@ -39,7 +39,7 @@ from pathlib import Path
 from job_finder.web.db_helpers import standalone_connection
 from job_finder.web.migrations import MIGRATIONS, Migration, MigrationContext
 from job_finder.web.migrations._gate import MigrationBlockedError, _check_backup_recent
-from job_finder.web.migrations._post_hooks import _run_retroactive_dedup_once
+from job_finder.web.migrations._post_hooks import _run_rekey_if_stale
 from job_finder.web.migrations._runner import _apply_migration
 
 __all__ = [
@@ -157,10 +157,11 @@ def run_migrations(db_path: str, user_data_root: str | None = None) -> None:
         MigrationBlockedError: Raised by Migration 41's preflight gate when no
             recent backup exists (and ``GSD_BACKUP_CONFIRMED=1`` is not set).
 
-    After Migration 6 completes (or if it was already applied), runs the
-    retroactive deduplication merge once. A sentinel row in ``merge_log``
-    (``merge_source='migration_complete'``) tracks that this has run so that
-    subsequent startups skip the one-time operation.
+    After the migration loop, runs the standing dedup re-key hook
+    (``_run_rekey_if_stale``) once m100 is present: it re-derives dedup_keys and
+    merges duplicates whenever the stored ``dedup_normalizer_version`` (in
+    ``schema_meta``) differs from the live ``NORMALIZER_VERSION`` (D-8). This
+    replaces the old once-ever ``merge_source='migration_complete'`` sentinel.
 
     Args:
         db_path: Path to the SQLite database file.
@@ -197,11 +198,14 @@ def run_migrations(db_path: str, user_data_root: str | None = None) -> None:
         for migration in pending:
             _apply_migration(ctx, migration)
 
-        # Run retroactive dedup once after Migration 6 or later is present.
-        # Sentinel row prevents re-running on subsequent startups.
+        # Standing dedup re-key (D-8): re-derive dedup_keys + merge duplicates
+        # whenever the stored dedup_normalizer_version (seeded by m100 into
+        # schema_meta) differs from the live NORMALIZER_VERSION. Idempotent and
+        # cheap on the common path (one SELECT when versions already match);
+        # defers safely if schema_meta isn't present yet (DB below m100).
         final_version = conn.execute("PRAGMA user_version").fetchone()[0]
-        if final_version >= 6:
-            _run_retroactive_dedup_once(conn)
+        if final_version >= 100:
+            _run_rekey_if_stale(conn)
 
         # Fixup: ensure comp_data_json column exists (missed in original Migration 7).
         # Required for databases that ran Migration 7 before this column was added —

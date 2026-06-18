@@ -195,6 +195,25 @@ def normalize_title(title: str) -> str:
     return normalized
 
 
+def derive_dedup_key(company: str, title: str) -> str:
+    """Derive the current-version dedup_key using the web-layer normalizers.
+
+    Web-layer twin of ``job_finder.normalizers.derive_dedup_key``. Uses this
+    module's own ``normalize_company`` / ``normalize_title`` copies (foundation
+    cannot depend on web); the parity test guarantees byte-for-byte agreement so
+    the merge engine produces the same key as ``Job.dedup_key`` and the upsert
+    path. See D-8 and ``NORMALIZER_VERSION`` in ``job_finder.normalizers``.
+
+    Args:
+        company: Raw company name.
+        title: Raw job title.
+
+    Returns:
+        ``"{normalized_company}|{normalized_title}"`` (location excluded).
+    """
+    return f"{normalize_company(company)}|{normalize_title(title)}"
+
+
 def normalized_dedup_key(company: str, title: str, location: str = "") -> str:
     """Backward-compat wrapper. Prefer Job.normalized_dedup_key().
 
@@ -211,8 +230,16 @@ def normalized_dedup_key(company: str, title: str, location: str = "") -> str:
     return Job.normalized_dedup_key(company, title, location)
 
 
-def run_retroactive_dedup(conn: sqlite3.Connection) -> int:
-    """Merge duplicate jobs in the database using normalized dedup_keys.
+def run_retroactive_dedup(
+    conn: sqlite3.Connection,
+    merge_source: str = "migration",
+) -> int:
+    """Re-derive every row's dedup_key and merge duplicates (D-8 standing op).
+
+    This is the standing, idempotent re-key + merge operation. It is safe to run
+    repeatedly: a second run over an already-keyed DB finds no collision groups
+    and re-keys no singletons (the stored key already equals the freshly-derived
+    key), so it returns 0 and mutates nothing.
 
     This function:
     1. Computes normalized keys for all existing rows
@@ -224,12 +251,19 @@ def run_retroactive_dedup(conn: sqlite3.Connection) -> int:
     6. Inserts merge_log entries for each merge
     7. Updates canonical row's dedup_key to the normalized format
     8. Deletes duplicate rows
+    9. Re-keys lone rows whose stored key differs from the freshly-derived key
+       (no merge, just a rename + FK rewrite via ``_update_canonical_key``)
 
     Args:
         conn: Open SQLite connection with the full job-finder schema.
+        merge_source: Value written to ``merge_log.merge_source`` for each merge.
+            The legacy once-ever path passes ``"migration"``; the standing
+            version-bump re-key passes ``"rekey_v{N}"`` so the audit trail
+            distinguishes a re-key wave from the original migration.
 
     Returns:
-        Number of duplicate rows merged (deleted).
+        Number of duplicate rows merged (deleted). Re-keyed singletons are not
+        counted (no row was removed).
     """
     # Step 1: Fetch all jobs, compute normalized key for each
     rows = conn.execute("SELECT * FROM jobs ORDER BY first_seen ASC").fetchall()
@@ -240,7 +274,9 @@ def run_retroactive_dedup(conn: sqlite3.Connection) -> int:
     groups: dict[str, list[dict]] = {}
     for row in rows:
         row_dict = dict(row)
-        norm_key = f"{normalize_company(row_dict['company'])}|{normalize_title(row_dict['title'])}"
+        # Single derivation entry point (D-8) so the group key matches every
+        # other code path that computes dedup_key (Job.dedup_key, upsert).
+        norm_key = derive_dedup_key(row_dict["company"], row_dict["title"])
         groups.setdefault(norm_key, []).append(row_dict)
 
     merged_count = 0
@@ -272,7 +308,7 @@ def run_retroactive_dedup(conn: sqlite3.Connection) -> int:
                 INSERT INTO merge_log (canonical_key, merged_key, merge_source, merged_at)
                 VALUES (?, ?, ?, ?)
             """,
-                (norm_key, dup_key, "migration", utc_now_iso()),
+                (norm_key, dup_key, merge_source, utc_now_iso()),
             )
 
             # Step 6: Delete duplicate row

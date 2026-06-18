@@ -836,3 +836,284 @@ def _run_with_bad_tables(conn, old_key, new_key, fk_tables):
             )
         except _sqlite3.OperationalError:
             pass
+
+
+# ===========================================================================
+# P4.1 — versioned dedup-key derivation + standing re-key (D-8, issue #377)
+# ===========================================================================
+
+
+class TestNormalizerVersionCanary:
+    """Enforce D-8: normalize_* output cannot drift without a version bump.
+
+    The hash below pins the byte-for-byte behavior of normalize_company /
+    normalize_title over a fixed corpus. If either function's semantics change
+    so the same input maps to a different output, this test fails with the
+    message below. The required response is to bump NORMALIZER_VERSION (which
+    re-arms the standing re-key operation) AND update the pinned hash — never
+    silently update the hash to match new behavior without a version bump.
+
+    This is the enforcement that #238's stranded-key gap can never recur: a
+    normalizer change that strands existing dedup_keys is now impossible to
+    merge without also bumping the version that triggers re-derivation.
+    """
+
+    # Corpus exercises every normalize branch: suffixes, abbreviations, level
+    # strips, legal-entity prefixes, HTML, the digit<->letter boundary (#212).
+    CORPUS_COMPANY = [
+        "Klaviyo Inc.",
+        "Intuit, Inc.",
+        "Google LLC",
+        "Apple",
+        "Microsoft Corp.",
+        "Acme Ltd.",
+        "IBM Corporation",
+        "Trading Co.",
+        "  Amazon  ",
+        "HC1316 GE Precision Healthcare LLC",
+        "1144 IHS GLOBAL INC",
+        "A10 Networks, Inc",
+        "Point2 Technology Inc.",
+        "21 Tech",
+        "&amp;T Corp",
+        "<b>Acme</b> Inc.",
+    ]
+    CORPUS_TITLE = [
+        "Sr. Software Engineer",
+        "Senior Software Engineer",
+        "Jr. Developer",
+        "Staff Engineer (IC5)",
+        "Engineer Level 3",
+        "Eng. Mgr.",
+        "84Data Scientist Jobs",
+        "84 Data Scientist Jobs",
+        "Level3Engineer",
+        "Software Engineer",
+        "VP. of Sales",
+        "Product Manager",
+        "Data Scientist III",
+        "Staff DS - L5",
+    ]
+    # Update this hash ONLY together with a NORMALIZER_VERSION bump.
+    # Foundation hash: pins job_finder.normalizers, the AUTHORITATIVE dedup_key
+    # derivation path (Job.dedup_key / derive_dedup_key both route here).
+    EXPECTED_HASH = "96704e50dc764ea686aab1eed375083066e122121fe3e3d41ed763b6fb6c9f7e"
+    # Web-copy hash: the web/dedup_normalizer twin's OWN behavior over the same
+    # corpus. It differs from the foundation hash today because the web copy's
+    # normalize_company is intentionally lighter (no HTML decode / tag strip /
+    # leading-numeric-junk strip) — that pre-existing divergence is in
+    # architectural-debt-B scope (P1/P2), NOT P4.1. We pin it independently so a
+    # future web-copy edit still trips a version-bump requirement. The
+    # title-boundary cross-copy parity that dedup correctness depends on is
+    # asserted separately by test_foundation_and_web_copies_agree_on_boundary.
+    EXPECTED_WEB_HASH = "24621a1457e2c7a49cc98f5b920a9a2863d99c0bde10d1ce0ebf896899caea25"
+    EXPECTED_VERSION = 2
+
+    def _corpus_hash(self, normalize_company, normalize_title) -> str:
+        import hashlib
+
+        h = hashlib.sha256()
+        for c in self.CORPUS_COMPANY:
+            h.update(normalize_company(c).encode("utf-8"))
+            h.update(b"\x00")
+        for t in self.CORPUS_TITLE:
+            h.update(normalize_title(t).encode("utf-8"))
+            h.update(b"\x00")
+        return h.hexdigest()
+
+    def test_foundation_normalizer_behavior_pinned(self):
+        from job_finder.normalizers import (
+            NORMALIZER_VERSION,
+            normalize_company,
+            normalize_title,
+        )
+
+        got = self._corpus_hash(normalize_company, normalize_title)
+        assert got == self.EXPECTED_HASH, (
+            "normalizer semantics changed -- bump NORMALIZER_VERSION "
+            f"(and the pinned hash). version={NORMALIZER_VERSION}, "
+            f"expected_hash={self.EXPECTED_HASH}, got={got}"
+        )
+        assert NORMALIZER_VERSION == self.EXPECTED_VERSION, (
+            "NORMALIZER_VERSION changed -- update EXPECTED_VERSION and the "
+            "pinned hash in this canary if the normalize_* behavior was "
+            "intentionally bumped."
+        )
+
+    def test_web_copy_behavior_pinned(self):
+        """The web-layer copy's own behavior is pinned independently.
+
+        Catches drift in web/dedup_normalizer.normalize_* without asserting full
+        cross-copy parity on normalize_company (which legitimately differs today
+        — see EXPECTED_WEB_HASH note).
+        """
+        from job_finder.web.dedup_normalizer import normalize_company, normalize_title
+
+        got = self._corpus_hash(normalize_company, normalize_title)
+        assert got == self.EXPECTED_WEB_HASH, (
+            "web-layer normalizer semantics changed -- bump NORMALIZER_VERSION "
+            "(and the pinned web hash)."
+        )
+
+
+class TestDeriveDedupKey:
+    """derive_dedup_key is the single versioned derivation entry point."""
+
+    def test_foundation_and_web_agree(self):
+        from job_finder.normalizers import derive_dedup_key as foundation_derive
+        from job_finder.web.dedup_normalizer import derive_dedup_key as web_derive
+
+        for company, title in (
+            ("Klaviyo Inc.", "Sr. Software Engineer"),
+            ("Capital One", "84Data Scientist Jobs"),
+            ("Google LLC", "Staff Engineer (IC5)"),
+        ):
+            assert foundation_derive(company, title) == web_derive(company, title)
+
+    def test_matches_job_dedup_key(self):
+        from job_finder.models import Job
+        from job_finder.normalizers import derive_dedup_key
+
+        job = Job(
+            title="Sr. Engineer",
+            company="Klaviyo Inc.",
+            location="SF",
+            source="test",
+            source_url="https://example.com",
+        )
+        assert job.dedup_key == derive_dedup_key("Klaviyo Inc.", "Sr. Engineer")
+
+    def test_location_excluded(self):
+        from job_finder.normalizers import derive_dedup_key
+
+        assert derive_dedup_key("Acme", "Engineer") == derive_dedup_key("Acme", "Engineer")
+        # No third segment.
+        assert len(derive_dedup_key("Acme", "Engineer").split("|")) == 2
+
+
+class TestRunRetroactiveDedupMergeSource:
+    """The merge_source parameter labels re-key runs distinctly (rekey_v{N})."""
+
+    def test_default_merge_source_is_migration(self, mem_db):
+        from job_finder.web.dedup_normalizer import run_retroactive_dedup
+
+        _insert_job(
+            mem_db, "old-key-1", "Senior Engineer", "Acme Inc.", first_seen="2026-01-01T00:00:00"
+        )
+        _insert_job(
+            mem_db, "old-key-2", "Senior Engineer", "Acme", first_seen="2026-01-05T00:00:00"
+        )
+
+        run_retroactive_dedup(mem_db)
+
+        sources = {r["merge_source"] for r in mem_db.execute("SELECT merge_source FROM merge_log")}
+        assert sources == {"migration"}
+
+    def test_custom_merge_source_recorded(self, mem_db):
+        from job_finder.web.dedup_normalizer import run_retroactive_dedup
+
+        _insert_job(
+            mem_db, "old-key-1", "Senior Engineer", "Acme Inc.", first_seen="2026-01-01T00:00:00"
+        )
+        _insert_job(
+            mem_db, "old-key-2", "Senior Engineer", "Acme", first_seen="2026-01-05T00:00:00"
+        )
+
+        run_retroactive_dedup(mem_db, merge_source="rekey_v2")
+
+        sources = {r["merge_source"] for r in mem_db.execute("SELECT merge_source FROM merge_log")}
+        assert sources == {"rekey_v2"}
+
+    def test_rekeys_lone_stale_singleton(self, mem_db):
+        """A single row whose stored key != derived key is re-keyed (no merge)."""
+        from job_finder.models import Job
+        from job_finder.web.dedup_normalizer import run_retroactive_dedup
+
+        # Stale key in the old (pre-#238) form; only one row -> no merge, rename.
+        _insert_job(
+            mem_db,
+            "capital one|84data scientist jobs",
+            "84Data Scientist Jobs",
+            "Capital One",
+            first_seen="2026-01-01T00:00:00",
+        )
+        # Add an FK row to prove the rename rewrites FK tables too.
+        mem_db.execute(
+            "INSERT INTO pipeline_events (job_id, to_status, timestamp) "
+            "VALUES ('capital one|84data scientist jobs', 'discovered', '2026-01-01T00:00:00')"
+        )
+        mem_db.commit()
+
+        merged = run_retroactive_dedup(mem_db, merge_source="rekey_v2")
+
+        assert merged == 0  # no row removed
+        rows = mem_db.execute("SELECT dedup_key FROM jobs").fetchall()
+        assert len(rows) == 1
+        expected = Job.normalized_dedup_key("Capital One", "84Data Scientist Jobs")
+        assert rows[0]["dedup_key"] == expected
+        # FK rewritten to the new canonical key.
+        ev = mem_db.execute("SELECT job_id FROM pipeline_events").fetchone()
+        assert ev["job_id"] == expected
+
+    def test_merge_preserves_user_fields(self, mem_db):
+        """Re-key merge keeps highest pipeline_status and concatenates notes."""
+        from job_finder.web.dedup_normalizer import run_retroactive_dedup
+
+        _insert_job(
+            mem_db,
+            "old-key-1",
+            "Senior Engineer",
+            "Acme Inc.",
+            pipeline_status="applied",
+            notes="Called the recruiter.",
+            first_seen="2026-01-01T00:00:00",
+        )
+        _insert_job(
+            mem_db,
+            "old-key-2",
+            "Senior Engineer",
+            "Acme",
+            pipeline_status="discovered",
+            notes="Found via LinkedIn.",
+            first_seen="2026-01-05T00:00:00",
+        )
+
+        run_retroactive_dedup(mem_db, merge_source="rekey_v2")
+
+        rows = mem_db.execute("SELECT pipeline_status, notes FROM jobs").fetchall()
+        assert len(rows) == 1
+        assert rows[0]["pipeline_status"] == "applied"  # higher precedence wins
+        assert "Called the recruiter." in rows[0]["notes"]
+        assert "Found via LinkedIn." in rows[0]["notes"]
+
+    def test_idempotent_second_run_is_noop(self, mem_db):
+        """Re-running over already-keyed rows merges nothing and renames nothing."""
+        from job_finder.web.dedup_normalizer import run_retroactive_dedup
+
+        _insert_job(
+            mem_db, "old-key-1", "Senior Engineer", "Acme Inc.", first_seen="2026-01-01T00:00:00"
+        )
+        _insert_job(
+            mem_db, "old-key-2", "Senior Engineer", "Acme", first_seen="2026-01-05T00:00:00"
+        )
+
+        first = run_retroactive_dedup(mem_db, merge_source="rekey_v2")
+        assert first == 1
+        keys_after_first = {r["dedup_key"] for r in mem_db.execute("SELECT dedup_key FROM jobs")}
+
+        second = run_retroactive_dedup(mem_db, merge_source="rekey_v2")
+        assert second == 0
+        keys_after_second = {r["dedup_key"] for r in mem_db.execute("SELECT dedup_key FROM jobs")}
+        assert keys_after_first == keys_after_second
+
+    def test_distinct_jobs_never_merged(self, mem_db):
+        """Two genuinely different jobs keep separate rows after a re-key run."""
+        from job_finder.web.dedup_normalizer import run_retroactive_dedup
+
+        _insert_job(mem_db, "k1", "Data Scientist", "Acme", first_seen="2026-01-01T00:00:00")
+        _insert_job(mem_db, "k2", "Product Manager", "Acme", first_seen="2026-01-02T00:00:00")
+
+        merged = run_retroactive_dedup(mem_db, merge_source="rekey_v2")
+
+        assert merged == 0
+        assert mem_db.execute("SELECT COUNT(*) FROM jobs").fetchone()[0] == 2
