@@ -18,8 +18,11 @@ import subprocess
 import sys
 from unittest.mock import patch
 
+import pytest
+
 from job_finder.db import JobAssessment
 from job_finder.web.job_scorer import ScoringResult
+from scripts import v3_rescore
 from scripts.v3_rescore import run_batch, select_batch_rows
 
 # ---------------------------------------------------------------------------
@@ -341,3 +344,152 @@ def test_cli_help_exits_zero():
     assert "--seed" in result.stdout
     assert "--report-path" in result.stdout
     assert "--batch-number" in result.stdout
+
+
+# ---------------------------------------------------------------------------
+# Scheduler-backfill pause/restore (issue #455)
+# ---------------------------------------------------------------------------
+
+
+class _FakeResp:
+    """Minimal urlopen() context-manager stand-in for /admin/jobs."""
+
+    def __init__(self, body: str):
+        self._body = body.encode()
+
+    def read(self) -> bytes:
+        return self._body
+
+    def __enter__(self) -> _FakeResp:
+        return self
+
+    def __exit__(self, *exc) -> bool:
+        return False
+
+
+def _admin_jobs_json(*, include_ingestion: bool = False, **paused: bool) -> str:
+    jobs = [{"id": job_id, "paused": paused_state} for job_id, paused_state in paused.items()]
+    if include_ingestion:
+        # ingestion_poll must always be present-but-ignored.
+        jobs.append({"id": "ingestion_poll", "paused": False})
+    return json.dumps({"jobs": jobs})
+
+
+def _make_main_argv(tmp_path) -> list[str]:
+    """Build a valid argv pointing main() at a throwaway config + sqlite DB."""
+    db_path = tmp_path / "jobs.db"
+    sqlite3.connect(str(db_path)).close()
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text(f"db:\n  path: {db_path.as_posix()}\n")
+    report = tmp_path / "report.json"
+    return [
+        "--batch-size",
+        "5",
+        "--seed",
+        "1",
+        "--batch-number",
+        "1",
+        "--report-path",
+        str(report),
+        "--config-path",
+        str(cfg),
+    ]
+
+
+def _stub_batch(monkeypatch, *, run_batch_side_effect=None):
+    """Replace the real scoring path so main() does no DB/LLM work."""
+    monkeypatch.setattr(v3_rescore, "select_batch_rows", lambda *a, **k: [])
+
+    def _fake_run_batch(*a, **k):
+        if run_batch_side_effect is not None:
+            raise run_batch_side_effect
+        return {"row_count_rescored": 0, "row_count_failed": 0, "wall_clock_seconds": 0.0}
+
+    monkeypatch.setattr(v3_rescore, "run_batch", _fake_run_batch)
+
+
+def _record_pause_resume(monkeypatch):
+    """Capture every _pause / _resume call as (action, job_id) tuples."""
+    calls: list[tuple[str, str]] = []
+    monkeypatch.setattr(v3_rescore, "_pause", lambda base, jid: calls.append(("pause", jid)))
+    monkeypatch.setattr(v3_rescore, "_resume", lambda base, jid: calls.append(("resume", jid)))
+    return calls
+
+
+def test_pause_resume_records_and_restores_prior_state(tmp_path, monkeypatch):
+    """Both targets paused; the previously-running one resumed, the other left paused."""
+    monkeypatch.setattr(
+        v3_rescore,
+        "_read_paused_state",
+        lambda base: {"enrichment_backfill": False, "agentic_backfill": True},
+    )
+    calls = _record_pause_resume(monkeypatch)
+    _stub_batch(monkeypatch)
+
+    rc = v3_rescore.main(_make_main_argv(tmp_path))
+
+    assert rc == 0
+    paused = [jid for action, jid in calls if action == "pause"]
+    resumed = [jid for action, jid in calls if action == "resume"]
+    assert set(paused) == {"enrichment_backfill", "agentic_backfill"}
+    # Only the previously-running job is resumed; the manually-paused one stays paused.
+    assert resumed == ["enrichment_backfill"]
+    assert "agentic_backfill" not in resumed
+
+
+def test_crash_mid_rescore_restores_state(tmp_path, monkeypatch):
+    """A crash mid-run still restores prior state and re-raises the original error."""
+    monkeypatch.setattr(
+        v3_rescore,
+        "_read_paused_state",
+        lambda base: {"enrichment_backfill": False, "agentic_backfill": False},
+    )
+    calls = _record_pause_resume(monkeypatch)
+    boom = RuntimeError("scoring exploded")
+    _stub_batch(monkeypatch, run_batch_side_effect=boom)
+
+    with pytest.raises(RuntimeError, match="scoring exploded"):
+        v3_rescore.main(_make_main_argv(tmp_path))
+
+    resumed = [jid for action, jid in calls if action == "resume"]
+    # Both were running before the crash → both must be resumed despite the failure.
+    assert set(resumed) == {"enrichment_backfill", "agentic_backfill"}
+
+
+def test_ingestion_poll_never_touched(tmp_path, monkeypatch):
+    """ingestion_poll is filtered out of prior state and never paused/resumed."""
+    body = _admin_jobs_json(
+        include_ingestion=True,
+        enrichment_backfill=False,
+        agentic_backfill=False,
+    )
+    monkeypatch.setattr(
+        v3_rescore.urllib.request,
+        "urlopen",
+        lambda *a, **k: _FakeResp(body),
+    )
+    calls = _record_pause_resume(monkeypatch)
+    _stub_batch(monkeypatch)
+
+    rc = v3_rescore.main(_make_main_argv(tmp_path))
+
+    assert rc == 0
+    touched = {jid for _action, jid in calls}
+    assert "ingestion_poll" not in touched
+    assert touched == {"enrichment_backfill", "agentic_backfill"}
+
+
+def test_scheduler_unreachable_proceeds(tmp_path, monkeypatch):
+    """A down scheduler yields {} prior state; rescore proceeds and exits 0, no pause/resume."""
+
+    def _boom(*a, **k):
+        raise v3_rescore.urllib.error.URLError("connection refused")
+
+    monkeypatch.setattr(v3_rescore.urllib.request, "urlopen", _boom)
+    calls = _record_pause_resume(monkeypatch)
+    _stub_batch(monkeypatch)
+
+    rc = v3_rescore.main(_make_main_argv(tmp_path))
+
+    assert rc == 0
+    assert calls == []

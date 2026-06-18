@@ -25,6 +25,8 @@ import random
 import sqlite3
 import sys
 import time
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 import yaml
@@ -237,6 +239,90 @@ def _load_db_path(config: dict, override: str | None) -> str:
     )
 
 
+# ---------------------------------------------------------------------------
+# Scheduler-backfill pause/restore (issue #455)
+#
+# A wholesale rescore selects rows where classification IS NULL — the same
+# rows the scheduled enrichment_backfill / agentic_backfill jobs claim. This
+# script runs out-of-process with no scheduler handle, so it pauses those two
+# backfills over the running app's admin HTTP API and restores each job's
+# prior paused/unpaused state on every exit path (normal, exception, kill).
+# ingestion_poll is deliberately never touched.
+# ---------------------------------------------------------------------------
+
+_TARGET_JOB_IDS: tuple[str, ...] = ("enrichment_backfill", "agentic_backfill")
+
+_DEFAULT_ADMIN_BASE_URL = "http://127.0.0.1:5000"
+
+
+def _admin_base_url(args: argparse.Namespace) -> str:
+    """Resolve the admin API base URL (CLI override or the default constant)."""
+    return getattr(args, "admin_base_url", None) or _DEFAULT_ADMIN_BASE_URL
+
+
+def _read_paused_state(base_url: str) -> dict[str, bool]:
+    """Return ``{job_id: paused}`` for the target backfills via GET /admin/jobs.
+
+    Returns a fresh dict restricted to ``_TARGET_JOB_IDS``. On connection
+    failure (app/scheduler not running) logs a warning and returns ``{}`` —
+    nothing to pause, so the rescore proceeds unguarded.
+    """
+    url = f"{base_url}/admin/jobs"
+    try:
+        with urllib.request.urlopen(url, timeout=5) as resp:  # noqa: S310 — fixed http://127.0.0.1 scheme
+            payload = json.loads(resp.read().decode())
+    except (urllib.error.URLError, OSError, ValueError) as exc:
+        log.warning("Could not read scheduler state from %s (%s); proceeding unguarded", url, exc)
+        return {}
+    return {
+        job["id"]: bool(job["paused"])
+        for job in payload.get("jobs", [])
+        if job.get("id") in _TARGET_JOB_IDS
+    }
+
+
+def _pause(base_url: str, job_id: str) -> None:
+    """POST /admin/jobs/{job_id}/pause; tolerate 404 (job absent)."""
+    url = f"{base_url}/admin/jobs/{job_id}/pause"
+    req = urllib.request.Request(url, method="POST")  # noqa: S310 — fixed http://127.0.0.1 scheme
+    try:
+        urllib.request.urlopen(req, timeout=5).read()  # noqa: S310 — fixed http://127.0.0.1 scheme
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            log.warning("Cannot pause %s: scheduler reports no such job (404)", job_id)
+            return
+        raise
+    except (urllib.error.URLError, OSError) as exc:
+        log.warning("Failed to pause %s (%s)", job_id, exc)
+
+
+def _resume(base_url: str, job_id: str) -> None:
+    """POST /admin/jobs/{job_id}/resume; tolerate 404 (job absent)."""
+    url = f"{base_url}/admin/jobs/{job_id}/resume"
+    req = urllib.request.Request(url, method="POST")  # noqa: S310 — fixed http://127.0.0.1 scheme
+    try:
+        urllib.request.urlopen(req, timeout=5).read()  # noqa: S310 — fixed http://127.0.0.1 scheme
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            log.warning("Cannot resume %s: scheduler reports no such job (404)", job_id)
+            return
+        raise
+    except (urllib.error.URLError, OSError) as exc:
+        log.warning("Failed to resume %s (%s)", job_id, exc)
+
+
+def _restore_paused_state(base_url: str, prior: dict[str, bool]) -> None:
+    """Restore each recorded job to its prior state.
+
+    Only resumes jobs that were running (``prior[job_id] is False``). A job the
+    user had already paused stays paused — we never resume a manually-paused job.
+    """
+    for job_id, was_paused in prior.items():
+        if not was_paused:
+            _resume(base_url, job_id)
+            log.info("Restored %s to prior state", job_id)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="v3.0 rescore runner (Phase 34 Plan 4)")
     parser.add_argument("--batch-size", type=int, required=True)
@@ -257,6 +343,12 @@ def main(argv: list[str] | None = None) -> int:
         "that converges global G1 to zero.",
     )
     parser.add_argument("--config-path", default="config.yaml")
+    parser.add_argument(
+        "--admin-base-url",
+        default=_DEFAULT_ADMIN_BASE_URL,
+        help="Base URL of the running app's admin API used to pause/resume "
+        "the enrichment_backfill / agentic_backfill jobs during the rescore.",
+    )
     args = parser.parse_args(argv)
 
     logging.basicConfig(
@@ -269,8 +361,18 @@ def main(argv: list[str] | None = None) -> int:
     report_path = Path(args.report_path)
     report_path.parent.mkdir(parents=True, exist_ok=True)
 
+    base_url = _admin_base_url(args)
     conn = sqlite3.connect(db_path)
+    # Record prior backfill state up front so restoration in `finally` runs on
+    # every exit path (normal, exception, KeyboardInterrupt/SystemExit) — a
+    # killed run never leaves a scheduler job permanently paused.
+    prior = _read_paused_state(base_url)
     try:
+        # Pause the targets so they don't race the rescore over
+        # `classification IS NULL` rows (pause is no-op-safe on already-paused).
+        for job_id in prior:
+            _pause(base_url, job_id)
+            log.info("Paused %s for rescore", job_id)
         keys = select_batch_rows(
             conn,
             args.batch_size,
@@ -298,6 +400,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     finally:
         conn.close()
+        _restore_paused_state(base_url, prior)
 
 
 if __name__ == "__main__":
