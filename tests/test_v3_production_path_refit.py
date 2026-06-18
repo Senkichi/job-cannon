@@ -204,6 +204,12 @@ def test_g4_score_job_production_wiring():
 
     sample_path, gold_path, _source = _resolve_wiring_artifacts()
     sample_row, gold_entry = _first_paired_row(sample_path, gold_path)
+    # P3.2 location gate (issue #391): this contract exercises the dispatcher ->
+    # _coerce_assessment -> JobAssessment wiring, not the location gate. Fixture
+    # rows (real Phase 33 + synthetic) predate the gate and may carry no location,
+    # which would now skip scoring. Ensure the row satisfies the gate — just like
+    # it already carries jd_full — so the wiring path actually runs.
+    sample_row = {**sample_row, "location": sample_row.get("location") or "Remote"}
     response_data = {dim: gold_entry[dim] for dim in _SUB_SCORE_KEYS}
     response_data["rationale"] = gold_entry.get("rationale") or {}
     response_data["legitimacy_note"] = gold_entry.get("legitimacy_note")
