@@ -88,8 +88,15 @@ orchestrator-state/
 *.db.bak*
 
 # Internal planning + working notes — entire .planning/ tree is untracked.
-# All subdirectories and files are ignored; no exceptions (issue #305).
-.planning/
+# All subdirectories and files are ignored (issue #305). The single
+# exception below: the ATS-coverage next-steps doc is tracked on purpose so
+# it cannot be lost again the way the original gitignored copy was (issue
+# #452) — it's a repeatable audit baseline downstream scanner work depends on.
+# NOTE: glob the contents (`.planning/*`), not the directory (`.planning/`), so
+# git still recurses into .planning/ and the single negation below can take
+# effect (a file under a directory-level ignore cannot be re-included).
+.planning/*
+!.planning/NEXT_STEPS_ATS_COVERAGE.md
 
 # Cascade audit (phase 36/37) artifact outputs — regenerable, may contain
 # LLM cost details and per-row provider responses. JD source samples under
