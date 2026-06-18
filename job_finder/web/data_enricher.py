@@ -46,6 +46,7 @@ from job_finder.config import JD_STORAGE_MAX_CHARS
 from job_finder.db._direct_link import set_direct_url
 from job_finder.db._jd_full import set_jd_full as _set_jd_full
 from job_finder.db._jobs import _reconcile_salary_for_write
+from job_finder.db._locations import apply_location_observation
 from job_finder.enrichment_states import (
     EnrichmentTier,
     backfill_skip_sql,
@@ -121,9 +122,14 @@ TIER_ORDER = [
     EnrichmentTier.EXHAUSTED.value,
 ]
 
-# Allowlist of jobs table columns that _persist() may write. Prevents AI-extracted
-# dict keys from injecting arbitrary column names into dynamic SQL SET clauses.
-_ENRICHABLE_COLUMNS = frozenset({"jd_full", "salary_min", "salary_max", "location"})
+# Allowlist of jobs table columns that _persist() may write directly. Prevents
+# AI-extracted dict keys from injecting arbitrary column names into dynamic SQL
+# SET clauses. ``location`` is deliberately NOT here: an extracted location is
+# routed through ``apply_location_observation`` (the D-5 single-writer funnel)
+# rather than side-door-written to the ``location`` column — that side-door
+# write with an empty ``locations_raw`` was the S4 wipe (next crawler
+# re-sighting rebuilt ``location`` from ``locations_raw=[]`` and reverted it).
+_ENRICHABLE_COLUMNS = frozenset({"jd_full", "salary_min", "salary_max"})
 
 # Per-field cost ceilings: highest tier allowed to search for this field.
 # After this tier fails for a field, it is abandoned (not escalated further).
@@ -767,12 +773,25 @@ def _persist(conn: Any, job_row: dict, enriched: dict, tier_name: str) -> None:
     if not dedup_key:
         return
 
+    # --- Step 0: location — route through the D-5 single-writer funnel ---
+    # An extracted location is an *observation*, not a direct column write. The
+    # funnel merges it into locations_raw + rewrites all five canonical location
+    # columns atomically, so a later crawler re-sighting (empty incoming
+    # location) cannot wipe it (the S4 bug). Pop it before the allowlist filter
+    # so it is neither dropped-as-unknown nor written directly.
+    if enriched:
+        location_obs = enriched.get("location")
+        if location_obs and str(location_obs).strip():
+            apply_location_observation(conn, dedup_key, str(location_obs), source="llm_extract")
+
     if enriched:
         # Filter to allowlisted columns only — prevents AI-extracted keys from
         # injecting arbitrary column names into the dynamic SQL SET clause.
+        # ``location`` is intentionally excluded (handled by the funnel above);
+        # drop it silently rather than logging it as an unknown column.
         safe_enriched = {k: v for k, v in enriched.items() if k in _ENRICHABLE_COLUMNS}
-        if safe_enriched != enriched:
-            unknown = set(enriched) - _ENRICHABLE_COLUMNS
+        unknown = set(enriched) - _ENRICHABLE_COLUMNS - {"location"}
+        if unknown:
             logger.warning("_persist: dropping non-allowlisted columns: %s", unknown)
     else:
         safe_enriched = {}
