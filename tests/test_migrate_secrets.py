@@ -80,7 +80,9 @@ class TestMigrateSecretsDryRun:
         # No config edit.
         assert config_path.read_text(encoding="utf-8") == before
         # No keyring write.
-        assert keyring_lib.get_password("job-cannon", "sources.serpapi.api_key") is None
+        from job_finder.secrets import _service_name
+
+        assert keyring_lib.get_password(_service_name(), "sources.serpapi.api_key") is None
 
 
 class TestMigrateSecretsNothingToMigrate:
@@ -120,12 +122,15 @@ class TestMigrateSecretsLiveRun:
         out = capsys.readouterr().out
         assert "Migrated 2 secret(s)" in out
 
-        # Keyring populated.
+        # Keyring populated (under the data-dir-namespaced service, Issue #396).
+        from job_finder.secrets import _service_name
+
         assert (
-            keyring_lib.get_password("job-cannon", "sources.serpapi.api_key") == "sk-live-secret"
+            keyring_lib.get_password(_service_name(), "sources.serpapi.api_key")
+            == "sk-live-secret"
         )
         assert (
-            keyring_lib.get_password("job-cannon", "sources.imap.app_password")
+            keyring_lib.get_password(_service_name(), "sources.imap.app_password")
             == "abcd efgh ijkl mnop"
         )
 
@@ -187,7 +192,10 @@ class TestMigrateSecretsErrors:
 
         rc = migrate_secrets.main(["--force"])
         assert rc == 0
-        assert keyring_lib.get_password("job-cannon", "sources.serpapi.api_key") == "sk-force"
+        assert (
+            keyring_lib.get_password(jf_secrets._service_name(), "sources.serpapi.api_key")
+            == "sk-force"
+        )
 
     def test_no_force_with_failed_probe_exits_one(self, isolated_user_data, monkeypatch, capsys):
         from job_finder import migrate_secrets

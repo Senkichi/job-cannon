@@ -515,9 +515,11 @@ def test_done_writes_imap_app_password_to_keyring(configured_app):
         resp = configured_app.test_client().post("/onboarding/done")
     assert resp.status_code == 302
 
-    # Keyring has it.
+    # Keyring has it (under the data-dir-namespaced service, Issue #396).
+    from job_finder.secrets import _service_name
+
     assert (
-        keyring_lib.get_password("job-cannon", "sources.imap.app_password")
+        keyring_lib.get_password(_service_name(), "sources.imap.app_password")
         == "abcd efgh ijkl mnop"
     )
 
@@ -571,8 +573,10 @@ def test_done_writes_provider_api_key_to_keyring(configured_app):
         resp = configured_app.test_client().post("/onboarding/done")
     assert resp.status_code == 302
 
+    from job_finder.secrets import _service_name
+
     assert (
-        keyring_lib.get_password("job-cannon", "providers.api_keys.openrouter")
+        keyring_lib.get_password(_service_name(), "providers.api_keys.openrouter")
         == "sk-or-test-12345"
     )
 

@@ -6,9 +6,15 @@ and the legacy config.yaml plaintext path can coexist while we migrate.
 Precedence (highest to lowest):
     1. Explicit env var (per SECRET_ENV_VARS below).
        Power users and CI / `.env` files keep working unchanged.
-    2. OS keyring entry under service="job-cannon", username=<canonical name>.
+    2. OS keyring entry under a data-dir-namespaced service
+       ("job-cannon:<digest>"), username=<canonical name>.
        Auto-selected backend: Windows Credential Manager, macOS Keychain,
        or Linux Secret Service via D-Bus.
+       The service name is namespaced by the resolved user-data directory so
+       two installs / data-dirs on the same machine can never collide on the
+       machine-global keyring (Issue #396). Reads transparently fall back to
+       the pre-namespacing legacy service ("job-cannon") so existing users
+       don't lose secrets after upgrade.
     3. Legacy config.yaml plaintext field at the matching dotted path.
        Emits a one-time deprecation warning per secret per process boot.
     4. None — caller's "if not secret: skip" guards handle source-disabled.
@@ -19,6 +25,7 @@ wide flag at boot; subsequent reads skip step 2 and writes raise
 RuntimeError so the Settings UI can flash a backend-missing warning.
 """
 
+import hashlib
 import logging
 import os
 
@@ -27,8 +34,35 @@ import keyring.errors
 
 logger = logging.getLogger(__name__)
 
-_SERVICE = "job-cannon"
+# Pre-namespacing service name. Secrets written before Issue #396 live here.
+# Reads fall back to it so upgrading users keep their stored secrets; writes
+# always target the namespaced service so collisions can't be reintroduced.
+_LEGACY_SERVICE = "job-cannon"
 _KEYRING_UNAVAILABLE = False  # set by probe_keyring_backend()
+
+
+def _service_name() -> str:
+    """Return the keyring service namespaced by the resolved user-data dir.
+
+    The machine-global OS keyring is keyed only by (service, username), so a
+    static service name made every install / data-dir on the box share the
+    same entry — re-running onboarding in one install clobbered another's
+    Gmail app password (Issue #396). Deriving the service from the resolved
+    user-data root makes that collision structurally impossible.
+
+    A short digest of the resolved path (not the raw path) keeps the service
+    string compact and free of characters that some keyring backends reject,
+    while staying stable for a given data-dir across process restarts.
+    """
+    # Imported lazily to avoid a circular import at module load
+    # (user_data_dirs has no dependency on secrets, but keeping this local
+    # also lets per-test JOB_CANNON_USER_DATA_DIR overrides take effect).
+    from job_finder.web import user_data_dirs
+
+    root = str(user_data_dirs.user_data_root().resolve())
+    digest = hashlib.sha256(root.encode("utf-8")).hexdigest()[:16]
+    return f"{_LEGACY_SERVICE}:{digest}"
+
 
 # Canonical secret name → env var name(s). Env wins per the precedence stack
 # documented in the module docstring. When adding a new secret:
@@ -80,7 +114,7 @@ def probe_keyring_backend() -> bool:
     """
     global _KEYRING_UNAVAILABLE
     try:
-        keyring.get_password(_SERVICE, "_probe")
+        keyring.get_password(_service_name(), "_probe")
         _KEYRING_UNAVAILABLE = False
         return True
     except keyring.errors.NoKeyringError as exc:
@@ -118,14 +152,17 @@ def get_secret(name: str, *, config: dict | None = None) -> str | None:
         if v:
             return v
 
-    # Step 2: keyring (skipped if unavailable)
+    # Step 2: keyring (skipped if unavailable). Read the data-dir-namespaced
+    # service first, then fall back to the pre-#396 legacy service so secrets
+    # stored before the upgrade still resolve.
     if not _KEYRING_UNAVAILABLE:
-        try:
-            v = keyring.get_password(_SERVICE, name)
-            if v:
-                return v
-        except keyring.errors.KeyringError as exc:
-            logger.warning("keyring read failed for %s: %s", name, exc)
+        for service in (_service_name(), _LEGACY_SERVICE):
+            try:
+                v = keyring.get_password(service, name)
+                if v:
+                    return v
+            except keyring.errors.KeyringError as exc:
+                logger.warning("keyring read failed for %s (%s): %s", name, service, exc)
 
     # Step 3: config.yaml legacy fallback
     if config is not None:
@@ -148,7 +185,7 @@ def set_secret(name: str, value: str) -> None:
         raise ValueError(f"Unknown secret name: {name!r}")
     if _KEYRING_UNAVAILABLE:
         raise RuntimeError("OS keyring is unavailable; cannot write secret")
-    keyring.set_password(_SERVICE, name, value)
+    keyring.set_password(_service_name(), name, value)
 
 
 def delete_secret(name: str) -> None:
@@ -159,17 +196,25 @@ def delete_secret(name: str) -> None:
     """
     if _KEYRING_UNAVAILABLE:
         return
-    try:
-        keyring.delete_password(_SERVICE, name)
-    except keyring.errors.PasswordDeleteError:
-        pass
+    # Delete from both the namespaced and legacy services so a removed secret
+    # can't resurface through the legacy read-fallback in get_secret().
+    for service in (_service_name(), _LEGACY_SERVICE):
+        try:
+            keyring.delete_password(service, name)
+        except keyring.errors.PasswordDeleteError:
+            pass
 
 
 def list_secrets() -> list[str]:
     """Return canonical names of secrets currently present in the keyring."""
     if _KEYRING_UNAVAILABLE:
         return []
-    return [name for name in SECRET_ENV_VARS if keyring.get_password(_SERVICE, name)]
+    service = _service_name()
+    return [
+        name
+        for name in SECRET_ENV_VARS
+        if keyring.get_password(service, name) or keyring.get_password(_LEGACY_SERVICE, name)
+    ]
 
 
 def _walk_config(config: dict, dotted_path: str) -> str | None:
