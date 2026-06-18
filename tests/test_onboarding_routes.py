@@ -63,11 +63,11 @@ def _no_live_provider_detection():
         yield
 
 
-# The 8 routes + their marker strings (success criterion 2)
+# The 7 routes + their marker strings (success criterion 2). Issue #441 merged
+# provider_credentials into provider_select, so it no longer has its own route.
 _ROUTE_TO_MARKER = [
     ("/onboarding/welcome", "WIZARD_STEP_WELCOME_MARKER"),
     ("/onboarding/provider_select", "WIZARD_STEP_PROVIDER_SELECT_MARKER"),
-    ("/onboarding/provider_credentials", "WIZARD_STEP_PROVIDER_CREDENTIALS_MARKER"),
     ("/onboarding/resume_upload", "WIZARD_STEP_RESUME_UPLOAD_MARKER"),
     ("/onboarding/profile_edit", "WIZARD_STEP_PROFILE_EDIT_MARKER"),
     ("/onboarding/imap_credentials", "WIZARD_STEP_IMAP_CREDENTIALS_MARKER"),
@@ -101,16 +101,24 @@ def test_welcome_renders_system_check_results(client):
 
 
 def test_step_indicator_renders(client):
-    """Step indicator passes step_num and step_label to _base.html."""
+    """Step indicator passes step_num and step_label to _base.html.
+
+    Issue #441 collapsed provider_credentials into provider_select, so the
+    denominator dropped from 8 to 7 and schedule/done renumbered to 6/7.
+    """
     resp = client.get("/onboarding/welcome")
     body = resp.get_data(as_text=True)
-    assert "Step 1 of 8" in body
+    assert "Step 1 of 7" in body
     assert "Welcome" in body
 
     resp = client.get("/onboarding/schedule")
     body = resp.get_data(as_text=True)
-    assert "Step 7 of 8" in body
+    assert "Step 6 of 7" in body
     assert "Schedule" in body
+
+    resp = client.get("/onboarding/done")
+    body = resp.get_data(as_text=True)
+    assert "Step 7 of 7" in body
 
 
 def test_welcome_post_redirects_to_provider_select(client):
@@ -120,13 +128,16 @@ def test_welcome_post_redirects_to_provider_select(client):
     assert "/onboarding/provider_select" in resp.headers["Location"]
 
 
-def test_provider_select_post_writes_wizard_data_and_redirects(client, app):
-    """POST /onboarding/provider_select writes {provider: {name}} to wizard_data, redirects to credentials."""
+def test_provider_select_post_no_cred_provider_writes_name_and_redirects(client, app):
+    """POST a no-cred provider writes {provider: {name}} and redirects to resume_upload (Issue #441).
+
+    No credential round-trip — the merged screen sends $0 CLIs straight through.
+    """
     resp = client.post("/onboarding/provider_select", data={"provider_name": "ollama"})
     assert resp.status_code == 302
-    assert "/onboarding/provider_credentials" in resp.headers["Location"]
+    assert "/onboarding/resume_upload" in resp.headers["Location"]
 
-    # Verify wizard_data was written
+    # Verify wizard_data was written (name only, no api_key)
     conn = sqlite3.connect(app.config["DB_PATH"])
     try:
         row = conn.execute("SELECT wizard_data FROM onboarding_state WHERE id=1").fetchone()
@@ -135,43 +146,92 @@ def test_provider_select_post_writes_wizard_data_and_redirects(client, app):
 
         data = json.loads(row[0])
         assert data["provider"]["name"] == "ollama"
+        assert "api_key" not in data["provider"]
     finally:
         conn.close()
 
 
-def test_provider_credentials_no_creds_for_free_clis(client, app):
-    """provider_credentials GET for ollama renders the 'no credentials needed' card."""
-    # First write a provider choice to wizard_data
+def test_provider_select_post_byo_writes_api_key_and_redirects(client, app):
+    """Issue #441: POST a BYO-key provider with an api_key writes both and redirects to resume_upload."""
+    resp = client.post(
+        "/onboarding/provider_select",
+        data={"provider_name": "anthropic", "api_key": "sk-test-123"},
+    )
+    assert resp.status_code == 302
+    assert "/onboarding/resume_upload" in resp.headers["Location"]
+
     conn = sqlite3.connect(app.config["DB_PATH"])
     try:
-        conn.execute(
-            'UPDATE onboarding_state SET wizard_data=\'{"provider":{"name":"ollama"}}\' WHERE id=1'
-        )
-        conn.commit()
+        import json
+
+        row = conn.execute("SELECT wizard_data FROM onboarding_state WHERE id=1").fetchone()
+        data = json.loads(row[0])
+        assert data["provider"]["name"] == "anthropic"
+        assert data["provider"]["api_key"] == "sk-test-123"
     finally:
         conn.close()
 
-    resp = client.get("/onboarding/provider_credentials")
+
+def test_provider_select_post_byo_empty_key_flashes_and_does_not_advance(client, app):
+    """Issue #441: a BYO-key provider with an empty api_key re-renders with the
+    'API key is required' flash and does NOT advance (mirrors old provider_credentials)."""
+    resp = client.post(
+        "/onboarding/provider_select",
+        data={"provider_name": "anthropic", "api_key": ""},
+        follow_redirects=True,
+    )
+    assert resp.status_code == 200
     body = resp.get_data(as_text=True)
-    assert "No credentials needed" in body
-    assert "ollama" in body
-
-
-def test_provider_credentials_api_key_form_for_anthropic(client, app):
-    """provider_credentials GET for anthropic renders an API-key form."""
+    assert "API key is required" in body
+    # No provider was committed.
     conn = sqlite3.connect(app.config["DB_PATH"])
     try:
-        conn.execute(
-            'UPDATE onboarding_state SET wizard_data=\'{"provider":{"name":"anthropic"}}\' WHERE id=1'
-        )
-        conn.commit()
+        import json
+
+        row = conn.execute("SELECT wizard_data FROM onboarding_state WHERE id=1").fetchone()
+        data = json.loads(row[0])
+        assert "provider" not in data
     finally:
         conn.close()
 
-    resp = client.get("/onboarding/provider_credentials")
+
+def test_provider_credentials_route_removed(client):
+    """Issue #441: the standalone provider_credentials route no longer resolves (404)."""
+    assert client.get("/onboarding/provider_credentials").status_code == 404
+    assert client.post("/onboarding/provider_credentials").status_code == 404
+
+
+def test_provider_select_renders_inline_api_key_for_byo(client, app):
+    """Issue #441: the merged screen renders the inline API-key field for a BYO-key provider.
+
+    With no CLIs detected (autouse mock returns []), the screen offers the
+    Anthropic BYO-key path with its credential field folded inline.
+    """
+    resp = client.get("/onboarding/provider_select")
+    assert resp.status_code == 200
     body = resp.get_data(as_text=True)
     assert 'type="password"' in body
     assert 'name="api_key"' in body
+
+
+def test_provider_select_no_api_key_field_for_no_cred(client):
+    """Issue #441: a no-cred provider selection renders no inline API-key field."""
+    from unittest.mock import patch as _patch
+
+    from job_finder.web.providers.detection import ProviderHandle
+
+    handle = ProviderHandle(
+        name="ollama", binary_path="/usr/bin/ollama", cost_label="$0", priority=3
+    )
+    with _patch(
+        "job_finder.web.onboarding.blueprint.detect_available_providers",
+        return_value=[handle],
+    ):
+        resp = client.get("/onboarding/provider_select")
+    assert resp.status_code == 200
+    body = resp.get_data(as_text=True)
+    assert 'type="password"' not in body
+    assert 'name="api_key"' not in body
 
 
 def test_resume_upload_rejects_non_pdf_docx(client):

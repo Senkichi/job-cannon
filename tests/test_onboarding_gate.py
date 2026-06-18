@@ -110,7 +110,6 @@ def test_all_wizard_routes_redirect_when_complete(client):
     for route in (
         "/onboarding/welcome",
         "/onboarding/provider_select",
-        "/onboarding/provider_credentials",
         "/onboarding/resume_upload",
         "/onboarding/profile_edit",
         "/onboarding/imap_credentials",
