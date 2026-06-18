@@ -381,6 +381,29 @@ def test_imap_credentials_renders_app_password_hand_holding(client):
     assert "<details open" not in body and "<details  open" not in body
 
 
+def test_imap_credentials_surfaces_readonly_and_workspace_tradeoffs(client):
+    """Issue #443: the Gmail/IMAP step must set expectations before the user
+    generates credentials — the connection is read-only/fetch-only (never marks
+    mail read, labels it, or changes the inbox), and Workspace users whose admin
+    has disabled IMAP/app passwords are pointed at the existing Skip-for-now path."""
+    resp = client.get("/onboarding/imap_credentials")
+    assert resp.status_code == 200
+    body = resp.get_data(as_text=True)
+
+    # Read-only / fetch-only expectation.
+    assert "Read-only / fetch-only" in body
+    assert "never marks them read, labels them, or changes your inbox" in body
+
+    # Workspace-admin fallback pointing at Skip for now.
+    assert "Google Workspace account" in body
+    assert "disabled IMAP or app passwords" in body
+    assert "Skip for now" in body
+
+    # The new copy must not reopen the "collapsed by default" invariant —
+    # it adds no <details open> block.
+    assert "<details open" not in body and "<details  open" not in body
+
+
 def test_imap_credentials_post_failure_rerenders_with_error(client, monkeypatch):
     """D-08: POST /onboarding/imap_credentials with bad creds → HTTP 200 + error + preserved email."""
     from job_finder.web.onboarding.imap_test import ImapTestResult
