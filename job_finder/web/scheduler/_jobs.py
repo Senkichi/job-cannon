@@ -14,8 +14,10 @@ the background thread.
 """
 
 import logging
+from datetime import datetime
 
 from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.date import DateTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
 from job_finder.web.db_helpers import get_config_snapshot
@@ -28,8 +30,40 @@ from job_finder.web.live_events import (
 )
 from job_finder.web.live_events import publish as publish_live
 from job_finder.web.scheduler._factories import _make_simple_job, _make_tracked_job
+from job_finder.web.scheduler._schedule import (
+    HEAVY_MISFIRE_GRACE_S,
+    LIGHT_MISFIRE_GRACE_S,
+    assert_no_heavy_writer_collisions,
+    enrichment_hour_expr,
+    ingestion_hour_expr,
+)
 
 logger = logging.getLogger(__name__)
+
+
+def _make_chainer(scheduler, successor_id: str, successor_wrapper):
+    """Return a no-arg on_complete hook that schedules ``successor_wrapper`` as a
+    one-shot DateTrigger(now), replacing any pending one-shot for the same id.
+
+    Completion-chaining (#229 design 3a): the successor has no cron trigger of
+    its own; it runs exactly once each time its predecessor finishes (on success
+    OR failure — the hook fires from the predecessor wrapper's ``finally``).
+    ``replace_existing=True`` keeps a single pending successor job if a
+    predecessor somehow completes twice before the successor drains.
+    """
+
+    def _release() -> None:
+        scheduler.add_job(
+            successor_wrapper,
+            trigger=DateTrigger(run_date=datetime.now()),
+            id=successor_id,
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+            misfire_grace_time=HEAVY_MISFIRE_GRACE_S,
+        )
+
+    return _release
 
 
 # ---------------------------------------------------------------------------
@@ -39,21 +73,13 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
-def _cadence_to_hour_expr(preset: str) -> str:
-    """Map a cadence_preset name to an APScheduler CronTrigger hour expression.
-
-    Supported presets (from config.example.yaml and the onboarding wizard):
-      - "light"    → "8"           (once/day, mid-morning)
-      - "standard" → "0,8,16"      (3×/day — the legacy default)
-      - "heavy"    → "0,4,8,12,16,20"  (6×/day)
-
-    Unknown values fall back to "0,8,16" (standard) so existing deployments
-    that omit cadence_preset are unaffected.
-
-    Note: rescheduling takes effect only on app restart — there is no
-    live-reschedule path.
-    """
-    return {"light": "8", "standard": "0,8,16", "heavy": "0,4,8,12,16,20"}.get(preset, "0,8,16")
+# Back-compat alias — the canonical cadence map now lives in _schedule.py
+# (single source of truth shared by ingestion AND enrichment_backfill). Kept so
+# existing imports of `_cadence_to_hour_expr` from this module keep working.
+#
+# Note: rescheduling takes effect only on app restart — there is no
+# live-reschedule path.
+_cadence_to_hour_expr = ingestion_hour_expr
 
 
 def register_ingestion(scheduler, app) -> None:
@@ -127,11 +153,12 @@ def register_ingestion(scheduler, app) -> None:
     preset = config.get("scheduler", {}).get("cadence_preset", "standard")
     scheduler.add_job(
         run_pipeline,
-        trigger=CronTrigger(hour=_cadence_to_hour_expr(preset)),
+        trigger=CronTrigger(hour=ingestion_hour_expr(preset)),
         id="ingestion_poll",
         replace_existing=True,
         max_instances=1,  # prevents overlap on long runs
         coalesce=True,  # skip missed runs if app was down
+        misfire_grace_time=HEAVY_MISFIRE_GRACE_S,
     )
 
 
@@ -145,8 +172,18 @@ def register_ingestion(scheduler, app) -> None:
 # ---------------------------------------------------------------------------
 
 
-def register_staleness(scheduler, app) -> None:
-    """Register the nightly unified staleness check (2:00 AM)."""
+def register_staleness(scheduler, app, *, on_complete=None) -> None:
+    """Register the nightly unified staleness check (2:00 AM).
+
+    Phase C runs a parallel HTTP cascade whose runtime scales with the live-job
+    count and a per-job request timeout; the run can drift well past its 2:00
+    slot. ``misfire_grace_time`` bounds a *late start* (coalesce drops a fire
+    that could not start within the window rather than replaying it on top of a
+    later run), and ``on_complete`` chains the agentic backfill off this job's
+    completion instead of racing it on a fixed 4:15 slot — the heaviest two
+    nightly DB writers can no longer overlap regardless of how long staleness
+    actually takes.
+    """
 
     def _import_staleness():
         from job_finder.web.expiry_checker import run_staleness_check
@@ -164,6 +201,7 @@ def register_staleness(scheduler, app) -> None:
             "Staleness check",
             import_func=_import_staleness,
             import_action=_import_staleness_action,
+            on_complete=on_complete,
             extract_metadata=lambda r: {
                 # Phase B (batch ATS reconciliation)
                 "batch_companies_checked": r.get("phase_b", {}).get("companies_checked", 0),
@@ -192,6 +230,7 @@ def register_staleness(scheduler, app) -> None:
         replace_existing=True,
         max_instances=1,
         coalesce=True,
+        misfire_grace_time=HEAVY_MISFIRE_GRACE_S,
     )
 
 
@@ -232,6 +271,7 @@ def register_pipeline_detection(scheduler, app) -> None:
         replace_existing=True,
         max_instances=1,
         coalesce=True,
+        misfire_grace_time=LIGHT_MISFIRE_GRACE_S,
     )
 
 
@@ -333,8 +373,14 @@ def register_ats_promote(scheduler, app) -> None:
 # ---------------------------------------------------------------------------
 
 
-def register_careers_crawl(scheduler, app) -> None:
-    """Register the daily careers-crawl job (5:00 AM)."""
+def register_careers_crawl(scheduler, app, *, on_complete=None) -> None:
+    """Register the daily careers-crawl job (5:00 AM).
+
+    Chains ``company_linkage`` off completion (#229): the two used to share the
+    05:00 slot and both write the companies/jobs tables, contending on DB locks.
+    company_linkage now runs as a one-shot when this job finishes, never on a
+    cron slot of its own.
+    """
 
     def _import_careers_crawl():
         from job_finder.web.careers_crawler import crawl_careers_batch
@@ -352,6 +398,7 @@ def register_careers_crawl(scheduler, app) -> None:
             "Careers crawl",
             import_func=_import_careers_crawl,
             import_action=_import_careers_crawl_action,
+            on_complete=on_complete,
             extract_metadata=lambda r: {
                 "companies_crawled": r.get("companies_crawled", 0),
                 "jobs_found": r.get("jobs_found", 0),
@@ -366,34 +413,34 @@ def register_careers_crawl(scheduler, app) -> None:
         replace_existing=True,
         max_instances=1,
         coalesce=True,
+        misfire_grace_time=HEAVY_MISFIRE_GRACE_S,
     )
 
 
 # ---------------------------------------------------------------------------
-# Company linkage backfill (daily 5:00 AM)
+# Company linkage backfill — chained off careers_crawl completion (no cron).
+# Previously fired at 05:00, the same slot as careers_crawl; both are heavy
+# writers, so the shared slot DB-locked under contention. Now a one-shot
+# released by careers_crawl's on_complete hook.
 # ---------------------------------------------------------------------------
 
 
-def register_company_linkage(scheduler, app) -> None:
-    """Register the daily company-linkage backfill (5:00 AM)."""
+def build_company_linkage_wrapper(app):
+    """Build (but do not schedule) the company-linkage job wrapper.
+
+    Returned wrapper is scheduled as a one-shot by careers_crawl's chainer.
+    """
 
     def _import_company_linkage():
         from job_finder.web.backfill_companies import run_company_linkage
 
         return run_company_linkage
 
-    scheduler.add_job(
-        _make_simple_job(
-            app,
-            "Company linkage",
-            _import_company_linkage,
-            publish_events=(COMPANIES_CHANGED, JOBS_CHANGED),
-        ),
-        trigger=CronTrigger(hour=5, minute=0),
-        id="company_linkage",
-        replace_existing=True,
-        max_instances=1,
-        coalesce=True,
+    return _make_simple_job(
+        app,
+        "Company linkage",
+        _import_company_linkage,
+        publish_events=(COMPANIES_CHANGED, JOBS_CHANGED),
     )
 
 
@@ -538,7 +585,14 @@ def register_registry_hygiene(scheduler, app) -> None:
 
 
 def register_enrichment_backfill(scheduler, app) -> None:
-    """Register the post-ingestion enrichment backfill (1, 9, 17)."""
+    """Register the post-ingestion enrichment backfill.
+
+    Hours are DERIVED from the same cadence_preset as ingestion (each ingestion
+    slot + 1h) via _schedule.enrichment_hour_expr — so light/standard/heavy
+    resize ingestion and its backfill together. Previously this was a hard-coded
+    ``1,9,17`` that silently desynced from a non-standard ingestion cadence
+    (bug (c) in #229).
+    """
 
     def _import_enrichment_backfill():
         from job_finder.web.scheduler._runners import run_enrichment_backfill_two_stage
@@ -550,6 +604,8 @@ def register_enrichment_backfill(scheduler, app) -> None:
 
         return ACTION_SCHEDULED_ENRICHMENT_BACKFILL
 
+    config = get_config_snapshot(app)
+    preset = config.get("scheduler", {}).get("cadence_preset", "standard")
     scheduler.add_job(
         _make_tracked_job(
             app,
@@ -567,29 +623,33 @@ def register_enrichment_backfill(scheduler, app) -> None:
             },
             publish_events=(JOBS_CHANGED, COSTS_CHANGED),
         ),
-        trigger=CronTrigger(hour="1,9,17"),
+        trigger=CronTrigger(hour=enrichment_hour_expr(preset)),
         id="enrichment_backfill",
         replace_existing=True,
         max_instances=1,
         coalesce=True,
+        misfire_grace_time=HEAVY_MISFIRE_GRACE_S,
     )
 
 
 # ---------------------------------------------------------------------------
-# Agentic backfill (nightly 4:15 AM). Moved off the 3:30 slot to avoid
-# colliding with day-1 monthly hygiene jobs (orphan_cleanup at 3:00,
-# registry_hygiene at 3:30) and the tail of staleness_check (starts 2:00,
-# runs ~2 hours). On May-1 the 3:30 collision DB-locked
-# persist_job_expiry_state 113 times and killed the agentic run after
-# enriching 1/50 jobs. 4:15 lands after staleness typically finishes
-# (~4:00) and well before careers_crawl (5:00). OllamaProvider is
-# instantiated INSIDE run_agentic_backfill, NOT here — the scheduler
-# closure only defers the import.
+# Agentic backfill — chained off staleness_check completion (no cron). Was a
+# fixed 4:15 slot chosen to clear the tail of staleness (starts 2:00, runs
+# ~2 hours). But staleness runtime is unbounded, so a fixed slot still raced it
+# on bad nights (the May-1 3:30 collision DB-locked persist_job_expiry_state 113
+# times and killed the agentic run after 1/50 jobs). Chaining off staleness's
+# completion makes the ordering exact regardless of how long staleness runs —
+# the two heaviest nightly writers can no longer overlap. OllamaProvider is
+# instantiated INSIDE run_agentic_backfill, NOT here — the closure only defers
+# the import.
 # ---------------------------------------------------------------------------
 
 
-def register_agentic_backfill(scheduler, app) -> None:
-    """Register the nightly agentic-backfill job (4:15 AM)."""
+def build_agentic_backfill_wrapper(app):
+    """Build (but do not schedule) the agentic-backfill job wrapper.
+
+    Returned wrapper is scheduled as a one-shot by staleness_check's chainer.
+    """
 
     def _import_agentic_backfill():
         from job_finder.web.agentic_enricher import run_agentic_backfill
@@ -603,22 +663,15 @@ def register_agentic_backfill(scheduler, app) -> None:
 
         return ACTION_SCHEDULED_AGENTIC_BACKFILL
 
-    scheduler.add_job(
-        _make_tracked_job(
-            app,
-            "Agentic backfill",
-            import_func=_import_agentic_backfill,
-            import_action=_import_agentic_action,
-            # "jobs_enriched" matches naming convention used by other tracked jobs
-            # (jobs_found, jobs_new, jobs_scanned) for consistent dashboard display.
-            extract_metadata=lambda r: {"jobs_enriched": r if isinstance(r, int) else 0},
-            publish_events=(JOBS_CHANGED, COSTS_CHANGED),
-        ),
-        trigger=CronTrigger(hour=4, minute=15),
-        id="agentic_backfill",
-        replace_existing=True,
-        max_instances=1,
-        coalesce=True,
+    return _make_tracked_job(
+        app,
+        "Agentic backfill",
+        import_func=_import_agentic_backfill,
+        import_action=_import_agentic_action,
+        # "jobs_enriched" matches naming convention used by other tracked jobs
+        # (jobs_found, jobs_new, jobs_scanned) for consistent dashboard display.
+        extract_metadata=lambda r: {"jobs_enriched": r if isinstance(r, int) else 0},
+        publish_events=(JOBS_CHANGED, COSTS_CHANGED),
     )
 
 
@@ -648,25 +701,47 @@ def register_health_heartbeat(scheduler, app) -> None:
 
 
 def register_all_jobs(scheduler, app) -> None:
-    """Register all 15 scheduled jobs on the given scheduler instance.
+    """Register all scheduled jobs on the given scheduler instance.
 
     Order matches the legacy inline shape so any future re-introduction of
     cross-job ordering invariants (e.g., agentic_backfill must register
     AFTER staleness so its metadata column appears second on the dashboard)
     has a stable insertion sequence.
+
+    Two dependent pairs are completion-chained rather than cron-scheduled
+    (#229), so the heaviest DB writers never share a slot:
+      - staleness_check → agentic_backfill
+      - careers_crawl   → company_linkage
+
+    A boot-time assertion (assert_no_heavy_writer_collisions) fails fast if a
+    future descriptor edit reintroduces a shared heavy-writer slot.
     """
+    # Fail fast on a descriptor that would put two heavy writers on one slot.
+    assert_no_heavy_writer_collisions()
+
+    # Build the chained successors first (they have no cron trigger of their own;
+    # the predecessor's on_complete hook schedules them as one-shots).
+    agentic_wrapper = build_agentic_backfill_wrapper(app)
+    company_linkage_wrapper = build_company_linkage_wrapper(app)
+
     register_ingestion(scheduler, app)
-    register_staleness(scheduler, app)
+    register_staleness(
+        scheduler,
+        app,
+        on_complete=_make_chainer(scheduler, "agentic_backfill", agentic_wrapper),
+    )
     register_pipeline_detection(scheduler, app)
     register_ats_scan(scheduler, app)
     register_ats_slug_probe(scheduler, app)
     register_ats_promote(scheduler, app)
-    register_careers_crawl(scheduler, app)
-    register_company_linkage(scheduler, app)
+    register_careers_crawl(
+        scheduler,
+        app,
+        on_complete=_make_chainer(scheduler, "company_linkage", company_linkage_wrapper),
+    )
     register_primary_source_resolution(scheduler, app)
     register_orphan_cleanup(scheduler, app)
     register_homepage_discovery(scheduler, app)
     register_registry_hygiene(scheduler, app)
     register_enrichment_backfill(scheduler, app)
-    register_agentic_backfill(scheduler, app)
     register_health_heartbeat(scheduler, app)

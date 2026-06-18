@@ -54,6 +54,30 @@ def _make_app(testing=False, db_path=None):
     return app
 
 
+def _chain_test_app():
+    """App mock for completion-chaining tests.
+
+    Disables the chained predecessors' real work (staleness + careers_crawl
+    guards) so invoking their wrappers short-circuits before any DB/network I/O,
+    while still exercising the on_complete chainer (it fires on the guard path).
+    DB_PATH points at a non-existent file — run_events.db_counters degrades to an
+    error dict rather than raising, so no real DB is needed.
+    """
+    app = MagicMock()
+    app.config = {
+        "JF_CONFIG": {
+            "staleness": {"enabled": False},
+            "careers_crawl": {"enabled": False},
+        },
+        "DB_PATH": "/nonexistent/chain_test.db",
+    }
+    ctx = MagicMock()
+    ctx.__enter__ = MagicMock(return_value=None)
+    ctx.__exit__ = MagicMock(return_value=False)
+    app.app_context.return_value = ctx
+    return app
+
+
 # ---------------------------------------------------------------------------
 # Fixture: reset scheduler singleton between tests
 # ---------------------------------------------------------------------------
@@ -642,15 +666,18 @@ class TestSchedulerArgOrder:
 
 
 # ---------------------------------------------------------------------------
-# Test: agentic_backfill job registered and paused (Glassdoor enrichment spec)
+# Test: agentic_backfill is completion-chained off staleness_check (#229).
+# It no longer has a cron trigger of its own; it is released as a one-shot
+# DateTrigger when staleness finishes (on success OR failure).
 # ---------------------------------------------------------------------------
 
 
 class TestSchedulerAgenticBackfill:
-    """Verify agentic_backfill job is registered and runs on schedule (not paused)."""
+    """Verify agentic_backfill is chained off staleness_check, not cron-scheduled."""
 
-    def test_agentic_backfill_job_registered(self):
-        """init_scheduler registers 'agentic_backfill' CronTrigger job (hour=3, minute=30)."""
+    def test_agentic_backfill_not_cron_registered_at_boot(self):
+        """agentic_backfill is NOT registered with a cron trigger at boot — it is
+        released only when staleness_check completes (#229 design 3a)."""
         from unittest.mock import MagicMock, patch
 
         from job_finder.web.scheduler import init_scheduler, reset_scheduler
@@ -670,64 +697,66 @@ class TestSchedulerAgenticBackfill:
                 init_scheduler(mock_app)
 
         job_ids_kw = [call[1].get("id") for call in mock_sched.add_job.call_args_list]
-        assert "agentic_backfill" in job_ids_kw, (
-            "agentic_backfill job must be registered via scheduler.add_job()"
+        # company_linkage is likewise chained (off careers_crawl), so neither
+        # successor appears among the boot-time add_job ids.
+        assert "agentic_backfill" not in job_ids_kw, (
+            "agentic_backfill must be completion-chained, not cron-registered at boot"
+        )
+        assert "company_linkage" not in job_ids_kw, (
+            "company_linkage must be completion-chained, not cron-registered at boot"
+        )
+        # staleness_check itself IS registered (the chain predecessor).
+        assert "staleness_check" in job_ids_kw
+
+    def test_agentic_backfill_released_on_staleness_completion(self):
+        """When staleness_check's wrapper finishes, agentic_backfill is scheduled
+        as a one-shot DateTrigger via the chainer."""
+
+        from apscheduler.schedulers.background import BackgroundScheduler
+        from apscheduler.triggers.date import DateTrigger
+
+        from job_finder.web.scheduler._jobs import register_all_jobs
+
+        app = _chain_test_app()
+        sched = BackgroundScheduler()  # not started
+        register_all_jobs(sched, app)
+
+        # No agentic_backfill before staleness runs.
+        assert sched.get_job("agentic_backfill") is None
+
+        # Invoke the staleness wrapper directly. Its guard short-circuits the real
+        # work (staleness disabled in our config) but the on_complete chainer must
+        # STILL release the successor (finally / guard path).
+        staleness_job = sched.get_job("staleness_check")
+        assert staleness_job is not None
+        staleness_job.func()
+
+        released = sched.get_job("agentic_backfill")
+        assert released is not None, "agentic_backfill not released after staleness completion"
+        assert isinstance(released.trigger, DateTrigger), (
+            "successor must be a one-shot DateTrigger, not a recurring trigger"
         )
 
-    def test_agentic_backfill_runs_on_schedule(self):
-        """agentic_backfill is registered without next_run_time=None — runs on CronTrigger schedule."""
-        from unittest.mock import MagicMock, patch
+    def test_company_linkage_released_on_careers_crawl_completion(self):
+        """careers_crawl completion chains company_linkage as a one-shot."""
+        from apscheduler.schedulers.background import BackgroundScheduler
+        from apscheduler.triggers.date import DateTrigger
 
-        from job_finder.web.scheduler import init_scheduler, reset_scheduler
+        from job_finder.web.scheduler._jobs import register_all_jobs
 
-        reset_scheduler()
+        app = _chain_test_app()
+        sched = BackgroundScheduler()
+        register_all_jobs(sched, app)
 
-        mock_app = MagicMock()
-        mock_app.config.get.side_effect = lambda key, default=None: {
-            "TESTING": False,
-        }.get(key, default)
+        assert sched.get_job("company_linkage") is None
 
-        with patch("job_finder.web.scheduler.os.environ.get", return_value=None):
-            with patch("job_finder.web.scheduler.BackgroundScheduler") as mock_scheduler_cls:
-                mock_sched = MagicMock()
-                mock_scheduler_cls.return_value = mock_sched
+        careers_job = sched.get_job("careers_crawl")
+        assert careers_job is not None
+        careers_job.func()
 
-                init_scheduler(mock_app)
-
-        # Find the add_job call for agentic_backfill
-        agentic_call = None
-        for call in mock_sched.add_job.call_args_list:
-            if call[1].get("id") == "agentic_backfill":
-                agentic_call = call
-                break
-
-        assert agentic_call is not None, "agentic_backfill add_job call not found"
-        # Backfill is now permanently enabled — next_run_time must NOT be set to None
-        assert "next_run_time" not in agentic_call[1], (
-            "next_run_time should not be set; backfill runs on CronTrigger schedule"
-        )
-
-    def test_agentic_backfill_is_not_paused(self):
-        """agentic_backfill must NOT be paused — it runs nightly on schedule."""
-        from unittest.mock import MagicMock, patch
-
-        from job_finder.web.scheduler import init_scheduler, reset_scheduler
-
-        reset_scheduler()
-
-        mock_app = MagicMock()
-        mock_app.config.get.side_effect = lambda key, default=None: {
-            "TESTING": False,
-        }.get(key, default)
-
-        with patch("job_finder.web.scheduler.os.environ.get", return_value=None):
-            with patch("job_finder.web.scheduler.BackgroundScheduler") as mock_scheduler_cls:
-                mock_sched = MagicMock()
-                mock_scheduler_cls.return_value = mock_sched
-
-                init_scheduler(mock_app)
-
-        mock_sched.pause_job.assert_not_called()
+        released = sched.get_job("company_linkage")
+        assert released is not None, "company_linkage not released after careers_crawl completion"
+        assert isinstance(released.trigger, DateTrigger)
 
 
 # ---------------------------------------------------------------------------

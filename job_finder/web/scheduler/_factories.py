@@ -44,7 +44,23 @@ def _publish_all(events) -> None:
         _publish_live(event)
 
 
-def _make_simple_job(app, name, import_func, *, publish_events=()):
+def _release_successor(on_complete) -> None:
+    """Fire a completion-chaining hook, swallowing any error.
+
+    Called from a ``finally`` so a *failed* predecessor still releases its
+    successor (the design invariant: the successor runs at most once per
+    predecessor completion, regardless of disposition). Instrumentation-style:
+    never lets a chaining failure propagate into the predecessor's wrapper.
+    """
+    if on_complete is None:
+        return
+    try:
+        on_complete()
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning("completion-chain hook failed: %s", exc)
+
+
+def _make_simple_job(app, name, import_func, *, publish_events=(), on_complete=None):
     """Factory for scheduler jobs that need only config + db_path + try/except.
 
     Args:
@@ -55,6 +71,9 @@ def _make_simple_job(app, name, import_func, *, publish_events=()):
             The returned function must accept (db_path, config).
         publish_events: Live-bus event names emitted after a successful run so
             subscribed widgets refetch (see job_finder.web.live_events).
+        on_complete: Optional no-arg callable fired in ``finally`` after the job
+            ends (success OR failure) — used for completion-chaining a dependent
+            successor as a one-shot. See _schedule.depends_on.
     """
 
     def wrapper():
@@ -94,12 +113,22 @@ def _make_simple_job(app, name, import_func, *, publish_events=()):
                     duration_s=round(_time.time() - t0, 2),
                     error=type(e).__name__,
                 )
+            finally:
+                _release_successor(on_complete)
 
     return wrapper
 
 
 def _make_tracked_job(
-    app, name, import_func, import_action, extract_metadata, *, guard=None, publish_events=()
+    app,
+    name,
+    import_func,
+    import_action,
+    extract_metadata,
+    *,
+    guard=None,
+    publish_events=(),
+    on_complete=None,
 ):
     """Factory for scheduler jobs with timing and activity logging.
 
@@ -121,6 +150,11 @@ def _make_tracked_job(
         publish_events: Live-bus event names emitted after a completed run
             (success or degraded) so subscribed widgets refetch (see
             job_finder.web.live_events).
+        on_complete: Optional no-arg callable fired in ``finally`` after the job
+            ends (success OR failure) — used for completion-chaining a dependent
+            successor as a one-shot. The hook also fires when the ``guard``
+            short-circuits the run, so a disabled predecessor still releases its
+            successor. See _schedule.depends_on.
     """
 
     def wrapper():
@@ -134,6 +168,7 @@ def _make_tracked_job(
             action = import_action()
 
             if guard is not None and not guard(config):
+                _release_successor(on_complete)
                 return
 
             t0 = _time.time()
@@ -189,5 +224,7 @@ def _make_tracked_job(
                     duration_s=duration,
                     error=type(e).__name__,
                 )
+            finally:
+                _release_successor(on_complete)
 
     return wrapper
