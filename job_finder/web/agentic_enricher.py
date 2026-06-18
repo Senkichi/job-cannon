@@ -28,6 +28,7 @@ from typing import Any
 
 from job_finder.config import DEFAULT_AGENTIC_BATCH_LIMIT, JD_STORAGE_MAX_CHARS
 from job_finder.db._jd_full import set_jd_full as _set_jd_full
+from job_finder.enrichment_states import EnrichmentTier
 
 logger = logging.getLogger(__name__)
 
@@ -708,9 +709,13 @@ def run_agentic_backfill(
                                 # DEFECT 001 FIX: capture rowcount INSIDE the `with`
                                 # block before the connection closes.
                                 cursor = write_conn.execute(
-                                    "UPDATE jobs SET enrichment_tier = 'agentic' "
-                                    "WHERE dedup_key = ? AND enrichment_tier = 'exhausted'",
-                                    (dedup_key,),
+                                    "UPDATE jobs SET enrichment_tier = ? "
+                                    "WHERE dedup_key = ? AND enrichment_tier = ?",
+                                    (
+                                        EnrichmentTier.AGENTIC.value,
+                                        dedup_key,
+                                        EnrichmentTier.EXHAUSTED.value,
+                                    ),
                                 )
                                 write_conn.commit()
                                 rows_updated = cursor.rowcount
@@ -733,9 +738,13 @@ def run_agentic_backfill(
                         # — skip silently (no data was found anyway, so no recovery needed).
                         with standalone_connection(db_path) as write_conn:
                             write_conn.execute(
-                                "UPDATE jobs SET enrichment_tier = 'agentic_exhausted' "
-                                "WHERE dedup_key = ? AND enrichment_tier = 'exhausted'",
-                                (dedup_key,),
+                                "UPDATE jobs SET enrichment_tier = ? "
+                                "WHERE dedup_key = ? AND enrichment_tier = ?",
+                                (
+                                    EnrichmentTier.AGENTIC_EXHAUSTED.value,
+                                    dedup_key,
+                                    EnrichmentTier.EXHAUSTED.value,
+                                ),
                             )
                             write_conn.commit()
                         logger.info("  -> NOT FOUND (%.1fs)", elapsed)

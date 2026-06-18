@@ -28,6 +28,7 @@ import logging
 import sqlite3
 
 from job_finder.db import persist_job_assessment
+from job_finder.enrichment_states import backfill_skip_sql
 from job_finder.secrets import get_secret
 from job_finder.web.claude_client import MODEL_PRICING
 from job_finder.web.data_enricher import enrich_job
@@ -46,8 +47,13 @@ _LOW_OUTPUT_TOKENS = 200
 _MID_INPUT_TOKENS = 2000
 _MID_OUTPUT_TOKENS = 500
 
-# Tiers eligible for re-enrichment (not yet exhausted or at high paid tiers)
-_ELIGIBLE_TIERS_QUERY = "enrichment_tier IS NULL OR enrichment_tier NOT IN ('exhausted', 'serpapi', 'mid', 'agentic', 'agentic_exhausted')"
+# Tiers eligible for re-enrichment (not yet at a terminal tier). Built from the
+# single source of truth (job_finder.enrichment_states, F1 fix) so this query can
+# no longer drift from data_enricher's backfill skip-set. NOTE: this now also skips
+# the legacy 'low'/'high' tiers, which data_enricher already skipped — those are
+# terminal no-ops in enrich_job (resume_index treats them as terminal), so skipping
+# them only avoids wasted selection, never changes a classification.
+_ELIGIBLE_TIERS_QUERY = f"enrichment_tier IS NULL OR {backfill_skip_sql()}"
 
 # Borderline score range for re-scoring after tier advancement
 _BORDERLINE_MIN = 40

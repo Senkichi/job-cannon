@@ -152,11 +152,14 @@ def test_convergence_multiple_passes(migrated_db):
         )
 
     # Multiple passes should complete and all 5 jobs should have been advanced.
-    # Actual convergence: 5 jobs x 4 tier advancements each = 20 total before exhausted.
-    # The test fixture advances through free->ddg->low->serpapi (4 tiers); pass 5 finds 0.
-    # Note: >= 25 was wrong because the mid/exhausted tiers are terminal, not transitional.
-    assert total_enriched >= 20, (
-        f"Expected >=20 enrichments (5 jobs x 4 active tiers), got {total_enriched}"
+    # Convergence: each job advances NULL->free->ddg->low (3 enrichments) and then
+    # halts — 'low' is a legacy TERMINAL tier in the unified skip-set
+    # (job_finder.enrichment_states, issue #260), so a 'low' row is no longer
+    # re-selected. 5 jobs x 3 active advancements = 15. Before #260, backfill_enrichment
+    # diverged from data_enricher and wrongly kept re-enriching 'low'/'high' rows (the
+    # F1 divergence class); that extra advancement is exactly what this fix removes.
+    assert total_enriched >= 15, (
+        f"Expected >=15 enrichments (5 jobs x 3 active advancements), got {total_enriched}"
     )
     assert len(tier_advanced_keys) == 5
 
