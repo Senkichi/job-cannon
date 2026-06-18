@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import pytest
 
-from job_finder.web.job_scorer import _coerce_assessment
+from job_finder.web.job_scorer import _coerce_assessment, _IncompleteAssessmentError
 from job_finder.web.model_provider import _sanitize_output, _validate_schema
 from job_finder.web.scoring_prompts.v3_scoring_prompt import JOB_ASSESSMENT_SCHEMA
 
@@ -92,17 +92,16 @@ class TestMissingAxis:
         errors = _sanitize_then_validate(self._make_payload_missing("skills_match"))
         assert len(errors) > 0, "Expected schema error for missing skills_match"
 
-    def test_coerce_assessment_missing_axis_produces_partial_sub_scores(self):
-        """_coerce_assessment silently skips missing axes (no exception).
+    def test_coerce_assessment_missing_axis_raises_incomplete(self):
+        """_coerce_assessment is fail-closed (Issue #227, mechanism 2).
 
-        The resulting sub_scores dict is missing the absent key — it does NOT
-        invent a default integer for it.
+        A missing axis raises ``_IncompleteAssessmentError`` rather than
+        producing a partial sub-score vector that ``derive_classification``
+        could read as a spurious ``apply``.
         """
         payload = self._make_payload_missing("comp_fit")
-        result = _coerce_assessment(payload, provider="ollama")
-        assert "comp_fit" not in result.sub_scores
-        # The other five are still present
-        assert len(result.sub_scores) == 5
+        with pytest.raises(_IncompleteAssessmentError):
+            _coerce_assessment(payload, provider="ollama")
 
 
 # ---------------------------------------------------------------------------
@@ -226,12 +225,15 @@ class TestVerboseEnumText:
         errors = _validate_schema(sanitized, JOB_ASSESSMENT_SCHEMA)
         assert len(errors) > 0, "Verbose string '4 - strong match' must fail schema"
 
-    def test_coerce_assessment_skips_verbose_string_axis(self):
-        """_coerce_assessment calls int() on verbose string → ValueError → axis skipped."""
+    def test_coerce_assessment_verbose_string_axis_raises_incomplete(self):
+        """_coerce_assessment calls int() on a verbose string → ValueError.
+
+        Fail-closed (Issue #227): an uncoercible axis raises
+        ``_IncompleteAssessmentError`` rather than being silently dropped.
+        """
         payload = {**_VALID_PAYLOAD, "title_fit": "4 - strong match"}
-        result = _coerce_assessment(payload, provider="gemini")
-        # axis is silently dropped rather than emitting a wrong value
-        assert "title_fit" not in result.sub_scores
+        with pytest.raises(_IncompleteAssessmentError):
+            _coerce_assessment(payload, provider="gemini")
 
 
 # ---------------------------------------------------------------------------
@@ -313,15 +315,16 @@ class TestV4d2WrappedAxes:
         assert result.sub_scores["skills_match"] == 4
         assert len(result.sub_scores) == 6
 
-    def test_wrapped_missing_score_key_is_skipped_by_coerce(self):
+    def test_wrapped_missing_score_key_raises_incomplete(self):
         """{"evidence": "..."} without "score" is not a dict with "score" key.
 
         _coerce_assessment checks `isinstance(raw, dict) and "score" in raw`.
-        A dict without "score" falls through to int(raw) → TypeError → skipped.
+        A dict without "score" falls through to int(raw) → TypeError, which
+        is now fail-closed (Issue #227): it raises ``_IncompleteAssessmentError``.
         """
         payload = {**_VALID_PAYLOAD, "title_fit": {"evidence": "no score here"}}
-        result = _coerce_assessment(payload, provider="test")
-        assert "title_fit" not in result.sub_scores
+        with pytest.raises(_IncompleteAssessmentError):
+            _coerce_assessment(payload, provider="test")
 
 
 # ---------------------------------------------------------------------------
