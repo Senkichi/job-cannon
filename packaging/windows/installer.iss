@@ -14,9 +14,12 @@
 ;     how Ollama / VS Code install. Program files land under
 ;     {localappdata}\Programs\JobCannon.
 ;   - Optional Desktop shortcut (unchecked) + optional "start at login"
-;     HKCU Run entry (unchecked). Login launch is safe: the app's pidfile +
-;     /__jc_health probe make a second launch focus the existing instance.
-;   - Uninstall removes program files + Run key, then PROMPTS before touching
+;     keepalive supervisor (unchecked). The supervisor is a per-user Scheduled
+;     Task at logon (job-cannon.exe supervisor-install) that also restarts the
+;     app on crash — superseding the old bare HKCU Run key. Login launch is
+;     safe: the app's pidfile + /__jc_health probe make a second launch focus
+;     the existing instance, and `serve` reclaims the port from a crashed one.
+;   - Uninstall deregisters the supervisor + removes program files, then PROMPTS before touching
 ;     user data ({localappdata}\JobCannon — jobs database, config, logs),
 ;     defaulting to KEEP. NB: the data dir is %LOCALAPPDATA%\JobCannon
 ;     (platformdirs user_data_dir with roaming=False — see
@@ -68,16 +71,21 @@ Source: "..\..\dist\JobCannon\*"; DestDir: "{app}"; Flags: ignoreversion recurse
 Name: "{userprograms}\Job Cannon"; Filename: "{app}\job-cannon.exe"
 Name: "{userdesktop}\Job Cannon"; Filename: "{app}\job-cannon.exe"; Tasks: desktopicon
 
-[Registry]
-; Login launch via the per-user Run key. uninsdeletevalue removes it on
-; uninstall even if the user later unchecks nothing else.
-Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; \
-  ValueType: string; ValueName: "JobCannon"; ValueData: """{app}\job-cannon.exe"""; \
-  Tasks: startatlogin; Flags: uninsdeletevalue
-
 [Run]
+; Login launch + crash-restart via the per-user keepalive supervisor (a
+; Scheduled Task at logon, NO admin). Replaces the old standalone HKCU Run key
+; so startup is registered exactly once. Gated on the same "startatlogin" task.
+Filename: "{app}\job-cannon.exe"; Parameters: "supervisor-install"; \
+  Description: "Register Job Cannon to start automatically"; \
+  Tasks: startatlogin; Flags: runhidden
 Filename: "{app}\job-cannon.exe"; Description: "Launch Job Cannon"; \
   Flags: nowait postinstall skipifsilent
+
+[UninstallRun]
+; Deregister the keepalive supervisor before the program files are removed.
+; --uninstall is a no-op success if the supervisor was never installed.
+Filename: "{app}\job-cannon.exe"; Parameters: "supervisor-install --uninstall"; \
+  RunOnceId: "SupervisorUninstall"; Flags: runhidden
 
 [Code]
 { Uninstall: prompt before deleting user data (jobs database, config.yaml,

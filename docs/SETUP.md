@@ -361,6 +361,36 @@ The scheduler's pidfile auto-cleans on graceful shutdown.
   the app keeps serving **headless** at the logged URL rather than restarting —
   press `Ctrl+C` to stop.
 
+### Run Job Cannon automatically (supervisor)
+
+To have Job Cannon launch at logon **and restart itself if it crashes**, install
+the OS-native keepalive supervisor:
+
+```powershell
+job-cannon supervisor-install            # install (per-user, no admin)
+job-cannon supervisor-install --uninstall  # remove it
+```
+
+It generates and registers the right mechanism for your OS — all **per-user**,
+no root/admin required, with a restart backoff and a max-restarts-per-window
+ceiling so a crash-loop can't busy-spin:
+
+| OS | Mechanism | Location |
+|----|-----------|----------|
+| **Windows** | Scheduled Task at logon (`schtasks`, no `SYSTEM`) | Task Scheduler → `JobCannon` |
+| **macOS** | launchd LaunchAgent with `KeepAlive` | `~/Library/LaunchAgents/com.senkichi.jobcannon.plist` |
+| **Linux** | systemd `--user` service with `Restart=always` | `~/.config/systemd/user/job-cannon.service` |
+
+The supervisor runs `job-cannon serve`, which (unlike the bare `job-cannon`)
+**reclaims port 5000 from a crashed instance** before binding — terminating the
+orphaned Werkzeug reloader parent *and* worker that APScheduler/Ollama leave
+holding the port. This replaces the manual "kill both python processes" restart
+dance. Re-running `supervisor-install` is safe (it overwrites cleanly), and
+`--uninstall` is a no-op success if nothing is installed.
+
+> On Windows, the bundled installer can register this for you — tick **"Start
+> Job Cannon when Windows starts"** during setup.
+
 ---
 
 ## 9. Troubleshooting

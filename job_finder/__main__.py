@@ -150,6 +150,52 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Override the user-data directory (else JOB_CANNON_USER_DATA_DIR "
         "or the platformdirs default).",
     )
+
+    # ``serve`` — like the bare invocation, but first reclaims :5000 from a
+    # crashed Job Cannon orphan (the Werkzeug reloader parent AND worker that
+    # APScheduler/Ollama keep alive past a hard kill). Used by the OS-native
+    # supervisor so a self-restart can always rebind the port. Uses distinct
+    # dests so the subparser defaults never clobber the top-level flags when no
+    # subcommand is given (the classic argparse same-dest gotcha).
+    serve = subparsers.add_parser(
+        "serve",
+        help="Launch the app, first reclaiming the port from a crashed instance "
+        "(for use under the OS supervisor). Bare `job-cannon` does NOT kill.",
+        description="Free :5000 from a confirmed Job Cannon orphan (reloader "
+        "parent + worker), then launch exactly as the bare invocation does. A "
+        "foreign listener is never killed — serve exits non-zero instead.",
+    )
+    serve.add_argument(
+        "--terminal",
+        action="store_true",
+        dest="serve_terminal",
+        help="Force terminal mode (no system tray) for this serve launch.",
+    )
+    serve.add_argument(
+        "--port",
+        type=int,
+        default=None,
+        dest="serve_port",
+        metavar="PORT",
+        help="Port to listen on (same precedence as the top-level --port).",
+    )
+
+    # ``supervisor-install`` — generate + register the per-OS keepalive manifest
+    # (Scheduled Task / launchd LaunchAgent / systemd --user). ``--uninstall``
+    # reverses it. Out-of-process: needs no config, Flask, or pidfile lock.
+    supervisor = subparsers.add_parser(
+        "supervisor-install",
+        help="Install an OS-native keepalive supervisor (Scheduled Task / "
+        "launchd / systemd) that relaunches Job Cannon at logon and on crash.",
+        description="Render and register a per-OS keepalive manifest so a "
+        "crashed/killed instance self-restarts. Per-user, no admin. Idempotent.",
+    )
+    supervisor.add_argument(
+        "--uninstall",
+        action="store_true",
+        help="Remove the installed supervisor manifest and deregister it "
+        "(no-op success if nothing is installed).",
+    )
     return parser
 
 
@@ -617,6 +663,24 @@ def main() -> None:
 
         sys.exit(run_healthcheck(args))
 
+    # SHORT-CIRCUIT: `supervisor-install` only writes/registers an OS keepalive
+    # manifest — no config, Flask app, scheduler, or pidfile lock. Route it here
+    # (mirrors healthcheck), before any of that machinery.
+    if getattr(args, "command", None) == "supervisor-install":
+        from job_finder.web.supervisor import cmd_supervisor_install
+
+        sys.exit(cmd_supervisor_install(args))
+
+    # `serve` shares the entire launch flow below; it differs only by a pre-bind
+    # port reclaim (inserted after host/port resolution). Fold its own
+    # --port/--terminal (distinct dests) back onto the top-level flags so the
+    # shared resolution sees them.
+    if getattr(args, "command", None) == "serve":
+        if getattr(args, "serve_port", None) is not None:
+            args.port = args.serve_port
+        if getattr(args, "serve_terminal", False):
+            args.terminal = True
+
     # SHORT-CIRCUIT: --print-example-config also needs no config or Flask.
     if args.print_example_config:
         _print_example_config()  # prints + sys.exit(0)
@@ -712,6 +776,25 @@ def main() -> None:
             print(f"Demo mode: port {port} is in use — using {free_port} instead.")
             port = free_port
             url = f"http://{client_host}:{port}"
+
+    # --- Step 0 (serve only): reclaim the port from a crashed Job Cannon orphan.
+    # Bare `job-cannon` treats a live instance as "already running" (Steps 1-2
+    # focus it and exit). `serve` is the supervisor entry — it must TAKE OVER, so
+    # it kills a confirmed-JC listener (reloader parent + worker) here, before
+    # the focus-and-exit probes can see it. A foreign listener is never killed:
+    # free_jc_port returns False and we surface the existing port-occupied guidance.
+    if getattr(args, "command", None) == "serve":
+        from job_finder.web.supervisor import free_jc_port
+
+        if not free_jc_port(client_host, port):
+            print(
+                f"job-cannon serve: port {port} is occupied by a process that is "
+                f"not Job Cannon — refusing to kill it.\n"
+                f"  Use a different port:  job-cannon serve --port 5001\n"
+                f"  Or stop the other process.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
 
     # --- Step 1: HTTP probe — matches post-plan instances responding at /__jc_health.
     if probe_existing_jc(url) is not None:

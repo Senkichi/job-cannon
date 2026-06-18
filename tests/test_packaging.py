@@ -204,6 +204,24 @@ def test_readme_mentions_update_banner():
     )
 
 
+def test_installer_uses_supervisor_install_not_run_key():
+    """installer.iss registers startup via `supervisor-install` (install +
+    --uninstall) and no longer writes the standalone HKCU Run key (#439).
+
+    The keepalive supervisor (a per-user Scheduled Task) supersedes the bare
+    Run-key launch — startup must be registered exactly once.
+    """
+    with open("packaging/windows/installer.iss") as f:
+        content = f.read()
+    # Supervisor wired on both install and uninstall.
+    assert 'Parameters: "supervisor-install"' in content
+    assert 'Parameters: "supervisor-install --uninstall"' in content
+    assert "[UninstallRun]" in content
+    # The standalone HKCU Run key is gone (no double-registration of startup).
+    assert "CurrentVersion\\Run" not in content
+    assert "[Registry]" not in content
+
+
 def test_release_checklist_covers_manual_steps():
     """PHASE-44-RELEASE-CHECKLIST.md exists and covers PyPI/TestPyPI setup.
 
