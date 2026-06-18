@@ -95,8 +95,6 @@ class TestPlausibilityFilter:
     @pytest.mark.parametrize(
         "text",
         [
-            # Hourly rates: "$15 - $30 per hour" — values are 15-30 not K-suffixed
-            "Hourly rate: $15 - $30",
             # Funding numbers: "$10M - $50M Series B" — too large for salary
             "Series B funding: $10M - $50M",
             # Version ranges: "Python 3.10 - 3.12" — too small after K-elision
@@ -110,6 +108,29 @@ class TestPlausibilityFilter:
         # Either (None, None) outright, or — if anything matches — it stays
         # outside the plausibility window so we treat as miss.
         assert result == (None, None), f"Expected no match for {text!r}, got {result}"
+
+
+class TestHourlySalvage:
+    """P1.2 deliberate expectation change: hourly-cue text now salvages to an
+    annualized value (×2080) instead of returning (None, None).
+
+    Design rule D-3 rung 1: known period → honest annualization; in-bounds →
+    resolution 'salvaged_hourly'. The old salary_extractor had a bare plausibility
+    filter ([$30K, $5M]) that saw 15–30 as sub-floor and rejected it. Now the
+    normalizer knows the period and multiplies before checking bounds.
+    """
+
+    @pytest.mark.parametrize(
+        "text, expected",
+        [
+            # $15/hr × 2080 = 31,200 ; $30/hr × 2080 = 62,400
+            ("Hourly rate: $15 - $30", (31_200, 62_400)),
+            ("$42 - $51 an hour", (87_360, 106_080)),
+            ("$25 - $35 per hour", (52_000, 72_800)),
+        ],
+    )
+    def test_hourly_cue_annualizes(self, text, expected):
+        assert extract_salary_from_text(text) == expected
 
 
 class TestOrdering:

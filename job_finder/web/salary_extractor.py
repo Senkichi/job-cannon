@@ -6,95 +6,47 @@ _apply_post_fetch_extraction. When the regex matches a plausible
 range, we skip the LLM call (saves API spend + always-deterministic
 result). When it doesn't, the caller falls back to the LLM.
 
-The salary regexes intentionally cover the common JD formats and
-reject implausible matches (hourly rates, funding numbers, version
-strings) via a [$30K, $5M] plausibility filter on the annual-USD
-expansion.
+P1.2 convergence: this module is now a thin wrapper over
+``job_finder.salary_normalizer``. The regex patterns, plausibility
+bounds, and K-elision logic have all been consolidated there (D-2).
+The public API is preserved so m062 and _apply_post_fetch_extraction
+can call it unchanged.
 
-Formats handled:
-
-    $120K - $150K            (explicit dollars both sides, K/M optional)
-    $120,000 - $150,000      (full dollars)
-    $120K-150K               (dollar only on left, K-suffix elision)
-    $120K to $150K           (word 'to' as range separator)
-    USD 120,000 - 150,000    (currency-code prefix)
-    USD 120K to USD 150K     (currency code both sides)
-    "salary range: 120K-150K"  (context-anchored, no $ required)
-    "compensation: 140K-180K"
-    "pay range: 120K to 150K"
-
-Single-value salaries ('$120K base', 'up to $150K') are NOT extracted —
-they could mean min, max, or midpoint, and the caller schema requires
-unambiguous min OR max attribution. Future work could add directional
-hints ('starting at' -> min, 'up to' -> max) if needed.
+Plausibility constants are re-exported from salary_normalizer so any
+existing importer (e.g. enrichment_tiers.parse_structured_fields)
+gets the single source of truth rather than a stale copy (D-2).
 """
 
 from __future__ import annotations
 
-import re
+from job_finder.salary_normalizer import (
+    MAX_PLAUSIBLE_ANNUAL as _MAX_PLAUSIBLE_SALARY,
+)
+from job_finder.salary_normalizer import (
+    MIN_PLAUSIBLE_ANNUAL as _MIN_PLAUSIBLE_SALARY,
+)
+from job_finder.salary_normalizer import (
+    NormalizedSalary,
+    SalaryObservation,
+    normalize_observation,
+    parse_salary_text,
+)
 
-# Plausibility filter for annual-USD salary. Rejects hourly rates ($15/hr
-# is ~$31K but the parser shouldn't trip on standalone $15), funding
-# numbers ("$10M Series B"), and version strings ("Python 3.12-3.13").
-_MIN_PLAUSIBLE_SALARY = 30_000
-_MAX_PLAUSIBLE_SALARY = 5_000_000
+# Re-export so legacy importers (e.g. enrichment_tiers.parse_structured_fields)
+# continue to resolve these names from this module (D-2: single source of truth).
+MIN_PLAUSIBLE_SALARY = _MIN_PLAUSIBLE_SALARY
+MAX_PLAUSIBLE_SALARY = _MAX_PLAUSIBLE_SALARY
 
-# Range patterns. Ordered by specificity — the first match wins because
-# the more-specific patterns are also less likely to false-positive on
-# generic numeric ranges. All capture (low, low_unit, high, high_unit).
-_SALARY_PATTERNS: list[re.Pattern[str]] = [
-    # "$120K - $150K" / "$120,000 - $150,000" / "$120K to $150K"
-    # Both sides have $, K/M optional, range separator is dash or "to".
-    re.compile(
-        r"\$\s*(?P<low>\d[\d,]*\.?\d*)\s*(?P<low_unit>[KkMm])?"
-        r"\s*(?:to|-|–|—)\s*"
-        r"\$\s*(?P<high>\d[\d,]*\.?\d*)\s*(?P<high_unit>[KkMm])?",
-    ),
-    # "$120K-150K" / "$120K to 150K" — single $ on the left side. K/M
-    # required on both sides to avoid matching ambiguous numeric ranges
-    # like "$5 - 10 employees".
-    re.compile(
-        r"\$\s*(?P<low>\d[\d,]*\.?\d*)\s*(?P<low_unit>[KkMm])"
-        r"\s*(?:to|-|–|—)\s*"
-        r"(?P<high>\d[\d,]*\.?\d*)\s*(?P<high_unit>[KkMm])",
-    ),
-    # "USD 120,000 - 150,000" / "USD 120K to USD 150K". Allow USD prefix
-    # on both sides or just the first.
-    re.compile(
-        r"USD\s*(?P<low>\d[\d,]*\.?\d*)\s*(?P<low_unit>[KkMm])?"
-        r"\s*(?:to|-|–|—)\s*"
-        r"(?:USD\s*)?(?P<high>\d[\d,]*\.?\d*)\s*(?P<high_unit>[KkMm])?",
-    ),
-    # Context-anchored no-dollar range: "salary range: 120K-150K" /
-    # "compensation: 140K to 180K". Requires K/M suffix on the LOW side
-    # to keep false positives down (skip "rotation: 3-5 months", etc.).
-    re.compile(
-        r"(?:salary|compensation|base\s+pay|pay\s+range|comp\s+range|hiring\s+range|pay\s+band)"
-        r"[^\n\r]{0,30}?"  # up to 30 chars of intervening words/punct
-        r"(?P<low>\d[\d,]*\.?\d*)\s*(?P<low_unit>[KkMm])"
-        r"\s*(?:to|-|–|—)\s*"
-        r"(?P<high>\d[\d,]*\.?\d*)\s*(?P<high_unit>[KkMm])?",
-        re.IGNORECASE,
-    ),
+__all__ = [
+    # Re-export foundation types for callers that want to use them directly.
+    "MAX_PLAUSIBLE_SALARY",
+    "MIN_PLAUSIBLE_SALARY",
+    "NormalizedSalary",
+    "SalaryObservation",
+    "extract_salary_from_text",
+    "normalize_observation",
+    "parse_salary_text",
 ]
-
-
-def _expand_amount(raw: str, unit: str | None) -> float | None:
-    """Convert '120K' / '1.5M' / '150,000' to a float in dollars.
-
-    Returns None on parse error.
-    """
-    try:
-        val = float(raw.replace(",", ""))
-    except ValueError:
-        return None
-    if unit:
-        upper = unit.upper()
-        if upper == "K":
-            val *= 1_000
-        elif upper == "M":
-            val *= 1_000_000
-    return val
 
 
 def extract_salary_from_text(text: str | None) -> tuple[int | None, int | None]:
@@ -105,31 +57,26 @@ def extract_salary_from_text(text: str | None) -> tuple[int | None, int | None]:
     are guaranteed populated when the result is not (None, None) —
     callers can rely on either both-present-or-neither semantics.
 
-    Plausibility filter: values must fall within [$30K, $5M]. Range
-    must have ``low <= high`` (swapped automatically if the regex
-    captures them in the wrong order). Both-under-1000 K-elision
-    rule: if both extracted values are < 1000 and no K/M unit was
-    captured, assume both are in thousands.
+    P1.2: thin wrapper — delegates entirely to
+    ``salary_normalizer.parse_salary_text`` (single parser, D-2) and
+    ``salary_normalizer.normalize_observation`` (single normalizer, D-2).
+    Hourly-cue text now salvages to an annualized value instead of
+    rejecting outright (D-3 rung 1: known period → honest annualize).
+    Funding numbers ("$10M - $50M") still return (None, None) because
+    the normalizer's period-unknown rung 2 keeps them in-range and
+    plausibility-filters them out correctly — the cents rung 3 is
+    ats_structured-only.
     """
-    if not text:
+    obs = parse_salary_text(text, provenance="jd_regex")
+    if obs is None:
         return None, None
-    for pattern in _SALARY_PATTERNS:
-        for match in pattern.finditer(text):
-            low = _expand_amount(match.group("low"), match.group("low_unit"))
-            high = _expand_amount(match.group("high"), match.group("high_unit"))
-            if low is None or high is None:
-                continue
-            # K-elision: "$120-150" with no K/M units on either side and
-            # both values plausible-as-thousands.
-            both_units_missing = not match.group("low_unit") and not match.group("high_unit")
-            if both_units_missing and low < 1000 and high < 1000:
-                low *= 1000
-                high *= 1000
-            # Normalize order
-            if low > high:
-                low, high = high, low
-            # Plausibility filter
-            if low < _MIN_PLAUSIBLE_SALARY or high > _MAX_PLAUSIBLE_SALARY:
-                continue
-            return int(low), int(high)
+    result = normalize_observation(obs)
+    if result.resolution in (
+        "ok",
+        "salvaged_hourly",
+        "salvaged_daily",
+        "salvaged_weekly",
+        "salvaged_monthly",
+    ):
+        return result.salary_min, result.salary_max
     return None, None
