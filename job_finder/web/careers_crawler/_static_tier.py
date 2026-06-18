@@ -32,6 +32,7 @@ from job_finder.web.careers_crawler._autoheal_seam import (
 )
 from job_finder.web.careers_crawler._title_filters import (
     _clean_title,
+    _is_listing_tile,
     _is_metadata_blob,
     _is_nav_path,
 )
@@ -147,6 +148,12 @@ def _extract_candidates(soup: BeautifulSoup, base_url: str) -> list[dict]:
         # enforcement (Phase 48.01); this avoids wasted work on garbage
         # titles. See FOLLOWUPS.md 2026-05-27 audit.
         if _is_metadata_blob(title):
+            continue
+        # Result-count / category-landing tiles (#211): "84 Data Scientist
+        # Jobs" ordered-words-matches a target title and slips the keyword
+        # gate. ParsedJob.from_job hard-drops these (I-14), but reject here
+        # too — a cheap early exit before ParsedJob construction.
+        if _is_listing_tile(title):
             continue
 
         if (absolute_url, title) in seen_pairs:

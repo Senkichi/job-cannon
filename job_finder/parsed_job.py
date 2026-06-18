@@ -20,6 +20,8 @@ Invariants enforced here:
     I-10  company not in configured denylist → raises DenylistedCompanyError
     I-13  jd_full either NULL or above content-density floor → UnresolvedParsedJob
           (reason="jd_full_junk") with jd_full=None; other fields preserved
+    I-14  title is not a result-count / category-landing tile (#211) → raises
+          ListingTileError (hard drop; a count tile is not a posting)
 
 Reference: .planning/specs/2026-05-29-ingestion-contract-enforcement.md §8
 """
@@ -33,7 +35,11 @@ from typing import TYPE_CHECKING, Literal
 
 from job_finder.config import get_company_denylist, load_config
 from job_finder.normalizers import normalize_company, normalize_title
-from job_finder.web.careers_crawler._title_filters import clean_title, is_metadata_blob
+from job_finder.web.careers_crawler._title_filters import (
+    clean_title,
+    is_listing_tile,
+    is_metadata_blob,
+)
 from job_finder.web.location_canonical import JobLocation
 from job_finder.web.url_canonical import canonicalize_url
 
@@ -106,6 +112,17 @@ class LocationShapeError(ValueError):
 
 class DenylistedCompanyError(ValueError):
     """I-10: company name appears in the configured denylist."""
+
+
+class ListingTileError(ValueError):
+    """I-14 (#211): title is a result-count / category-landing tile.
+
+    A count tile ("84 Data Scientist Jobs", "1,200+ openings") is a category
+    landing page, not a single applyable posting. Unlike the metadata-blob
+    validators (I-08/I-09), which flag→UnresolvedParsedJob for human triage,
+    this is a HARD DROP — a tile has zero triage value, so we raise and the
+    row never enters the pipeline (sibling of ``DenylistedCompanyError``).
+    """
 
 
 # ---------------------------------------------------------------------------
@@ -250,6 +267,7 @@ class ParsedJob:
 
         Validator routing (I-07..I-13):
 
+            I-14 (listing tile, #211)       → raises ListingTileError
             I-08 (title_metadata_blob)      → UnresolvedParsedJob, does NOT raise
             I-09 (title_cross_field_bleed)  → UnresolvedParsedJob, does NOT raise
             I-10 (denylist)                 → raises DenylistedCompanyError
@@ -303,6 +321,16 @@ class ParsedJob:
         #
         # Both I-08 and is_metadata_blob map to the same reason code
         # 'title_metadata_blob'; the distinction is an implementation detail.
+
+        # I-14 (#211): result-count / category-landing tile — HARD DROP.
+        # Runs before the flag-only blob checks (and before clean_title, which
+        # leaves the leading-count + listing-noun shape intact). A count tile is
+        # categorically not a posting and carries zero human-triage value, so we
+        # raise rather than persist an UnresolvedParsedJob.
+        if is_listing_tile(raw_title):
+            raise ListingTileError(
+                f"Title {raw_title!r} is a result-count / category-landing tile (I-14)"
+            )
 
         if is_metadata_blob(raw_title):
             unresolved_reasons.append("title_metadata_blob")

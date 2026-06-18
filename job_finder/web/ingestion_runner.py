@@ -738,14 +738,15 @@ def _score_and_persist(
         # Persist (upsert handles dedup by dedup_key). Phase 48.07: the Job
         # shim is gone — construct a ParsedJob here and forward scoring as
         # explicit kwargs (score/score_breakdown are not parser-owned).
-        from job_finder.parsed_job import DenylistedCompanyError, ParsedJob
+        from job_finder.parsed_job import DenylistedCompanyError, ListingTileError, ParsedJob
 
         try:
             parsed = ParsedJob.from_job(job)
-        except DenylistedCompanyError:
+        except (DenylistedCompanyError, ListingTileError):
             # Preserve the pre-48.07 shim early-return: a denylisted company
-            # is reported as "unchanged" so the per-job error counter does
-            # not fire and ingestion summary counts stay identical.
+            # (I-10) — or a result-count tile (I-14, #211) — is reported as
+            # "unchanged" so the per-job error counter does not fire and
+            # ingestion summary counts stay identical.
             return
         result = upsert_job(
             conn,
