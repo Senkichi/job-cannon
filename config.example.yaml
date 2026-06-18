@@ -409,8 +409,14 @@ staleness:
 
 # --- Filtering ---
 filters:
-  # Additional companies to auto-exclude (merged with built-in denylist)
-  # Add staffing agencies or spam companies you keep seeing
+  # Additional companies to auto-exclude (merged with the built-in denylist).
+  # Matching is on the NORMALIZED company name: case-insensitive and with legal-
+  # entity suffixes stripped, so a single entry "Acme" also excludes
+  # "Acme, Inc." / "Acme LLC". Add taste-dependent staffing mills or any
+  # aggregator/spam "employer" you keep seeing.
+  # Built-in seed already excludes known aggregators/re-posters (Virtual
+  # Vocations, ProSidian, SynergisticIT) and placeholder names — no need to
+  # repeat those here.
   company_denylist: []
 
 # --- Parser auto-heal (default ON) ---
