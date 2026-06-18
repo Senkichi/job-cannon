@@ -10,18 +10,32 @@ Three layers of evidence — fast first, slow last:
      qwen2_5_14b.json — the Phase 33 shootout's per-site MAE record for
      qwen2.5:14b — and asserts the haiku_score MAE is <= 1.0. This proves
      the model + prompt achieved the threshold under Phase 33's measurement.
+     Stays skip-gated on the real (sensitive, git-ignored) artifact — it is
+     a provenance check that only has meaning against the genuine shootout
+     numbers, so there is no synthetic stand-in for it.
 
   2. ``test_g4_score_job_production_wiring``   Loads the first valid row
-     from baseline_sample.json + baseline_gold.json, mocks call_model with
-     the gold response, and asserts score_job (the production path)
-     returns a JobAssessment with sub_scores matching the gold byte-for-byte.
-     Verifies the dispatcher -> _coerce_assessment -> JobAssessment wiring
-     does not silently mangle the model output.
+     from a (sample, gold) pair, mocks call_model with the gold response,
+     and asserts score_job (the production path) returns a JobAssessment
+     with sub_scores matching the gold byte-for-byte. Verifies the
+     dispatcher -> _coerce_assessment -> JobAssessment wiring does not
+     silently mangle the model output. This test **always runs**: it prefers
+     the real Phase 33 artifacts when present, else falls back to the
+     committed synthetic fixture in ``tests/fixtures/v3_contract/``. The
+     wiring contract only needs *fixed* sub-scores, not *true* gold, so the
+     fabricated fixture exercises it just as well (see issue #261).
 
   3. ``test_g4_refit_live_ollama``  @pytest.mark.integration — full live
      measurement. Iterates the 100-row baseline sample, invokes score_job
      against live Ollama qwen2.5:14b, and asserts paired MAE <= 1.0. Opt-in
      via ``pytest -m integration`` (requires Ollama + qwen2.5:14b pulled).
+
+Module meta-canary (issue #261): ``test_g4_contract_canary_ran`` fails if
+zero contract tests in this module actually executed. A fully-inert module
+(everything skipped) can no longer coexist with a green suite — the green
+light always certifies *something*. Layer 2's always-run behavior keeps the
+canary green by default, so the canary is satisfied without provisioning the
+sensitive Phase 33 provenance artifact.
 """
 
 from __future__ import annotations
@@ -39,6 +53,27 @@ BASELINE_SAMPLE = BASELINE_DIR / "baseline_sample.json"
 BASELINE_GOLD = BASELINE_DIR / "baseline_gold.json"
 QWEN_CACHE = BASELINE_DIR / "qwen2_5_14b.json"
 
+# Committed, non-sensitive synthetic stand-in for the Phase 33 baseline
+# artifacts. Used by Layer 2 (the production-wiring guard) when the real
+# (sensitive, git-ignored) artifacts are absent, so the wiring contract runs
+# in every environment instead of silently skipping. See issue #261 and
+# tests/fixtures/v3_contract/README.md.
+SYNTHETIC_DIR = Path(__file__).parent / "fixtures" / "v3_contract"
+SYNTHETIC_SAMPLE = SYNTHETIC_DIR / "baseline_sample.json"
+SYNTHETIC_GOLD = SYNTHETIC_DIR / "baseline_gold.json"
+
+# Module meta-canary: incremented by every contract test that actually runs
+# its body. ``test_g4_contract_canary_ran`` asserts this is non-zero, so a
+# fully-inert (everything-skipped) module fails the suite. See issue #261.
+_CONTRACT_TESTS_RAN = 0
+
+
+def _mark_contract_test_ran() -> None:
+    """Record that a contract test body executed (feeds the meta-canary)."""
+    global _CONTRACT_TESTS_RAN
+    _CONTRACT_TESTS_RAN += 1
+
+
 _SUB_SCORE_KEYS = (
     "title_fit",
     "location_fit",
@@ -50,15 +85,27 @@ _SUB_SCORE_KEYS = (
 _G4_MAE_THRESHOLD = 1.0
 
 
-def _iter_sample_rows() -> list[dict]:
-    """Flatten dev + holdout categories from baseline_sample.json."""
-    if not BASELINE_SAMPLE.exists():
+def _iter_sample_rows(sample_path: Path = BASELINE_SAMPLE) -> list[dict]:
+    """Flatten dev + holdout categories from a baseline_sample.json file."""
+    if not sample_path.exists():
         return []
-    payload = json.loads(BASELINE_SAMPLE.read_text())
+    payload = json.loads(sample_path.read_text())
     rows: list[dict] = []
     for key in ("dev", "holdout"):
         rows.extend(payload.get(key) or [])
     return rows
+
+
+def _resolve_wiring_artifacts() -> tuple[Path, Path, str]:
+    """Resolve the (sample, gold) paths for the Layer 2 wiring test.
+
+    Prefers the real Phase 33 artifacts; falls back to the committed synthetic
+    fixture so the wiring contract always runs. Returns (sample, gold, source)
+    where ``source`` is "real" or "synthetic" for diagnostics.
+    """
+    if BASELINE_SAMPLE.exists() and BASELINE_GOLD.exists():
+        return BASELINE_SAMPLE, BASELINE_GOLD, "real"
+    return SYNTHETIC_SAMPLE, SYNTHETIC_GOLD, "synthetic"
 
 
 def _paired_mae(gold_map: dict, candidate_map: dict) -> tuple[float, int]:
@@ -101,6 +148,7 @@ def test_g4_phase33_provenance():
             "the Phase 33 shootout against qwen2.5:14b and copy the per-site result JSON to the "
             "expected path. Marked @pytest.mark.requires_artifacts."
         )
+    _mark_contract_test_ran()
     cache = json.loads(QWEN_CACHE.read_text())
     haiku = (cache.get("per_site") or {}).get("haiku_score") or {}
     mae = haiku.get("mae")
@@ -116,41 +164,46 @@ def test_g4_phase33_provenance():
 # ---------------------------------------------------------------------------
 
 
-def _first_paired_row() -> tuple[dict, dict]:
-    """Return (sample_row, gold_entry) for the first sample row with a valid gold."""
-    sample = _iter_sample_rows()
-    if not sample:
-        pytest.skip(
-            f"Phase 33 artifact missing or malformed: {BASELINE_SAMPLE} has no dev/holdout rows. "
-            "Regenerate by re-running the Phase 33 baseline-sampling step."
-        )
-    gold = json.loads(BASELINE_GOLD.read_text())
+def _first_paired_row(sample_path: Path, gold_path: Path) -> tuple[dict, dict]:
+    """Return (sample_row, gold_entry) for the first sample row with a valid gold.
+
+    Raises AssertionError (not skip) on a malformed pair — the synthetic
+    fixture fallback guarantees a well-formed pair always exists, so a missing
+    pairing here is a genuine fixture regression, not an environment gap.
+    """
+    sample = _iter_sample_rows(sample_path)
+    assert sample, (
+        f"{sample_path} has no dev/holdout rows — the Layer 2 wiring fixture is malformed."
+    )
+    gold = json.loads(gold_path.read_text())
     for row in sample:
         key = row.get("dedup_key")
         gold_entry = gold.get(key)
         if gold_entry and not gold_entry.get("_error"):
             return row, gold_entry
-    pytest.skip(
-        f"Phase 33 artifact malformed: no sample row in {BASELINE_SAMPLE} has a valid (non-_error) "
-        f"gold entry in {BASELINE_GOLD}. Regenerate the Phase 33 gold pass against the sample."
+    raise AssertionError(
+        f"No sample row in {sample_path} has a valid (non-_error) gold entry in "
+        f"{gold_path} — the Layer 2 wiring fixture is malformed."
     )
 
 
-@pytest.mark.requires_artifacts
 def test_g4_score_job_production_wiring():
-    """score_job + _coerce_assessment preserves gold sub_scores byte-for-byte."""
-    if not BASELINE_SAMPLE.exists() or not BASELINE_GOLD.exists():
-        pytest.skip(
-            f"Phase 33 baseline artifacts missing ({BASELINE_SAMPLE} and/or {BASELINE_GOLD}). "
-            "This test guards the production score_job + _coerce_assessment wiring contract: "
-            "the dispatcher MUST preserve gold sub_scores byte-for-byte. Regenerate by re-running "
-            "Phase 33's baseline sampling + gold scoring pass. Marked @pytest.mark.requires_artifacts."
-        )
+    """score_job + _coerce_assessment preserves gold sub_scores byte-for-byte.
+
+    Always runs: prefers the real (sensitive, git-ignored) Phase 33 artifacts,
+    else falls back to the committed synthetic fixture in
+    ``tests/fixtures/v3_contract/``. The wiring contract only needs *fixed*
+    sub-scores, not *true* gold — so the fabricated fixture exercises the
+    dispatcher -> _coerce_assessment -> JobAssessment path just as well, and
+    the contract can no longer silently skip. See issue #261.
+    """
+    _mark_contract_test_ran()
 
     from job_finder.web.job_scorer import score_job
     from job_finder.web.model_provider import ModelResult
 
-    sample_row, gold_entry = _first_paired_row()
+    sample_path, gold_path, _source = _resolve_wiring_artifacts()
+    sample_row, gold_entry = _first_paired_row(sample_path, gold_path)
     response_data = {dim: gold_entry[dim] for dim in _SUB_SCORE_KEYS}
     response_data["rationale"] = gold_entry.get("rationale") or {}
     response_data["legitimacy_note"] = gold_entry.get("legitimacy_note")
@@ -230,4 +283,37 @@ def test_g4_refit_live_ollama():
     assert paired >= 50, f"only {paired} paired rows -- live run produced too few results"
     assert mae <= _G4_MAE_THRESHOLD, (
         f"G4 live refit failed: MAE={mae:.3f} > {_G4_MAE_THRESHOLD} (paired n={paired})"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Meta-canary — a fully-inert contract module can no longer stay green
+# ---------------------------------------------------------------------------
+
+
+def test_g4_contract_canary_ran():
+    """Fail if zero contract tests in this module actually executed.
+
+    The whole point of these tests is to certify the v3 scoring contract.
+    Before issue #261, the Layer 1/Layer 2 tests ``pytest.skip``ped whenever
+    the (sensitive, git-ignored) Phase 33 artifacts were absent — so a fully
+    green suite could coexist with the contract entirely unverified.
+
+    This canary closes that gap at the module level: it asserts that at least
+    one contract test ran its body. With Layer 2 now always running (real or
+    synthetic fixture), this stays green by default; if both Layer 1 and
+    Layer 2 ever regress back to unconditional skips, this fails loudly.
+
+    Ordering note: pytest collects and runs tests top-to-bottom within a
+    module, so the canary (defined last) runs after the contract tests have
+    had their chance to increment the counter. Under xdist the module is
+    pinned to one worker by ``--dist loadscope``, preserving that ordering.
+    """
+    assert _CONTRACT_TESTS_RAN > 0, (
+        "No v3 scoring-contract test executed its body in this module — every "
+        "contract test skipped. A green suite must certify the contract, not "
+        "no-op around it. The Layer 2 production-wiring test is designed to "
+        "always run via the synthetic fixture in tests/fixtures/v3_contract/; "
+        "if it stopped running, the fixture is missing or the fallback broke. "
+        "See issue #261."
     )

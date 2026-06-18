@@ -1,0 +1,10 @@
+{
+  "dev": [
+    {
+      "dedup_key": "synthetic-v3-contract-0001",
+      "title": "Senior Backend Engineer (Synthetic Fixture)",
+      "jd_full": "SYNTHETIC FIXTURE — not a real posting. We are looking for a senior backend engineer to build distributed services in Python. Remote-first. Competitive compensation. This text exists only to exercise the v3 production-wiring contract test and contains no real job-posting content."
+    }
+  ],
+  "holdout": []
+}
