@@ -10,6 +10,13 @@ import pytest
 
 from job_finder.web.db_migrate import MIGRATIONS, run_migrations
 
+# user_version is set to a migration's explicit `version`, NOT to its index, so
+# the post-migration watermark equals the HIGHEST migration version — which is
+# only the same as len(MIGRATIONS) while versions stay contiguous. m100 (P4.1)
+# introduces a gap (m097–m099 are sibling-cohort allocations), so assert against
+# the max version, the actual runner invariant.
+_MAX_MIGRATION_VERSION = max(m.version for m in MIGRATIONS)
+
 
 class TestMigrationOnEmptyDB:
     """Tests for migration on a fresh empty database."""
@@ -143,9 +150,9 @@ class TestMigrationOnEmptyDB:
         conn.close()
 
         assert version_before == 0, f"Expected version 0 before migration, got: {version_before}"
-        # Version equals the total number of migrations applied
-        assert version_after == len(MIGRATIONS), (
-            f"Expected version {len(MIGRATIONS)} after migration, got: {version_after}"
+        # Version equals the highest migration version applied.
+        assert version_after == _MAX_MIGRATION_VERSION, (
+            f"Expected version {_MAX_MIGRATION_VERSION} after migration, got: {version_after}"
         )
 
 
@@ -225,7 +232,7 @@ class TestMigrationIdempotency:
         conn = sqlite3.connect(tmp_db_path)
         version = conn.execute("PRAGMA user_version").fetchone()[0]
         conn.close()
-        assert version == len(MIGRATIONS)
+        assert version == _MAX_MIGRATION_VERSION
 
     def test_migration_is_idempotent_on_existing_data(self, sample_db_with_jobs):
         """Running migration twice on DB with existing data produces no errors and no data loss."""
@@ -736,11 +743,9 @@ class TestMigration2:
         assert "haiku_score" not in cols
 
     def test_migration2_user_version_is_current(self, migrated_db_class):
-        from job_finder.web.db_migrate import MIGRATIONS
-
         path, conn = migrated_db_class
         version = conn.execute("PRAGMA user_version").fetchone()[0]
-        assert version == len(MIGRATIONS)
+        assert version == _MAX_MIGRATION_VERSION
 
 
 class TestMigration3:
@@ -908,13 +913,13 @@ class TestMigration40:
         assert row is not None, "Migration 40: idx_jobs_classification index missing"
 
     def test_migration_40_user_version_increments(self, tmp_db_path):
-        """Migration 40 increments user_version to 40 (matches len(MIGRATIONS))."""
+        """Migration chain sets user_version to the highest migration version."""
         run_migrations(tmp_db_path)
         conn = sqlite3.connect(tmp_db_path)
         version = conn.execute("PRAGMA user_version").fetchone()[0]
         conn.close()
-        assert version == len(MIGRATIONS), (
-            f"Migration 40: user_version={version}, expected {len(MIGRATIONS)}"
+        assert version == _MAX_MIGRATION_VERSION, (
+            f"Migration 40: user_version={version}, expected {_MAX_MIGRATION_VERSION}"
         )
         # Post-Plan-5 the final user_version is 41 (Mig 41 ran on top of Mig 40).
         assert version >= 40, f"Migration 40: expected user_version>=40, got {version}"
@@ -1124,7 +1129,7 @@ class TestMigration41DestructiveShape:
         version = conn.execute("PRAGMA user_version").fetchone()[0]
         conn.close()
         assert "haiku_score" not in cols
-        assert version == len(MIGRATIONS)
+        assert version == _MAX_MIGRATION_VERSION
 
 
 class TestMigration41BackupGate:

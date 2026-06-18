@@ -9,6 +9,30 @@ import html
 import re
 
 # ---------------------------------------------------------------------------
+# Normalizer version (D-8: derived values are versioned)
+# ---------------------------------------------------------------------------
+#
+# dedup_key is a pure function of (company, title) routed through
+# normalize_company / normalize_title. Per D-8, any stored value that is a pure
+# function of other stored data records the version of the function that derived
+# it, and a standing, idempotent re-derivation runs when that version changes.
+#
+# NORMALIZER_VERSION is that version tag. Version 1 is the IMPLICIT pre-#238
+# normalizer (no digit<->letter separator rule). Version 2 is the current
+# algorithm (#212/#238 added the digit<->letter boundary split at line ~249).
+#
+# BUMP THIS whenever normalize_company / normalize_title semantics change so
+# that the same (company, title) could map to a different dedup_key. Bumping it
+# re-arms the standing re-key operation (`_run_rekey_if_stale` in
+# job_finder/web/migrations/_post_hooks.py), which re-derives every row's key
+# under the new version on next startup. The canary test in
+# tests/test_dedup_normalizer.py fails loudly ("normalizer semantics changed --
+# bump NORMALIZER_VERSION") if the functions drift without a bump — this is the
+# enforcement that #238's once-ever-sentinel gap can never recur.
+NORMALIZER_VERSION: int = 2
+
+
+# ---------------------------------------------------------------------------
 # Company name deterministic cleanup regexes
 # ---------------------------------------------------------------------------
 
@@ -251,3 +275,25 @@ def normalize_title(title: str) -> str:
     # Normalize whitespace and lowercase
     normalized = " ".join(normalized.split()).lower()
     return normalized
+
+
+def derive_dedup_key(company: str, title: str) -> str:
+    """Derive the current-version dedup_key for a job (D-8).
+
+    The dedup_key is ``"{normalize_company(company)}|{normalize_title(title)}"``.
+    Location is intentionally excluded (same company + same title = same job).
+
+    This is the single derivation entry point keyed to ``NORMALIZER_VERSION``.
+    ``Job.normalized_dedup_key`` and ``dedup_normalizer.normalized_dedup_key``
+    delegate to the same two normalize functions, so all derivation paths agree
+    byte-for-byte (enforced by the foundation/web parity test).
+
+    Args:
+        company: Raw company name.
+        title: Raw job title.
+
+    Returns:
+        ``"{normalized_company}|{normalized_title}"`` under the current
+        normalizer version.
+    """
+    return f"{normalize_company(company)}|{normalize_title(title)}"

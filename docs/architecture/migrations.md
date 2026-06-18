@@ -16,7 +16,7 @@ job_finder/web/
     ├── types.py                       # Migration / MigrationContext dataclasses
     ├── _gate.py                       # MigrationBlockedError + _check_backup_recent
     ├── _runner.py                     # _apply_migration (one migration → DB)
-    ├── _post_hooks.py                 # _run_retroactive_dedup_once (post-loop)
+    ├── _post_hooks.py                 # _run_rekey_if_stale (standing dedup re-key, post-loop)
     └── m001_initial_schema.py         # One file per migration, version in name
         m002_ai_scoring_columns.py
         ...

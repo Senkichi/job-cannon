@@ -1,12 +1,18 @@
-"""Post-migration hooks — one-time data fixes that ride on the migration loop.
+"""Post-migration hooks — standing data fixups that ride on the migration loop.
 
 These are NOT migrations. They are application-startup fixups that depend on
 the migration chain having reached at least a certain version. The runner
 (`run_migrations` in `db_migrate.py`) calls them after the loop terminates.
 
-Putting them here keeps `db_migrate.py` focused on the migration runner;
-the dedup hook is a one-time data-quality pass that happens to run at the
-same boundary.
+Putting them here keeps `db_migrate.py` focused on the migration runner.
+
+The dedup re-key hook (`_run_rekey_if_stale`) is the standing, idempotent
+re-derivation operation mandated by D-8: a derived value (dedup_key) records
+the version of the function that produced it (`dedup_normalizer_version` in
+`schema_meta`), and whenever the live `NORMALIZER_VERSION` differs, every row's
+key is re-derived and duplicates are merged. This replaces the old once-ever
+`merge_source='migration_complete'` sentinel, whose run-exactly-once gating let
+#238's normalizer change strand 17 stale-key duplicate pairs.
 """
 
 from __future__ import annotations
@@ -14,67 +20,116 @@ from __future__ import annotations
 import logging
 import sqlite3
 
+from job_finder.normalizers import NORMALIZER_VERSION
+
 logger = logging.getLogger(__name__)
 
+_VERSION_KEY = "dedup_normalizer_version"
 
-def _run_retroactive_dedup_once(conn: sqlite3.Connection) -> None:
-    """Run retroactive dedup merge exactly once (guarded by sentinel in merge_log).
 
-    Checks for a sentinel row with `merge_source='migration_complete'`. If
-    not found, runs `run_retroactive_dedup`, inserts the sentinel, and logs
-    the result. Inserts a `runs` table entry for activity feed visibility.
+def _read_stored_version(conn: sqlite3.Connection) -> int | None:
+    """Return the stored dedup_normalizer_version, or None if unavailable.
 
-    Args:
-        conn: Open SQLite connection (must have migration 6 applied).
+    None means the watermark cannot be read yet — either ``schema_meta`` does
+    not exist (DB is mid-migration, below m100) or the key was never seeded. The
+    caller treats None as "defer; not safe to decide" so we never re-key against
+    an unknown baseline.
     """
     try:
-        sentinel = conn.execute(
-            "SELECT id FROM merge_log WHERE merge_source = 'migration_complete' LIMIT 1"
+        row = conn.execute(
+            "SELECT value FROM schema_meta WHERE key = ?", (_VERSION_KEY,)
         ).fetchone()
-        if sentinel is not None:
-            return  # Already ran -- skip
+    except sqlite3.OperationalError:
+        return None
+    if row is None:
+        return None
+    try:
+        return int(row[0])
+    except (TypeError, ValueError):
+        return None
 
-        # Import here to avoid circular import at module load time
-        from datetime import datetime as _dt
+
+def _stamp_version(conn: sqlite3.Connection, version: int) -> None:
+    """Write the dedup_normalizer_version watermark (upsert)."""
+    conn.execute(
+        "INSERT INTO schema_meta (key, value) VALUES (?, ?) "
+        "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        (_VERSION_KEY, str(version)),
+    )
+    conn.commit()
+
+
+def _run_rekey_if_stale(conn: sqlite3.Connection) -> None:
+    """Re-derive dedup_keys + merge duplicates when the normalizer version drifts.
+
+    Standing, idempotent re-key operation (D-8). Compares the stored
+    ``dedup_normalizer_version`` against the live ``NORMALIZER_VERSION``:
+
+    - Versions equal → nothing owed; return immediately (the common startup
+      path — one cheap SELECT).
+    - Versions differ → run ``run_retroactive_dedup`` (logging merges as
+      ``rekey_v{N}``), stamp the watermark to ``NORMALIZER_VERSION``, and NULL
+      classification/sub_scores/fit_analysis on merged canonicals so the v3
+      scorer re-derives them. Re-keyed singletons need no rescore (their facts
+      are unchanged; only the key string moved).
+    - Watermark unreadable (``schema_meta`` absent, DB below m100 mid-migration)
+      → defer. m100 seeds the watermark, so the next startup decides correctly.
+      This is the "keep honoring the old sentinel for fresh DBs mid-migration"
+      contract: the legacy ``migration_complete`` sentinel still suppresses a
+      redundant v1 dedup until m100 has run, after which the watermark governs.
+
+    Args:
+        conn: Open SQLite connection (must have m100 applied to act).
+    """
+    try:
+        stored = _read_stored_version(conn)
+        if stored is None:
+            # schema_meta not present / unseeded — m100 hasn't run yet. Defer.
+            return
+        if stored == NORMALIZER_VERSION:
+            return  # Keys already at the current version — nothing to do.
 
         from job_finder.web.dedup_normalizer import run_retroactive_dedup
 
-        merged_count = run_retroactive_dedup(conn)
-        now_iso = _dt.now().isoformat()
+        merge_source = f"rekey_v{NORMALIZER_VERSION}"
+        merged_count = run_retroactive_dedup(conn, merge_source=merge_source)
 
-        # Insert sentinel row to mark completion
-        conn.execute(
-            """
-            INSERT INTO merge_log (canonical_key, merged_key, merge_source, merged_at)
-            VALUES ('__sentinel__', '__sentinel__', 'migration_complete', ?)
-        """,
-            (now_iso,),
+        # Stamp the watermark FIRST so a crash after a partial merge still
+        # records progress at the target version (the operation is idempotent —
+        # a re-run finds no remaining collisions).
+        _stamp_version(conn, NORMALIZER_VERSION)
+
+        logger.info(
+            "Dedup re-key v%d: merged %d duplicate jobs (was version %d).",
+            NORMALIZER_VERSION,
+            merged_count,
+            stored,
         )
-        conn.commit()
 
         if merged_count > 0:
-            # Add activity feed entry so the user sees the merge count
+            # Activity-feed entry so the user sees the merge count.
             try:
+                from job_finder.json_utils import utc_now_iso
+
                 conn.execute(
                     """
                     INSERT INTO runs (timestamp, source, jobs_fetched, jobs_new, jobs_scored)
-                    VALUES (?, 'dedup_migration', ?, 0, 0)
+                    VALUES (?, 'dedup_rekey', ?, 0, 0)
                 """,
-                    (now_iso, merged_count),
+                    (utc_now_iso(), merged_count),
                 )
                 conn.commit()
             except Exception as e:
-                logger.warning("Failed to log dedup migration run: %s", e)
+                logger.warning("Failed to log dedup re-key run: %s", e)
 
-            logger.info("Retroactive dedup: merged %d duplicate jobs.", merged_count)
-
-            # Queue merged canonical rows for re-scoring by nulling the v3
-            # scoring surface (classification/sub_scores_json) and the
-            # rationale (fit_analysis). Plan 5 dropped haiku_score/sonnet_score;
-            # the v3 scorer re-derives classification from sub_scores.
+            # Queue merged canonical rows for re-scoring: NULL the v3 scoring
+            # surface (classification/sub_scores_json) and the rationale
+            # (fit_analysis). Only rows that were the canonical target of a
+            # re-key merge are touched — re-keyed singletons keep their scores.
             try:
                 canonical_keys = conn.execute(
-                    "SELECT canonical_key FROM merge_log WHERE merge_source = 'migration'"
+                    "SELECT DISTINCT canonical_key FROM merge_log WHERE merge_source = ?",
+                    (merge_source,),
                 ).fetchall()
                 for row in canonical_keys:
                     conn.execute(
@@ -89,9 +144,7 @@ def _run_retroactive_dedup_once(conn: sqlite3.Connection) -> None:
                     )
                 conn.commit()
             except Exception as e:
-                logger.warning("Failed to queue merged rows for re-scoring: %s", e)
-        else:
-            logger.info("Retroactive dedup: no duplicates found.")
+                logger.warning("Failed to queue re-keyed rows for re-scoring: %s", e)
 
     except Exception as e:
-        logger.warning("Retroactive dedup failed (non-fatal): %s", e)
+        logger.warning("Dedup re-key failed (non-fatal): %s", e)
