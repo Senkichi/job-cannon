@@ -679,6 +679,10 @@ def fetch_serp_portals(
 
     try:
         raw_jobs = backend.fetch_jobs(queries)
+    except RuntimeError:
+        # Credential / vendor-envelope failures (#437) must surface, not be
+        # masked as an empty portal run — propagate to _fetch_portal_search.
+        raise
     except Exception:
         logger.warning("Portal SERP search failed", exc_info=True)
         return []

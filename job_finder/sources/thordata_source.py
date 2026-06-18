@@ -18,6 +18,7 @@ import time
 import requests
 
 from job_finder.models import Job
+from job_finder.sources._error_envelope import detect_vendor_error_envelope
 
 logger = logging.getLogger(__name__)
 
@@ -96,12 +97,11 @@ class ThordataSource:
                     )
                 resp.raise_for_status()
                 data = resp.json()
-                # Detect expired/invalid subscription surfaced as a 200 with an
-                # error payload (e.g. {"message": "Package has expired!"}).
-                if isinstance(data, dict) and not data.get("jobs_results") and data.get("message"):
-                    msg = data["message"]
-                    if any(kw in msg.lower() for kw in ("expired", "invalid", "unauthorized")):
-                        raise RuntimeError(f"Thordata account error: {msg}")
+                # Detect a vendor error envelope surfaced as a 200 (e.g.
+                # {"message": "Package has expired!"}) via the shared detector.
+                reason = detect_vendor_error_envelope(data, source="thordata")
+                if reason:
+                    raise RuntimeError(reason)
             except RuntimeError:
                 raise
             except Exception as e:

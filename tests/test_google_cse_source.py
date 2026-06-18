@@ -12,6 +12,8 @@ Coverage:
 from datetime import date, datetime, timedelta
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from job_finder.sources.google_cse_source import (
     GoogleCSESource,
     _split_title_company,
@@ -32,6 +34,27 @@ def _make_item(
     snippet: str = "We are hiring",
 ) -> dict:
     return {"title": title, "link": link, "snippet": snippet}
+
+
+def _make_error_response(body: dict) -> MagicMock:
+    resp = MagicMock()
+    resp.status_code = 200
+    resp.json.return_value = body
+    resp.raise_for_status = MagicMock()
+    return resp
+
+
+class TestVendorErrorEnvelope:
+    """A 200 body wrapping a vendor error envelope must raise, not be swallowed (#437)."""
+
+    @patch("job_finder.sources.google_cse_source.requests.get")
+    def test_200_error_envelope_raises(self, mock_get):
+        mock_get.return_value = _make_error_response(
+            {"error": {"code": 429, "message": "Quota exceeded for quota metric 'Queries'"}}
+        )
+        src = GoogleCSESource(api_key="bad", cse_id="cx")
+        with pytest.raises(RuntimeError, match="Quota exceeded"):
+            src.fetch_jobs([{"query": "site:wellfound.com data scientist", "location": ""}])
 
 
 # ---------------------------------------------------------------------------
