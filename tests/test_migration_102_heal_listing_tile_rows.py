@@ -1,4 +1,4 @@
-"""Tests for Migration 97 — heal result-count / category-landing tile rows (#211).
+"""Tests for Migration 102 — heal result-count / category-landing tile rows (#211).
 
 Covers:
 - Result-count tile titles (incl. whitespace-variant dups, #212) are deleted.
@@ -18,7 +18,7 @@ import tempfile
 import pytest
 
 from job_finder.web.db_migrate import run_migrations
-from job_finder.web.migrations.m097_heal_listing_tile_rows import MIGRATION, _heal_listing_tiles
+from job_finder.web.migrations.m102_heal_listing_tile_rows import MIGRATION, _heal_listing_tiles
 from job_finder.web.migrations.types import MigrationContext
 
 
@@ -55,7 +55,7 @@ def _insert_job(
     return dedup_key
 
 
-def _run_m097(path: str, conn: sqlite3.Connection) -> None:
+def _run_m102(path: str, conn: sqlite3.Connection) -> None:
     ctx = MigrationContext(
         conn=conn,
         db_path=path,
@@ -72,8 +72,8 @@ def _job_exists(conn: sqlite3.Connection, dedup_key: str) -> bool:
     )
 
 
-def test_migration_declares_version_97():
-    assert MIGRATION.version == 97
+def test_migration_declares_version_102():
+    assert MIGRATION.version == 102
 
 
 class TestTileRowDeletion:
@@ -91,7 +91,7 @@ class TestTileRowDeletion:
     def test_tile_title_is_deleted(self, migrated_db, dedup_key, title):
         path, conn = migrated_db
         _insert_job(conn, dedup_key, title, ["careers_page"])
-        _run_m097(path, conn)
+        _run_m102(path, conn)
         assert not _job_exists(conn, dedup_key)
 
 
@@ -104,7 +104,7 @@ class TestSpareRealRows:
         path, conn = migrated_db
         dedup_key = f"capital one|{title.lower()}"
         _insert_job(conn, dedup_key, title, ["careers_page"])
-        _run_m097(path, conn)
+        _run_m102(path, conn)
         assert _job_exists(conn, dedup_key)
 
 
@@ -120,7 +120,7 @@ class TestUserActionGuard:
             ["careers_page"],
             pipeline_status=status,
         )
-        _run_m097(path, conn)
+        _run_m102(path, conn)
         assert _job_exists(conn, dedup_key), f"pipeline_status={status!r} must be preserved"
 
 
@@ -134,11 +134,11 @@ class TestIdempotence:
             conn, "capital one|data scientist", "Data Scientist", ["careers_page"]
         )
 
-        _run_m097(path, conn)
+        _run_m102(path, conn)
         assert not _job_exists(conn, tile_id)
         assert _job_exists(conn, clean_id)
 
-        _run_m097(path, conn)
+        _run_m102(path, conn)
         assert not _job_exists(conn, tile_id)
         assert _job_exists(conn, clean_id)
 
@@ -146,6 +146,6 @@ class TestIdempotence:
 class TestEmptyDatabase:
     def test_no_jobs_is_noop(self, migrated_db):
         path, conn = migrated_db
-        _run_m097(path, conn)  # should not raise
+        _run_m102(path, conn)  # should not raise
         count = conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
         assert count == 0

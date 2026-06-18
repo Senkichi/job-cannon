@@ -1,4 +1,4 @@
-"""Migration 97 — heal existing result-count / category-landing tile rows (#211).
+"""Migration 102 — heal existing result-count / category-landing tile rows (#211).
 
 Background: prior to the #211 fix the careers crawler's static tier harvested
 careers-page *category landing* links as if they were single postings. A link
@@ -54,7 +54,7 @@ def _heal_listing_tiles(ctx: MigrationContext) -> None:
         "SELECT 1 FROM sqlite_master WHERE type='table' AND name = 'jobs'"
     ).fetchone()
     if row is None:
-        logger.info("m097: jobs table not present, no-op")
+        logger.info("m102: jobs table not present, no-op")
         return
 
     # Pre-filter in SQL (cheap, indexable) to untouched rows whose title
@@ -76,16 +76,16 @@ def _heal_listing_tiles(ctx: MigrationContext) -> None:
         conn.execute("DELETE FROM jobs WHERE dedup_key = ?", (dedup_key,))
         deleted += 1
         logger.info(
-            "m097: deleted result-count tile row dedup_key=%r title=%r",
+            "m102: deleted result-count tile row dedup_key=%r title=%r",
             dedup_key,
             title,
         )
 
-    logger.info("m097: removed %d result-count / category-landing tile rows", deleted)
+    logger.info("m102: removed %d result-count / category-landing tile rows", deleted)
 
 
 MIGRATION = Migration(
-    version=97,
+    version=102,
     description="heal result-count / category-landing tile rows (#211)",
     py=_heal_listing_tiles,
 )
