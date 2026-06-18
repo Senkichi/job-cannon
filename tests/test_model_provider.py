@@ -1476,3 +1476,167 @@ def test_maybe_record_cost_rejects_empty_provider(tmp_path):
             _maybe_record_cost(bad_result, conn, "j1", "purpose")
     finally:
         conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Issue #227: quality floor — degenerate (no-signal) scoring detection +
+# cascade fallthrough.
+# ---------------------------------------------------------------------------
+
+from job_finder.web.model_provider import is_degenerate_assessment
+
+# Scoring schema shape the quality floor is gated on (six ordinal axes +
+# rationale). Mirrors v3 JOB_ASSESSMENT_SCHEMA structurally (enough for
+# _validate_schema to pass on a complete vector).
+_SCORE_SCHEMA = {
+    "type": "object",
+    "required": [
+        "title_fit",
+        "location_fit",
+        "comp_fit",
+        "domain_match",
+        "seniority_match",
+        "skills_match",
+        "rationale",
+    ],
+    "properties": {
+        "title_fit": {"type": "integer", "minimum": 1, "maximum": 5},
+        "location_fit": {"type": "integer", "minimum": 1, "maximum": 5},
+        "comp_fit": {"type": "integer", "minimum": 1, "maximum": 5},
+        "domain_match": {"type": "integer", "minimum": 1, "maximum": 5},
+        "seniority_match": {"type": "integer", "minimum": 1, "maximum": 5},
+        "skills_match": {"type": "integer", "minimum": 1, "maximum": 5},
+        "rationale": {"type": "object"},
+    },
+}
+
+_EMPTY_RATIONALE = {
+    "strengths": [],
+    "gaps": [],
+    "talking_points": [],
+    "resume_priority_skills": [],
+}
+
+
+def _uniform_score_data(value: int, rationale: dict | None = None) -> dict:
+    """A six-axis vector with every axis == value."""
+    data = {k: value for k in _SCORE_SCHEMA["required"] if k != "rationale"}
+    data["rationale"] = rationale if rationale is not None else dict(_EMPTY_RATIONALE)
+    return data
+
+
+class TestDegeneratePredicate:
+    """is_degenerate_assessment: uniform axes AND empty rationale → True."""
+
+    def test_uniform_3s_empty_rationale_is_degenerate(self):
+        assert is_degenerate_assessment(_uniform_score_data(3)) is True
+
+    def test_uniform_5s_empty_rationale_is_degenerate(self):
+        # No-signal is not just all-3s; uniform 5s with no rationale is equally meaningless.
+        assert is_degenerate_assessment(_uniform_score_data(5)) is True
+
+    def test_uniform_with_rationale_is_not_degenerate(self):
+        data = _uniform_score_data(5, rationale={**_EMPTY_RATIONALE, "strengths": ["Real match"]})
+        assert is_degenerate_assessment(data) is False
+
+    def test_varied_vector_is_not_degenerate(self):
+        data = _uniform_score_data(3)
+        data["title_fit"] = 5
+        assert is_degenerate_assessment(data) is False
+
+    def test_missing_rationale_object_with_uniform_axes_is_degenerate(self):
+        data = _uniform_score_data(2)
+        del data["rationale"]
+        assert is_degenerate_assessment(data) is True
+
+    def test_non_scoring_payload_is_never_degenerate(self):
+        # quick/triage/extraction payloads lack the six axis keys.
+        assert is_degenerate_assessment({"score": 80}) is False
+        assert is_degenerate_assessment({}) is False
+        assert is_degenerate_assessment(None) is False
+
+    def test_evidence_score_wrapped_axes_handled(self):
+        # Variant v4d2 wraps each axis as {evidence, score}.
+        data = _uniform_score_data(3)
+        for k in [k for k in data if k != "rationale"]:
+            data[k] = {"evidence": "x", "score": 3}
+        assert is_degenerate_assessment(data) is True
+
+
+def _score_model_result(provider, data):
+    return ModelResult(
+        data=data,
+        cost_usd=0.0,
+        input_tokens=100,
+        output_tokens=50,
+        model=f"{provider}-model",
+        provider=provider,
+        schema_valid=True,
+    )
+
+
+def test_cascade_advances_past_degenerate_to_genuine(tmp_path, _reset_daily_state):
+    """A degenerate result from the primary advances the cascade to the next
+    provider, which returns a genuine (varied) vector that is accepted."""
+    from job_finder.web.model_provider import call_model
+
+    conn = _migrated_conn(tmp_path)
+
+    degenerate = _score_model_result("ollama", _uniform_score_data(3))
+    genuine_data = _uniform_score_data(4)
+    genuine_data["title_fit"] = 5
+    genuine_data["rationale"] = {**_EMPTY_RATIONALE, "strengths": ["Direct match"]}
+    genuine = _score_model_result("gemini", genuine_data)
+
+    def make_adapter_side_effect(provider_name, *args, **kwargs):
+        adapter = MagicMock()
+        adapter.call.return_value = degenerate if provider_name == "ollama" else genuine
+        return adapter
+
+    with (
+        patch("job_finder.web.model_provider._make_adapter", side_effect=make_adapter_side_effect),
+        patch("job_finder.web.model_provider.cost_gate", return_value=True),
+        patch("job_finder.web.model_provider.record_cost"),
+    ):
+        result = call_model(
+            "score",
+            "sys",
+            [{"role": "user", "content": "hi"}],
+            conn,
+            _CASCADE_CONFIG,
+            output_schema=_SCORE_SCHEMA,
+        )
+
+    assert result.provider == "gemini"
+    assert result.degenerate is False
+
+
+def test_cascade_all_degenerate_returns_flagged(tmp_path, _reset_daily_state):
+    """When every provider returns a degenerate vector, the last one is
+    accepted with degenerate=True rather than raising."""
+    from job_finder.web.model_provider import call_model
+
+    conn = _migrated_conn(tmp_path)
+
+    def make_adapter_side_effect(provider_name, *args, **kwargs):
+        adapter = MagicMock()
+        adapter.call.return_value = _score_model_result(provider_name, _uniform_score_data(3))
+        return adapter
+
+    with (
+        patch("job_finder.web.model_provider._make_adapter", side_effect=make_adapter_side_effect),
+        patch("job_finder.web.model_provider.cost_gate", return_value=True),
+        patch("job_finder.web.model_provider.record_cost"),
+    ):
+        result = call_model(
+            "score",
+            "sys",
+            [{"role": "user", "content": "hi"}],
+            conn,
+            _CASCADE_CONFIG,
+            output_schema=_SCORE_SCHEMA,
+        )
+
+    # Last provider in chain (anthropic) accepted, flagged degenerate.
+    assert result.degenerate is True
+    assert result.provider == "anthropic"
