@@ -380,3 +380,87 @@ class TestFetchSmartRecruitersDescription:
             detail_call_url
             == "https://api.smartrecruiters.com/v1/companies/TestCo/postings/abc-123"
         )
+
+
+# ---------------------------------------------------------------------------
+# Tests: _fetch_postings_with_completeness (completeness gate, #217)
+# ---------------------------------------------------------------------------
+
+
+class TestSmartRecruitersCompleteness:
+    """The reconciler may only expire against a complete live board (#217)."""
+
+    @patch("job_finder.web.ats_platforms._platforms_smartrecruiters.requests.get")
+    def test_under_cap_board_is_complete(self, mock_get):
+        """totalFound <= cap and fully paginated → complete=True."""
+        from job_finder.web.ats_platforms._platforms_smartrecruiters import (
+            _fetch_postings_with_completeness,
+        )
+
+        resp = MagicMock(status_code=200)
+        resp.json.return_value = {
+            "totalFound": 2,
+            "content": [{"id": "1", "name": "A"}, {"id": "2", "name": "B"}],
+        }
+        mock_get.return_value = resp
+
+        postings, complete = _fetch_postings_with_completeness("TestCo")
+        assert complete is True
+        assert len(postings) == 2
+
+    @patch("job_finder.web.ats_platforms._platforms_smartrecruiters.requests.get")
+    def test_over_cap_board_is_incomplete(self, mock_get):
+        """totalFound > 500 cap → complete=False; the 501+ tail is unfetchable."""
+        from job_finder.web.ats_platforms._platforms_smartrecruiters import (
+            _fetch_postings_with_completeness,
+        )
+
+        resp = MagicMock(status_code=200)
+        resp.json.return_value = {
+            "totalFound": 600,
+            "content": [{"id": str(i), "name": f"Job {i}"} for i in range(100)],
+        }
+        mock_get.return_value = resp
+
+        _, complete = _fetch_postings_with_completeness("TestCo")
+        assert complete is False
+
+    @patch("job_finder.web.ats_platforms._platforms_smartrecruiters.requests.get")
+    def test_empty_board_is_complete(self, mock_get):
+        """totalFound=0 (genuinely empty) → complete=True (safe to reconcile)."""
+        from job_finder.web.ats_platforms._platforms_smartrecruiters import (
+            _fetch_postings_with_completeness,
+        )
+
+        resp = MagicMock(status_code=200)
+        resp.json.return_value = {"totalFound": 0, "content": []}
+        mock_get.return_value = resp
+
+        postings, complete = _fetch_postings_with_completeness("TestCo")
+        assert postings == []
+        assert complete is True
+
+    @patch("job_finder.web.ats_platforms._platforms_smartrecruiters.requests.get")
+    def test_first_page_error_is_incomplete(self, mock_get):
+        """Network/HTTP error before any page arrives → complete=False (no expiry)."""
+        from job_finder.web.ats_platforms._platforms_smartrecruiters import (
+            _fetch_postings_with_completeness,
+        )
+
+        mock_get.side_effect = Exception("network error")
+        postings, complete = _fetch_postings_with_completeness("TestCo")
+        assert postings == []
+        assert complete is False
+
+    @patch("job_finder.web.ats_platforms._platforms_smartrecruiters.requests.get")
+    def test_fetch_postings_wrapper_returns_list_only(self, mock_get):
+        """Thin _fetch_postings wrapper returns just the postings list."""
+        from job_finder.web.ats_platforms._platforms_smartrecruiters import _fetch_postings
+
+        resp = MagicMock(status_code=200)
+        resp.json.return_value = {"totalFound": 1, "content": [{"id": "1", "name": "A"}]}
+        mock_get.return_value = resp
+
+        result = _fetch_postings("TestCo")
+        assert isinstance(result, list)
+        assert result[0]["id"] == "1"

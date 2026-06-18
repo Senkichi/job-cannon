@@ -632,6 +632,171 @@ class TestReconcileCompany:
 
         mock_desc_fetch.assert_not_called()
 
+    # -- SmartRecruiters completeness gate (#217) ---------------------------
+
+    @patch("job_finder.web.ats_reconciler._smartrecruiters_live_id_set")
+    def test_smartrecruiters_incomplete_board_skips_no_writes(self, mock_sr, tmp_db_path):
+        """SmartRecruiters board that can't be fully paginated (totalFound > cap)
+        skips to avoid false-expire. Zero expiry writes for any tracked job."""
+        from job_finder.web.ats_reconciler import reconcile_company
+        from job_finder.web.db_helpers import standalone_connection
+
+        url = "https://jobs.smartrecruiters.com/AbbVie/744000123456789"
+        _, dedup_keys = _setup_company_and_jobs(
+            tmp_db_path,
+            platform="smartrecruiters",
+            slug="AbbVie",
+            job_urls=[url],
+        )
+        mock_sr.return_value = (set(), False)  # board incomplete
+
+        with standalone_connection(tmp_db_path) as conn:
+            company_row = dict(
+                conn.execute("SELECT id, ats_platform, ats_slug FROM companies").fetchone()
+            )
+            result = reconcile_company(conn, company_row)
+
+        assert result["skipped"] is True
+        assert result["skip_reason"] == "smartrecruiters_incomplete"
+        assert result["expired"] == 0  # false-expire guard held
+
+        conn = sqlite3.connect(tmp_db_path)
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT expiry_status FROM jobs WHERE dedup_key = ?",
+            (dedup_keys[0],),
+        ).fetchone()
+        conn.close()
+        assert row["expiry_status"] is None  # no write happened
+
+    @patch("job_finder.web.ats_platforms._platforms_smartrecruiters.requests.get")
+    def test_smartrecruiters_over_cap_total_skips_via_completeness_gate(
+        self, mock_get, tmp_db_path
+    ):
+        """End-to-end: list endpoint returns totalFound=600 (> 500 cap) →
+        complete=False → reconcile skips with 'smartrecruiters_incomplete',
+        no DB writes. Guards the 501+ tail described in #217."""
+        from job_finder.web.ats_reconciler import reconcile_company
+        from job_finder.web.db_helpers import standalone_connection
+
+        url = "https://jobs.smartrecruiters.com/AbbVie/744000123456789"
+        _, dedup_keys = _setup_company_and_jobs(
+            tmp_db_path,
+            platform="smartrecruiters",
+            slug="AbbVie",
+            job_urls=[url],
+        )
+        mock_resp = MagicMock(status_code=200)
+        mock_resp.json.return_value = {
+            "totalFound": 600,
+            "content": [{"id": str(i), "name": f"Job {i}"} for i in range(100)],
+        }
+        mock_get.return_value = mock_resp
+
+        with standalone_connection(tmp_db_path) as conn:
+            company_row = dict(
+                conn.execute("SELECT id, ats_platform, ats_slug FROM companies").fetchone()
+            )
+            result = reconcile_company(conn, company_row)
+
+        assert result["skipped"] is True
+        assert result["skip_reason"] == "smartrecruiters_incomplete"
+        assert result["expired"] == 0
+
+        conn = sqlite3.connect(tmp_db_path)
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT expiry_status FROM jobs WHERE dedup_key = ?",
+            (dedup_keys[0],),
+        ).fetchone()
+        conn.close()
+        assert row["expiry_status"] is None
+
+    @patch("job_finder.web.ats_reconciler._smartrecruiters_live_id_set")
+    def test_smartrecruiters_complete_board_expires_absentees_and_keeps_live(
+        self, mock_sr, tmp_db_path
+    ):
+        """Complete SmartRecruiters board (≤500): present job stays live,
+        absentee expires + archives. Unchanged reconcile behavior."""
+        from job_finder.web.ats_reconciler import reconcile_company
+        from job_finder.web.db_helpers import standalone_connection
+
+        present_url = "https://jobs.smartrecruiters.com/AbbVie/111-present-job"
+        absent_url = "https://jobs.smartrecruiters.com/AbbVie/222-absent-job"
+        _, dedup_keys = _setup_company_and_jobs(
+            tmp_db_path,
+            platform="smartrecruiters",
+            slug="AbbVie",
+            job_urls=[present_url, absent_url],
+        )
+        # Live board only includes posting id "111".
+        mock_sr.return_value = ({"111"}, True)
+
+        with standalone_connection(tmp_db_path) as conn:
+            company_row = dict(
+                conn.execute("SELECT id, ats_platform, ats_slug FROM companies").fetchone()
+            )
+            result = reconcile_company(conn, company_row)
+
+        assert result["skipped"] is False
+        assert result["live"] == 1
+        assert result["expired"] == 1
+
+        conn = sqlite3.connect(tmp_db_path)
+        conn.row_factory = sqlite3.Row
+        rows = {
+            r["dedup_key"]: dict(r)
+            for r in conn.execute(
+                "SELECT dedup_key, expiry_status, pipeline_status FROM jobs"
+            ).fetchall()
+        }
+        conn.close()
+        assert rows[dedup_keys[0]]["expiry_status"] == "live"  # present → live
+        assert rows[dedup_keys[1]]["expiry_status"] == "expired"  # absent → expired
+        assert rows[dedup_keys[1]]["pipeline_status"] == "archived"
+
+    @patch("job_finder.web.ats_platforms._platforms_smartrecruiters.requests.get")
+    def test_smartrecruiters_under_cap_board_reconciles_normally(self, mock_get, tmp_db_path):
+        """End-to-end: list endpoint returns totalFound=2 (≤ 500 cap) →
+        complete=True → reconcile runs; absentee expires."""
+        from job_finder.web.ats_reconciler import reconcile_company
+        from job_finder.web.db_helpers import standalone_connection
+
+        present_url = "https://jobs.smartrecruiters.com/AbbVie/111-present-job"
+        absent_url = "https://jobs.smartrecruiters.com/AbbVie/222-absent-job"
+        _, dedup_keys = _setup_company_and_jobs(
+            tmp_db_path,
+            platform="smartrecruiters",
+            slug="AbbVie",
+            job_urls=[present_url, absent_url],
+        )
+        mock_resp = MagicMock(status_code=200)
+        mock_resp.json.return_value = {
+            "totalFound": 1,
+            "content": [{"id": "111", "name": "Present Job"}],
+        }
+        mock_get.return_value = mock_resp
+
+        with standalone_connection(tmp_db_path) as conn:
+            company_row = dict(
+                conn.execute("SELECT id, ats_platform, ats_slug FROM companies").fetchone()
+            )
+            result = reconcile_company(conn, company_row)
+
+        assert result["skipped"] is False
+        assert result["live"] == 1
+        assert result["expired"] == 1
+
+        conn = sqlite3.connect(tmp_db_path)
+        conn.row_factory = sqlite3.Row
+        rows = {
+            r["dedup_key"]: dict(r)
+            for r in conn.execute("SELECT dedup_key, expiry_status FROM jobs").fetchall()
+        }
+        conn.close()
+        assert rows[dedup_keys[0]]["expiry_status"] == "live"
+        assert rows[dedup_keys[1]]["expiry_status"] == "expired"
+
     @patch("job_finder.web.ats_reconciler.run_platform_scan")
     def test_scan_returns_postings_but_no_parseable_ids_skips(
         self,

@@ -30,12 +30,28 @@ _DETAIL_FETCH_SLEEP_S = 0.1
 _PAGE_FETCH_SLEEP_S = 0.1
 
 
-def _fetch_postings(slug: str) -> list[dict]:
-    """GET + paginate over SmartRecruiters /v1/companies/{slug}/postings."""
+def _fetch_postings_with_completeness(slug: str) -> tuple[list[dict], bool]:
+    """GET + paginate over SmartRecruiters /v1/companies/{slug}/postings, tracking completeness.
+
+    Returns ``(postings, complete)`` where ``complete`` is ``True`` only
+    when the board was **fully** fetched:
+
+    - First-page error (network / HTTP / JSON) → ``complete=False``.
+    - ``totalFound > _MAX_RESULTS`` → ``complete=False`` (board too large to paginate).
+    - Pagination stops before ``total_fetched >= totalFound`` → ``complete=False``.
+    - Genuine empty board (``totalFound=0``) → ``complete=True``.
+
+    The completeness flag is the gate used by the ATS reconciler to decide
+    whether expiry-reconciliation is safe for a SmartRecruiters company. A
+    warning is logged whenever the board is incomplete so operators can see
+    which companies exceed the pagination cap (#217).
+    """
     base_url = f"https://api.smartrecruiters.com/v1/companies/{slug}/postings"
     offset = 0
     out: list[dict] = []
     total_fetched = 0
+    saw_total = False
+    total_found = 0
 
     while offset < _MAX_RESULTS:
         if offset > 0:
@@ -63,6 +79,18 @@ def _fetch_postings(slug: str) -> list[dict]:
             break
 
         total_found = data.get("totalFound", 0)
+        saw_total = True
+
+        if total_found > _MAX_RESULTS:
+            logger.warning(
+                "scan_smartrecruiters('%s') board has %d postings (cap %d) — incomplete; "
+                "reconciliation will skip this company",
+                slug,
+                total_found,
+                _MAX_RESULTS,
+            )
+            break
+
         postings = data.get("content", [])
         if not postings:
             break
@@ -74,7 +102,18 @@ def _fetch_postings(slug: str) -> list[dict]:
         if total_fetched >= total_found:
             break
 
-    return out
+    complete = saw_total and total_fetched >= total_found
+    return out, complete
+
+
+def _fetch_postings(slug: str) -> list[dict]:
+    """GET + paginate over SmartRecruiters /v1/companies/{slug}/postings.
+
+    Thin wrapper around :func:`_fetch_postings_with_completeness` — the
+    completeness signal is consumed by the ATS reconciler but is not needed
+    by the standard scanner flow.
+    """
+    return _fetch_postings_with_completeness(slug)[0]
 
 
 def _to_canonical(posting: dict) -> list[JobLocation]:
