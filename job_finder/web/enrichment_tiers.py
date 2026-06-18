@@ -71,12 +71,15 @@ _MIN_VALID_JD_CHARS = 200
 # DELIBERATELY EXCLUDES jd_full so the model cannot summarize the description
 # back into the description field (the bug the deleted Haiku/Sonnet synthesis
 # tiers had — they fabricated short pseudo-JDs from search snippets).
+# P1.2: salary_period added so the LLM can signal the posting's pay period;
+# the value is routed through normalize_observation for unit math (D-2/D-3).
 _STRUCTURED_FIELDS_SCHEMA: dict = {
     "type": "object",
     "additionalProperties": False,
     "properties": {
         "salary_min": {"type": "integer"},
         "salary_max": {"type": "integer"},
+        "salary_period": {"type": "string", "enum": ["annual", "hourly", "monthly"]},
         "location": {"type": "string"},
     },
 }
@@ -477,7 +480,10 @@ def parse_structured_fields(
     system_prompt = (
         "You extract structured fields from a job description. "
         "Return ONLY a JSON object with optional fields: "
-        "salary_min (integer USD annual), salary_max (integer USD annual), "
+        "salary_min (integer, in the unit stated by the posting), "
+        "salary_max (integer, in the unit stated by the posting), "
+        "salary_period (string, one of: annual|hourly|monthly — include only "
+        "if the description explicitly states a pay period), "
         "location (string). Omit fields that cannot be determined. "
         "Do not invent data."
     )
@@ -506,46 +512,62 @@ def parse_structured_fields(
     if not result.data or not result.schema_valid:
         return {}
 
-    # Mirror the regex path's plausibility bound on the LLM path so an
-    # inflated value (e.g. salary_min=27_500_000 on a $275K role — the
-    # model emits a string of digits without unit-checking) cannot reach
-    # _persist. The regex extractor enforces [$30K, $5M] at
-    # salary_extractor.py:132; without this mirror, only inverted pairs
-    # are caught downstream by _reconcile_salary_for_write — both-ordered
-    # inflated pairs and single-field-inflated rows sail through. Drop
-    # BOTH salary fields when EITHER is out of bounds to preserve the
-    # both-or-neither semantics _apply_post_fetch_extraction expects.
-    from job_finder.web.salary_extractor import (
-        _MAX_PLAUSIBLE_SALARY,
-        _MIN_PLAUSIBLE_SALARY,
+    # P1.2 (D-2/D-3): route LLM-reported salary through normalize_observation
+    # so the single normalizer applies the salvage ladder (hourly → annualize,
+    # implausible → drop both, etc.) instead of a bespoke inline bounds check.
+    # The old inline check dropped BOTH salary fields when EITHER was out of
+    # bounds but couldn't salvage hourly values — normalize_observation does
+    # both correctly. Both-or-neither semantics are preserved by the normalizer's
+    # pair discipline.
+    from job_finder.salary_normalizer import (
+        SalaryObservation,
+        normalize_observation,
     )
 
     raw_min = result.data.get("salary_min")
     raw_max = result.data.get("salary_max")
+    raw_period = result.data.get("salary_period") or "unknown"
 
-    def _implausible(v: int | None) -> bool:
-        return v is not None and (v < _MIN_PLAUSIBLE_SALARY or v > _MAX_PLAUSIBLE_SALARY)
+    out: dict = {}
 
-    drop_salary = _implausible(raw_min) or _implausible(raw_max)
-    if drop_salary:
-        logger.warning(
-            "parse_structured_fields: dropping implausible salary for %s "
-            "(min=%s max=%s, bounds=[%d,%d])",
-            job_id,
-            raw_min,
-            raw_max,
-            _MIN_PLAUSIBLE_SALARY,
-            _MAX_PLAUSIBLE_SALARY,
+    if raw_min is not None or raw_max is not None:
+        obs = SalaryObservation(
+            min_value=float(raw_min) if raw_min is not None else None,
+            max_value=float(raw_max) if raw_max is not None else None,
+            period=raw_period,
+            currency="USD",
+            provenance="llm_extract",
+            raw_text=f"llm: min={raw_min} max={raw_max} period={raw_period}",
         )
+        normalized = normalize_observation(obs)
+        if normalized.resolution in (
+            "ok",
+            "salvaged_hourly",
+            "salvaged_daily",
+            "salvaged_weekly",
+            "salvaged_monthly",
+        ):
+            if normalized.salary_min is not None:
+                out["salary_min"] = normalized.salary_min
+            if normalized.salary_max is not None:
+                out["salary_max"] = normalized.salary_max
+            if normalized.period != "unknown":
+                out["salary_period"] = normalized.period
+        else:
+            logger.warning(
+                "parse_structured_fields: dropping implausible salary for %s "
+                "(min=%s max=%s period=%s, resolution=%s)",
+                job_id,
+                raw_min,
+                raw_max,
+                raw_period,
+                normalized.resolution,
+            )
 
-    out = {}
-    for k in ("salary_min", "salary_max", "location"):
-        v = result.data.get(k)
-        if v is None:
-            continue
-        if drop_salary and k in ("salary_min", "salary_max"):
-            continue
-        out[k] = v
+    location = result.data.get("location")
+    if location is not None:
+        out["location"] = location
+
     return out
 
 
@@ -557,51 +579,39 @@ def parse_structured_fields(
 def _parse_salary_string(salary_str: str) -> dict | None:
     """Parse a salary string like '$140K-$180K/yr' into min/max integers.
 
+    P1.2 (D-2): thin wrapper — delegates to ``salary_normalizer.parse_salary_text``
+    (single parser) + ``normalize_observation`` (single normalizer) instead of
+    duplicating bespoke regex + K/M logic. Hourly/period cues are now captured
+    and annualized via the salvage ladder (D-3) rather than silently ignored.
+    Implausible values return None (existing behavior).
+
     Args:
         salary_str: Salary string from SerpAPI detected_extensions.
 
     Returns:
         Dict with salary_min and/or salary_max as integers, or None if parsing fails.
     """
+    from job_finder.salary_normalizer import normalize_observation, parse_salary_text
+
     try:
-        # Remove currency symbols and whitespace
-        cleaned = salary_str.upper().replace("$", "").replace(",", "").strip()
-
-        # Handle K (thousands) and M (millions)
-        def parse_amount(s: str) -> int | None:
-            s = s.strip()
-            if s.endswith("K"):
-                return int(float(s[:-1]) * 1000)
-            elif s.endswith("M"):
-                return int(float(s[:-1]) * 1_000_000)
-            else:
-                try:
-                    return int(float(s))
-                except ValueError:
-                    return None
-
-        result = {}
-
-        # Range pattern: "140K-180K" or "140,000-180,000"
-        range_match = re.search(r"([\d.]+[KM]?)\s*[-–]\s*([\d.]+[KM]?)", cleaned)
-        if range_match:
-            low = parse_amount(range_match.group(1))
-            high = parse_amount(range_match.group(2))
-            if low:
-                result["salary_min"] = low
-            if high:
-                result["salary_max"] = high
-            return result if result else None
-
-        # Single value: "$140K"
-        single_match = re.search(r"([\d.]+[KM]?)", cleaned)
-        if single_match:
-            val = parse_amount(single_match.group(1))
-            if val:
-                return {"salary_min": val}
-
-        return None
-
+        obs = parse_salary_text(salary_str, provenance="feed_string")
+        if obs is None:
+            return None
+        normalized = normalize_observation(obs)
+        if normalized.resolution not in (
+            "ok",
+            "salvaged_hourly",
+            "salvaged_daily",
+            "salvaged_weekly",
+            "salvaged_monthly",
+        ):
+            return None
+        result: dict = {}
+        if normalized.salary_min is not None:
+            result["salary_min"] = normalized.salary_min
+        if normalized.salary_max is not None:
+            result["salary_max"] = normalized.salary_max
+        return result if result else None
     except Exception:
         logger.debug("_parse_salary_string failed", exc_info=True)
         return None
