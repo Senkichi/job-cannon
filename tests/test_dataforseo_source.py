@@ -105,6 +105,26 @@ def _make_mock_response(json_data: dict, raise_for_status=None) -> MagicMock:
     return mock_resp
 
 
+class TestVendorErrorEnvelope:
+    """A 200 body wrapping a vendor error envelope must raise, not return [] (#437)."""
+
+    def test_submit_tasks_raises_on_200_error_envelope(self, source):
+        resp = _make_mock_response(
+            {"status_code": 40200, "status_message": "Payment required: credit exhausted"}
+        )
+        with patch("job_finder.sources.dataforseo_source.requests.post", return_value=resp):
+            with pytest.raises(RuntimeError, match="exhausted"):
+                source.submit_tasks([{"query": "Data Scientist", "location": ""}])
+
+    def test_fetch_task_results_raises_on_200_error_envelope(self, source):
+        resp = _make_mock_response(
+            {"status_code": 40200, "status_message": "Access denied: quota exhausted"}
+        )
+        with patch("job_finder.sources.dataforseo_source.requests.get", return_value=resp):
+            with pytest.raises(RuntimeError, match="quota"):
+                source._fetch_task_results("task-uuid-001")
+
+
 # ---------------------------------------------------------------------------
 # Test: _parse_item field mapping
 # ---------------------------------------------------------------------------

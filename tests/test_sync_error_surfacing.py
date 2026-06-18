@@ -241,6 +241,46 @@ class TestSerpAPIAuthFailure:
         err_text = summary["serpapi_errors"][0].lower()
         assert "key rejected" in err_text or "401" in err_text
 
+    def test_serpapi_200_error_envelope_raises(self):
+        """SerpAPI 200 body wrapping an error envelope → RuntimeError, not silent empty (#437)."""
+        from job_finder.sources.serpapi_source import SerpAPISource
+
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.json.return_value = {"error": "Invalid API key."}
+        resp.raise_for_status = MagicMock()
+        src = SerpAPISource(api_key="bad-key")
+        with patch("requests.get", return_value=resp):
+            with pytest.raises(RuntimeError, match="Invalid API key"):
+                src._search("Data Scientist")
+
+    def test_serpapi_200_envelope_surfaced_in_ingestion_summary(self, migrated_db, minimal_config):
+        """SerpAPI 200-error-envelope → summary['serpapi_errors'], like the 401 case (#437)."""
+        path, _ = migrated_db
+
+        resp_mock = MagicMock()
+        resp_mock.status_code = 200
+        resp_mock.json.return_value = {"error": "Invalid API key."}
+        resp_mock.raise_for_status = MagicMock()
+
+        with (
+            patch("job_finder.web.ingestion_runner.GmailSource") as MockGmail,
+            patch("job_finder.web.ingestion_runner.ImapSource") as MockImap,
+            patch("requests.get", return_value=resp_mock),
+        ):
+            MockGmail.return_value.fetch_jobs.return_value = ([], set())
+            MockImap.return_value.fetch_jobs.return_value = ([], set())
+            minimal_config["sources"]["imap"]["enabled"] = False
+            minimal_config["sources"]["gmail"] = {"enabled": True, "lookback_days": 7}
+            minimal_config["sources"]["thordata"]["enabled"] = False
+
+            from job_finder.web.pipeline_runner import run_ingestion
+
+            summary = run_ingestion(path, minimal_config)
+
+        assert len(summary["serpapi_errors"]) >= 1
+        assert "invalid" in summary["serpapi_errors"][0].lower()
+
 
 # ---------------------------------------------------------------------------
 # Tests: Thordata auth failure detection

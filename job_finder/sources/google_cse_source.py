@@ -32,6 +32,10 @@ import requests
 
 from job_finder.json_utils import utc_now_iso
 from job_finder.models import Job
+from job_finder.sources._error_envelope import (
+    VendorAccountError,
+    detect_vendor_error_envelope,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -136,6 +140,10 @@ class GoogleCSESource:
             except Exception as exc:
                 logger.warning("CSE query failed for %r: %s", query, exc)
                 continue
+
+            reason = detect_vendor_error_envelope(payload, source="google_cse")
+            if reason:
+                raise VendorAccountError(reason)
 
             for item in payload.get("items", []) or []:
                 url = item.get("link") or ""
