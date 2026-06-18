@@ -48,6 +48,10 @@ _DEFAULT_API_TIMEOUT_SECONDS: int = 120
 # Pricing table — price per million tokens (USD)
 # ---------------------------------------------------------------------------
 
+# GUARD: keys are real Anthropic SDK model identifiers, NOT job-cannon tier
+# labels. Do NOT rename `claude-haiku-4-5`/`claude-sonnet-4-6`/`claude-opus-4-6`
+# to low/mid/high — that would break cost accounting (lookups key off the
+# model-ID). The tier rename (quick/score/triage) lives in model_provider.py.
 MODEL_PRICING: dict[str, dict[str, float]] = {
     "claude-haiku-4-5": {"input": 1.0, "output": 5.0},
     "claude-sonnet-4-6": {"input": 3.0, "output": 15.0},
@@ -670,6 +674,11 @@ def get_monthly_provider_usage(conn: sqlite3.Connection) -> list[dict]:
 # CLI model aliases — map full SDK model names to short CLI aliases
 # ---------------------------------------------------------------------------
 
+# GUARD: values are the Claude CLI's own `--model` shortnames, NOT job-cannon
+# tier labels. Do NOT rename them to low/mid/high — they are passed verbatim to
+# `claude --model <alias>` (see cli_model lookup below), so renaming breaks the
+# subprocess invocation. The job-cannon workload tiers (quick/score/triage) live
+# in model_provider.py and are unrelated to these strings.
 _CLI_MODEL_ALIASES: dict[str, str] = {
     "claude-haiku-4-5": "haiku",
     "claude-sonnet-4-6": "sonnet",
