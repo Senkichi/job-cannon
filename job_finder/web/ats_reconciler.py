@@ -458,13 +458,20 @@ def reconcile_all_companies(db_path: str, config: dict | None = None) -> dict:
 
     Args:
         db_path: Path to the SQLite database file.
-        config: Application config dict. Unused currently; reserved for
-            per-platform tuning (Workday max_results override, etc.).
+        config: Application config dict. ``config.ats.workday_max_pages``
+            (if present) sets the Workday per-board pagination budget for
+            this run so large tenants discover their first N pages instead
+            of returning zero (issue #216).
 
     Returns:
         {'companies_checked', 'companies_skipped', 'checked', 'live',
          'expired', 'unparseable'}
     """
+    from job_finder.web.ats_platforms._platforms_workday import (
+        reset_max_pages,
+        set_max_pages,
+    )
+
     summary = {
         "companies_checked": 0,
         "companies_skipped": 0,
@@ -475,6 +482,16 @@ def reconcile_all_companies(db_path: str, config: dict | None = None) -> dict:
         "direct_url_cleared": 0,
     }
 
+    workday_max_pages = (config or {}).get("ats", {}).get("workday_max_pages")
+    token = set_max_pages(workday_max_pages)
+    try:
+        return _reconcile_all_companies_inner(db_path, summary)
+    finally:
+        reset_max_pages(token)
+
+
+def _reconcile_all_companies_inner(db_path: str, summary: dict) -> dict:
+    """Body of :func:`reconcile_all_companies` (page-budget already set)."""
     with standalone_connection(db_path) as conn:
         try:
             companies = conn.execute(

@@ -515,9 +515,13 @@ class TestReconcileCompany:
         assert row["expiry_status"] is None  # no write happened
 
     @patch("job_finder.web.ats_platforms._platforms_workday.requests.post")
-    def test_workday_over_cap_total_skips_via_completeness_gate(self, mock_post, tmp_db_path):
-        """End-to-end: CXS returns total=500 (> 200 cap) → complete=False →
-        reconcile skips with 'workday_incomplete', no DB writes."""
+    def test_workday_over_budget_total_skips_via_completeness_gate(self, mock_post, tmp_db_path):
+        """End-to-end: a board too large to fully paginate within the page budget
+        → complete=False → reconcile skips with 'workday_incomplete', no DB writes.
+
+        total=5000 exceeds the default budget (100 pages * 20 = 2000), so even
+        though discovery now returns the first 2000 postings (issue #216), the
+        completeness gate still declines expiry-reconciliation for the tenant."""
         from job_finder.web.ats_reconciler import reconcile_company
         from job_finder.web.db_helpers import standalone_connection
 
@@ -528,16 +532,27 @@ class TestReconcileCompany:
             slug="walmart.wd5/WalmartExternal",
             job_urls=[url],
         )
-        mock_resp = MagicMock(status_code=200)
-        mock_resp.json.return_value = {
-            "total": 500,
-            "jobPostings": [
-                {"title": f"Job {i}", "externalPath": f"/job/Job-{i}_R-{i}"} for i in range(20)
-            ],
-        }
-        mock_post.return_value = mock_resp
 
-        with standalone_connection(tmp_db_path) as conn:
+        def _page(_url, **_kwargs):
+            offset = _kwargs["json"]["offset"]
+            resp = MagicMock(status_code=200)
+            resp.json.return_value = {
+                "total": 5000,
+                "jobPostings": [
+                    {"title": f"Job {i}", "externalPath": f"/job/Job-{i}_R-{i}"}
+                    for i in range(offset, offset + 20)
+                ],
+            }
+            return resp
+
+        mock_post.side_effect = _page
+
+        # Zero the inter-page pacing sleep — this board paginates the full
+        # default budget (100 pages) before the gate fires.
+        with (
+            patch("job_finder.web.ats_platforms._platforms_workday._PAGE_FETCH_SLEEP_S", 0),
+            standalone_connection(tmp_db_path) as conn,
+        ):
             company_row = dict(
                 conn.execute("SELECT id, ats_platform, ats_slug FROM companies").fetchone()
             )
@@ -914,6 +929,55 @@ class TestReconcileCompany:
 
 
 class TestReconcileAllCompanies:
+    def test_config_threads_workday_max_pages_budget(self, tmp_db_path):
+        """config.ats.workday_max_pages sets the per-run Workday page budget (issue #216).
+
+        Asserts the ContextVar override is live *during* the run (so the
+        registry's slug->list Workday scanner picks it up) and is reset to
+        None afterward (no leak past the run)."""
+        from job_finder.web.ats_platforms import _platforms_workday
+        from job_finder.web.ats_reconciler import reconcile_all_companies
+        from job_finder.web.db_migrate import run_migrations
+
+        run_migrations(tmp_db_path)
+        conn = sqlite3.connect(tmp_db_path)
+        now_iso = datetime.now(UTC).isoformat()
+        conn.execute(
+            "INSERT INTO companies (name, name_raw, homepage_url, ats_platform, "
+            "ats_slug, ats_probe_status, scan_enabled, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)",
+            (
+                "wd",
+                "WD",
+                "https://wd.com",
+                "workday",
+                "wd.wd5/WdExternal",
+                "hit",
+                now_iso,
+                now_iso,
+            ),
+        )
+        conn.commit()
+        conn.close()
+
+        seen_budget: dict = {}
+
+        def _spy(_slug):
+            # During the run, the ContextVar must carry the config value so the
+            # real _fetch_postings_with_completeness would honor it.
+            seen_budget["value"] = _platforms_workday._max_pages_override.get()
+            return set(), False  # incomplete → company skipped, no writes
+
+        with patch(
+            "job_finder.web.ats_reconciler._workday_live_id_set",
+            side_effect=_spy,
+        ):
+            reconcile_all_companies(tmp_db_path, config={"ats": {"workday_max_pages": 7}})
+
+        assert seen_budget["value"] == 7
+        # No leak: override reset to default (None) after the run.
+        assert _platforms_workday._max_pages_override.get() is None
+
     @patch("job_finder.web.ats_reconciler.run_platform_scan")
     def test_aggregates_per_company(self, mock_scan, tmp_db_path):
         """Multiple companies are each reconciled; summary aggregates counts."""
