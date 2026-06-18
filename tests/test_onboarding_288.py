@@ -5,7 +5,6 @@ Acceptance criteria:
 - Skip path (skip_provider POST) writes provider.name="none", redirects to resume_upload
 - Wizard completes with zero providers selected and writes a valid config
   (passes load_config() without error)
-- provider_credentials renders "no credentials needed" for provider="none"
 - HTMX conventions: full page returned for direct browser GET (HX-Request absent)
 """
 
@@ -136,25 +135,6 @@ def test_skip_provider_bypasses_provider_credentials(client):
     # Must go to resume_upload, NOT provider_credentials
     assert "/onboarding/provider_credentials" not in resp.headers["Location"]
     assert "/onboarding/resume_upload" in resp.headers["Location"]
-
-
-def test_provider_credentials_no_key_for_none_provider(client, app):
-    """If wizard_data has provider.name='none', provider_credentials must render no-creds card."""
-    conn = sqlite3.connect(app.config["DB_PATH"])
-    try:
-        conn.execute(
-            'UPDATE onboarding_state SET wizard_data=\'{"provider":{"name":"none"}}\' WHERE id=1'
-        )
-        conn.commit()
-    finally:
-        conn.close()
-
-    resp = client.get("/onboarding/provider_credentials")
-    assert resp.status_code == 200
-    body = resp.get_data(as_text=True)
-    # Must render the no-credentials card, not the API key form
-    assert 'type="password"' not in body
-    assert "No credentials needed" in body
 
 
 # ---------------------------------------------------------------------------

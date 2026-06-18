@@ -1,15 +1,19 @@
 """Onboarding wizard blueprint (Phase 42, STRANGE-WIZ-02/05).
 
-Eight routes, one screen each, numbered sequentially 1..8:
-    welcome (1), provider_select (2), provider_credentials (3),
-    resume_upload (4), profile_edit (5), imap_credentials (6),
-    schedule (7), done (8).
+Seven routes, one screen each, numbered sequentially 1..7:
+    welcome (1), provider_select (2), resume_upload (3), profile_edit (4),
+    imap_credentials (5), schedule (6), done (7).
+
+provider_select folds AI-provider choice and credential entry into a single
+screen (Issue #441): the inline API-key field renders only for BYO-key
+providers (anything NOT in _NO_CREDS_PROVIDERS); $0 CLIs / local / skip paths
+proceed straight through with no credential UI.
 
 Step indicator (D-21): each route unpacks _step("<route>") into render_template,
 which supplies step_num + step_total + step_label to _base.html. The ordered
 tuple _WIZARD_STEPS is the single source of truth for both the number and the
-"of N" denominator — neither is hardcoded in the template. resume_upload (step 4)
-is optional (D-05); skipping it advances to profile_edit (step 5) and leaves
+"of N" denominator — neither is hardcoded in the template. resume_upload (step 3)
+is optional (D-05); skipping it advances to profile_edit (step 4) and leaves
 every screen's fixed number unchanged.
 
 POST sequencing (D-13): every POST calls state.write_wizard_data(slice) to stash
@@ -74,7 +78,9 @@ onboarding_bp.before_request(state.gate_completed_onboarding)
 # blueprint-level, and modifying app-level would break other blueprints' uploads.
 _MAX_RESUME_BYTES: Final[int] = 10 * 1024 * 1024
 
-# $0 CLIs that need no credentials at the provider_credentials step (D-04).
+# $0 CLIs that need no credentials — they gate the inline API-key form on the
+# merged provider_select screen (D-04, Issue #441). A provider NOT in this set is
+# BYO-key and renders the password field inline.
 # "none" represents the "skip — configure later in Settings" path (Issue #288).
 # "local_bundled" requires only a model_path in Settings, no API key.
 _NO_CREDS_PROVIDERS: Final[frozenset[str]] = frozenset(
@@ -103,7 +109,6 @@ def _is_valid_email(value: str) -> bool:
 _WIZARD_STEPS: Final[tuple[tuple[str, str], ...]] = (
     ("welcome", "Welcome"),
     ("provider_select", "AI provider"),
-    ("provider_credentials", "Credentials"),
     ("resume_upload", "Resume"),
     ("profile_edit", "Profile"),
     ("imap_credentials", "Gmail"),
@@ -174,7 +179,7 @@ def _move_secret_or_warn(config_slice: dict, path: tuple[str, ...], canonical: s
         )
 
 
-# --- Routes (8 total) ---
+# --- Routes (7 total) ---
 
 
 @onboarding_bp.route("/welcome", methods=["GET", "POST"], strict_slashes=False)
@@ -192,14 +197,18 @@ def welcome():
 
 @onboarding_bp.route("/provider_select", methods=["GET", "POST"], strict_slashes=False)
 def provider_select():
-    """Step 2: render detected providers + Re-detect button (D-01, D-02).
+    """Step 2: render detected providers + Re-detect button + inline credentials (D-01, D-02, D-04).
+
+    Issue #441 folds credential entry into this screen: on POST, a BYO-key
+    provider (anything NOT in _NO_CREDS_PROVIDERS) reads+validates the inline
+    ``api_key`` field from the same form; $0 CLIs / local / skip paths write
+    only provider.name. All credential-complete paths advance to resume_upload.
 
     Issue #288 additions:
-    - "Skip — configure later" path writes provider.name="none" and skips
-      provider_credentials entirely, advancing to resume_upload.  The done
-      step omits providers.primary from config when name="none" so
-      tier_has_configured_provider returns False and the dashboard warning
-      fires on first login.
+    - "Skip — configure later" path writes provider.name="none" and advances to
+      resume_upload.  The done step omits providers.primary from config when
+      name="none" so tier_has_configured_provider returns False and the
+      dashboard warning fires on first login.
     - detection_extras passed to template for Ollama-no-model guidance.
     """
     if request.method == "POST":
@@ -211,55 +220,52 @@ def provider_select():
         if request.form.get("skip_provider"):
             # Issue #288: explicit "configure later" escape hatch.
             state.write_wizard_data(_db(), {"provider": {"name": "none"}})
-            # Skip provider_credentials entirely — no credentials needed
+            # No credentials needed — advance straight to resume_upload.
             return redirect(url_for("onboarding.resume_upload"))
 
         provider_name = request.form.get("provider_name", "").strip()
         if not provider_name:
             flash("Please choose a provider to continue.", "error")
             return redirect(url_for("onboarding.provider_select"))
-        state.write_wizard_data(_db(), {"provider": {"name": provider_name}})
-        return redirect(url_for("onboarding.provider_credentials"))
 
-    providers = detect_available_providers()
-    extras = get_detection_extras()
-    return render_template(
-        "onboarding/provider_select.html",
-        providers=providers,
-        ollama_no_model=extras.ollama_no_model,
-        **_step("provider_select"),
-    )
-
-
-@onboarding_bp.route("/provider_credentials", methods=["GET", "POST"], strict_slashes=False)
-def provider_credentials():
-    """Step 3: conditional - $0 CLIs render confirmation card; Anthropic renders API-key form (D-04)."""
-    data = _wizard()
-    provider_name = (data.get("provider") or {}).get("name", "anthropic")
-    needs_api_key = provider_name not in _NO_CREDS_PROVIDERS
-
-    if request.method == "POST":
+        # Issue #441: credential entry is inline on this screen. BYO-key providers
+        # require an api_key from the same form (mirrors the former
+        # provider_credentials validation); no-cred providers proceed straight
+        # through with provider.name only.
         slice_: dict = {"provider": {"name": provider_name}}
-        if needs_api_key:
+        if provider_name not in _NO_CREDS_PROVIDERS:
             api_key = request.form.get("api_key", "").strip()
             if not api_key:
                 flash("API key is required for this provider.", "error")
-                return redirect(url_for("onboarding.provider_credentials"))
+                return redirect(url_for("onboarding.provider_select"))
             slice_["provider"]["api_key"] = api_key
         state.write_wizard_data(_db(), slice_)
         return redirect(url_for("onboarding.resume_upload"))
 
+    providers = detect_available_providers()
+    extras = get_detection_extras()
+    # Decide whether the inline API-key field renders (Issue #441). The chosen
+    # provider is a prior wizard selection if present, otherwise the recommended
+    # (top detected) one; detected CLIs are all $0/no-cred, so this is True only
+    # when a BYO-key provider is preselected. Build a fresh render context — no
+    # shared-state mutation (immutability convention).
+    chosen = (_wizard().get("provider") or {}).get("name") or (
+        providers[0].name if providers else None
+    )
+    needs_api_key = bool(chosen) and chosen not in _NO_CREDS_PROVIDERS
     return render_template(
-        "onboarding/provider_credentials.html",
-        provider_name=provider_name,
+        "onboarding/provider_select.html",
+        providers=providers,
+        ollama_no_model=extras.ollama_no_model,
+        provider_name=chosen,
         needs_api_key=needs_api_key,
-        **_step("provider_credentials"),
+        **_step("provider_select"),
     )
 
 
 @onboarding_bp.route("/resume_upload", methods=["GET", "POST"], strict_slashes=False)
 def resume_upload():
-    """Step 4a: optional PDF/DOCX upload (D-05). Parse + stash in wizard_data (D-07).
+    """Step 3: optional PDF/DOCX upload (D-05). Parse + stash in wizard_data (D-07).
 
     Security (T-42-03, T-42-07):
     - Filename validation by extension + content-length check
@@ -355,7 +361,7 @@ def resume_upload():
 
 @onboarding_bp.route("/profile_edit", methods=["GET", "POST"], strict_slashes=False)
 def profile_edit():
-    """Step 4b: mirrors /profile form shape (D-06) - target_titles/target_locations/skills/min_salary only."""
+    """Step 4: mirrors /profile form shape (D-06) - target_titles/target_locations/skills/min_salary only."""
     data = _wizard()
     existing_edit = data.get("profile_edit") or {}
     resume_profile = data.get("resume_profile") or {}
