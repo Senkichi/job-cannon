@@ -3,6 +3,7 @@
 from unittest.mock import MagicMock, patch
 
 from job_finder.models import Job
+from job_finder.sources._error_envelope import VendorAccountError
 from job_finder.sources.portal_search_source import (
     SERP_PORTALS,
     _detect_portal_from_url,
@@ -824,6 +825,24 @@ class TestFetchSerpPortalsCseBackend:
             google_cse_source=mock_cse,
         )
         assert jobs == []
+
+    def test_vendor_account_error_propagates(self):
+        """A VendorAccountError (200-wrapped credential/quota/expiry, #437) must
+        surface — NOT be swallowed like a transient transport error — so it
+        reaches the sync-error banner."""
+        import pytest
+
+        mock_cse = MagicMock()
+        mock_cse.fetch_jobs.side_effect = VendorAccountError(
+            "google_cse account error: Quota exceeded"
+        )
+
+        with pytest.raises(VendorAccountError, match="Quota exceeded"):
+            fetch_serp_portals(
+                ["Engineer"],
+                dataforseo_source=None,
+                google_cse_source=mock_cse,
+            )
 
 
 class TestFetchAllPortalsCseBackend:

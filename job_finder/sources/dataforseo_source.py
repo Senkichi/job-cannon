@@ -18,7 +18,10 @@ from datetime import UTC, datetime
 import requests
 
 from job_finder.models import Job
-from job_finder.sources._error_envelope import detect_vendor_error_envelope
+from job_finder.sources._error_envelope import (
+    VendorAccountError,
+    detect_vendor_error_envelope,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -189,8 +192,11 @@ class DataForSEOSource:
             data = resp.json()
             reason = detect_vendor_error_envelope(data, source="dataforseo")
             if reason:
-                raise RuntimeError(reason)
-        except RuntimeError:
+                raise VendorAccountError(reason)
+        except VendorAccountError:
+            # Account/credential/quota failure — propagate so it reaches the
+            # sync-error banner. Transient transport errors fall through to the
+            # best-effort swallow below (return []).
             raise
         except Exception as e:
             logger.warning("DataForSEO task_post failed: %s", e)
@@ -296,8 +302,11 @@ class DataForSEOSource:
             data = resp.json()
             reason = detect_vendor_error_envelope(data, source="dataforseo")
             if reason:
-                raise RuntimeError(reason)
-        except RuntimeError:
+                raise VendorAccountError(reason)
+        except VendorAccountError:
+            # Account/credential/quota failure — propagate so it reaches the
+            # sync-error banner. Transient transport errors fall through to the
+            # best-effort swallow below (return []).
             raise
         except Exception as e:
             logger.warning("DataForSEO task_get failed for %s: %s", task_id, e)

@@ -22,6 +22,20 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+
+class VendorAccountError(RuntimeError):
+    """A vendor returned a 200 body that actually denotes an *account* failure.
+
+    Semantically distinct from a transient transport error (a bare
+    ``RuntimeError`` such as ``"CSE 503"``): a best-effort aggregator that
+    swallows per-backend failures (e.g. ``fetch_serp_portals``) must still
+    *propagate* a ``VendorAccountError`` so credential / quota / expiry problems
+    reach the sync-error banner instead of silently yielding zero jobs. Catching
+    ``except VendorAccountError`` re-raises only account failures while letting
+    transient errors fall through to the swallow.
+    """
+
+
 # Lowercased substrings in an error message that mark a credential/quota/auth
 # failure wrapped in a 200 body.
 _ERROR_KEYWORDS: frozenset[str] = frozenset(

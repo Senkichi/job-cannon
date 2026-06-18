@@ -12,7 +12,10 @@ import requests
 logger = logging.getLogger(__name__)
 
 from job_finder.models import Job
-from job_finder.sources._error_envelope import detect_vendor_error_envelope
+from job_finder.sources._error_envelope import (
+    VendorAccountError,
+    detect_vendor_error_envelope,
+)
 
 
 class SerpAPISource:
@@ -75,7 +78,7 @@ class SerpAPISource:
                 data = resp.json()
                 reason = detect_vendor_error_envelope(data, source=self.source_name)
                 if reason:
-                    raise RuntimeError(reason)
+                    raise VendorAccountError(reason)
             except RuntimeError:
                 raise
             except Exception as e:

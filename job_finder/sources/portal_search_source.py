@@ -21,6 +21,7 @@ from bs4 import BeautifulSoup
 from ftfy import fix_text
 
 from job_finder.models import Job
+from job_finder.sources._error_envelope import VendorAccountError
 
 logger = logging.getLogger(__name__)
 
@@ -679,9 +680,12 @@ def fetch_serp_portals(
 
     try:
         raw_jobs = backend.fetch_jobs(queries)
-    except RuntimeError:
-        # Credential / vendor-envelope failures (#437) must surface, not be
-        # masked as an empty portal run — propagate to _fetch_portal_search.
+    except VendorAccountError:
+        # Account / credential / quota / expiry failures (#437) must surface,
+        # not be masked as an empty portal run — propagate to
+        # _fetch_portal_search. Transient transport errors (a bare RuntimeError
+        # such as "CSE 503") are NOT account failures and fall through to the
+        # best-effort swallow below.
         raise
     except Exception:
         logger.warning("Portal SERP search failed", exc_info=True)

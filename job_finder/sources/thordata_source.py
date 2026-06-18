@@ -18,7 +18,10 @@ import time
 import requests
 
 from job_finder.models import Job
-from job_finder.sources._error_envelope import detect_vendor_error_envelope
+from job_finder.sources._error_envelope import (
+    VendorAccountError,
+    detect_vendor_error_envelope,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -101,7 +104,7 @@ class ThordataSource:
                 # {"message": "Package has expired!"}) via the shared detector.
                 reason = detect_vendor_error_envelope(data, source="thordata")
                 if reason:
-                    raise RuntimeError(reason)
+                    raise VendorAccountError(reason)
             except RuntimeError:
                 raise
             except Exception as e:
