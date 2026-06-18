@@ -56,6 +56,7 @@ from ._jobs import merge_description as merge_description
 from ._jobs import upsert_job as upsert_job
 
 # DB write paths — runs log + per-row persistence + pipeline state machine.
+from ._persistence import invalidate_job_score as invalidate_job_score
 from ._persistence import log_run as log_run
 from ._persistence import persist_job_assessment as persist_job_assessment
 from ._persistence import persist_job_expiry_state as persist_job_expiry_state

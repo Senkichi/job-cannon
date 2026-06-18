@@ -140,8 +140,19 @@ def set_jd_full(
     Returns True if ``jd_full`` was written; False if junk-gated (no write).
     On gate hit, logs at WARN level with the source tag and first 60 chars.
 
+    Score invalidation (#226): when the written text materially differs from
+    what was stored (the common case being a NULL→full-body transition during
+    enrichment, but also a genuinely changed body on re-fetch), the job's prior
+    scoring tuple is stale. As the SOLE sanctioned ``jd_full`` writer, this is the
+    single point where that invariant is enforced: ``invalidate_job_score`` clears
+    ``classification`` (and the rest of the scoring tuple) so the existing
+    Stage-2 sweeps — which select ``classification IS NULL AND jd_full IS NOT
+    NULL`` — re-queue the row. A write that does not change the stored text
+    (idempotent re-fetch) leaves the score untouched, so trivial re-sightings
+    never churn the scorer.
+
     The caller is responsible for any side effects (e.g. ``enrichment_tier``
-    updates); this helper ONLY handles the ``jd_full`` write.
+    updates); this helper ONLY handles the ``jd_full`` write + score invalidation.
     """
     if not text:
         return False
@@ -153,9 +164,22 @@ def set_jd_full(
             text.strip()[:60],
         )
         return False
+    existing_row = conn.execute(
+        "SELECT jd_full FROM jobs WHERE dedup_key = ?",
+        (dedup_key,),
+    ).fetchone()
+    existing_jd = existing_row[0] if existing_row is not None else None
+    content_changed = text != existing_jd
     conn.execute(
         "UPDATE jobs SET jd_full = ? WHERE dedup_key = ?",
         (text, dedup_key),
     )
     conn.commit()
+    if content_changed:
+        # Lazy import — keeps this leaf module free of an import-time dependency
+        # on the assessment writer (both live in db/, no cycle, but the helper
+        # is only needed on the change path).
+        from ._assessment_writer import invalidate_job_score
+
+        invalidate_job_score(conn, dedup_key)
     return True
