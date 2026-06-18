@@ -205,3 +205,24 @@ def gate_onboarding() -> Response | None:
         return redirect(url_for("onboarding.welcome"))
 
     return None
+
+
+def gate_completed_onboarding() -> Response | None:
+    """Redirect completed users out of the wizard (Issue #400).
+
+    Registered as a blueprint-level before_request on onboarding_bp. The
+    app-level gate_onboarding whitelists /onboarding/* unconditionally so an
+    *incomplete* user is never trapped, but that same whitelist let an
+    *already-completed* user re-enter the wizard via GET /onboarding/welcome
+    (HTTP 200). Re-walking the wizard is the entry point for the
+    config.yaml-overwrite hazard the done-POST guard defends against; this
+    closes it one layer earlier by making "completed user inside the wizard"
+    unreachable.
+
+    Returns a 302 to jobs.index when onboarding_complete=1, else None so the
+    requested wizard route runs normally.
+    """
+    db = get_db()
+    if is_onboarding_complete(db):
+        return redirect(url_for("jobs.index"))
+    return None

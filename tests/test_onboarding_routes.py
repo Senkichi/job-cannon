@@ -13,6 +13,32 @@ import pytest
 
 
 @pytest.fixture(autouse=True)
+def _mid_onboarding(app):
+    """Walk the wizard as an *in-progress* user (Issue #400).
+
+    These route tests exercise wizard rendering/navigation, which is only a
+    reachable state while onboarding is incomplete. The standard `app`/`client`
+    fixtures seed onboarding_complete=1, and the blueprint-level
+    gate_completed_onboarding now bounces a completed user out of every wizard
+    route to /jobs. Reset the flag to 0 so the wizard is walkable here; the
+    completed-user redirect itself is covered by tests/test_onboarding_gate.py.
+    """
+    import sqlite3 as _sqlite3
+
+    conn = _sqlite3.connect(app.config["DB_PATH"])
+    try:
+        conn.execute(
+            "INSERT INTO onboarding_state (id, onboarding_complete, wizard_data) "
+            "VALUES (1, 0, '{}') "
+            "ON CONFLICT(id) DO UPDATE SET onboarding_complete = 0"
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _no_live_provider_detection():
     """Stop onboarding routes from spawning real CLI liveness probes.
 

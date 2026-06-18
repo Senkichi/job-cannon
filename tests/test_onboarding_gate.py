@@ -93,6 +93,52 @@ def test_gate_handles_missing_row_with_no_legacy_install(app_unconfigured):
     assert resp.status_code in (200, 301, 302)
 
 
+def test_welcome_redirects_when_complete(client):
+    """Issue #400: a completed install hitting GET /onboarding/welcome → 302 to /jobs.
+
+    The standard `client` fixture has onboarding_complete=1. Before the fix this
+    returned 200 and re-served the wizard (the keyring-overwrite entry point).
+    """
+    resp = client.get("/onboarding/welcome")
+    assert resp.status_code == 302
+    assert "/jobs" in resp.headers["Location"]
+    assert "/onboarding" not in resp.headers["Location"]
+
+
+def test_all_wizard_routes_redirect_when_complete(client):
+    """Issue #400: EVERY wizard route redirects out once onboarding is complete."""
+    for route in (
+        "/onboarding/welcome",
+        "/onboarding/provider_select",
+        "/onboarding/provider_credentials",
+        "/onboarding/resume_upload",
+        "/onboarding/profile_edit",
+        "/onboarding/imap_credentials",
+        "/onboarding/schedule",
+        "/onboarding/done",
+    ):
+        resp = client.get(route)
+        assert resp.status_code == 302, f"{route} did not redirect"
+        assert "/jobs" in resp.headers["Location"], (
+            f"{route} redirected to {resp.headers['Location']}"
+        )
+
+
+def test_done_post_redirects_when_complete_without_overwrite(client):
+    """Issue #400 (footgun #4): POST /onboarding/done on a completed install is
+    bounced to /jobs before any config-write side effect runs."""
+    resp = client.post("/onboarding/done", data={})
+    assert resp.status_code == 302
+    assert "/jobs" in resp.headers["Location"]
+
+
+def test_welcome_serves_when_incomplete(unconf_client):
+    """Issue #400 regression guard: the completed-user redirect MUST NOT trap an
+    incomplete user — GET /onboarding/welcome still serves 200 mid-onboarding."""
+    resp = unconf_client.get("/onboarding/welcome")
+    assert resp.status_code == 200
+
+
 def test_no_open_redirect_via_next_param(unconf_client):
     """T-42-04: gate MUST NOT honor ?next= query param. All redirects target /onboarding/welcome only."""
     resp = unconf_client.get("/jobs?next=https://evil.example.com")
