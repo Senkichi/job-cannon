@@ -26,6 +26,7 @@ from bs4 import BeautifulSoup
 
 from job_finder.config import JD_STORAGE_MAX_CHARS
 from job_finder.web.claude_client import call_claude
+from job_finder.web.html_extract import html_to_clean_text
 from job_finder.web.model_provider import ProviderCascadeExhaustedError, call_model
 
 logger = logging.getLogger(__name__)
@@ -45,8 +46,6 @@ _TIMEOUT = 10
 
 _JD_DELAY = 1.0  # seconds between job page fetches (rate limiting)
 _MAX_JD_CHARS = JD_STORAGE_MAX_CHARS  # cap extracted JD text
-
-_NOISE_TAGS = ["script", "style", "nav", "footer", "header", "noscript", "aside"]
 
 # Class names that suggest a child element contains a location (city/region)
 _LOCATION_CLASSES = {"location", "city", "geo", "place", "region", "department-location"}
@@ -210,8 +209,10 @@ def _find_careers_url_with_low_tier(
 def _fetch_job_description(url: str) -> str:
     """Fetch a job page and extract cleaned description text.
 
-    Strips noise HTML tags, checks for auth-wall signatures, and caps
-    output at _MAX_JD_CHARS. Returns empty string on any failure.
+    Delegates structure-aware extraction to ``html_extract.html_to_clean_text``
+    (trafilatura → markdown + block dedup, BeautifulSoup fallback), checks for
+    auth-wall signatures, and caps output at _MAX_JD_CHARS. Returns empty string
+    on any failure (never None).
 
     Args:
         url: Job page URL to fetch.
@@ -222,10 +223,7 @@ def _fetch_job_description(url: str) -> str:
     try:
         resp = requests.get(url, timeout=_TIMEOUT, headers=_HEADERS)
         resp.raise_for_status()
-        soup = BeautifulSoup(resp.text, "html.parser")
-        for tag in soup.find_all(_NOISE_TAGS):
-            tag.decompose()
-        text = soup.get_text(separator="\n", strip=True)
+        text = html_to_clean_text(resp.text) or ""
         text_lower = text.lower()
         if any(sig in text_lower for sig in _AUTH_WALL_SIGNATURES):
             logger.debug("Auth-wall detected for job page '%s'", url)
