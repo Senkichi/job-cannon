@@ -13,6 +13,10 @@ that doesn't touch packaging can ship on the CI gate alone.
 
 ## Checklist
 
+> Per-run fill-in log: copy `PASS-B-RUNLOG.template.md` per release and complete
+> it live — it logs the full stranger journey (bootstrap → wizard → first sync)
+> plus the 13 items below with pass/fail + friction fields.
+
 1. [ ] Download `JobCannon-Setup-<ver>.exe` from the draft/published release
        on a clean Windows 11 VM with no Python installed.
 2. [ ] `Get-FileHash` matches the published `.sha256`.
