@@ -1,4 +1,4 @@
-"""Migration 97 — dismiss historical aggregator/re-poster listings (#213).
+"""Migration 103 — dismiss historical aggregator/re-poster listings (#213).
 
 Background: aggregators / re-posters (Virtual Vocations, ProSidian,
 SynergisticIT) re-list *other* employers' jobs under their own brand. Their
@@ -10,7 +10,7 @@ the actionable apply/consider list.
 The pre-scoring gate (``should_exclude`` → ``get_company_denylist``) now seeds
 these names in the company denylist and matches on ``normalize_company`` so
 legal-entity-suffix variants ("Virtual Vocations Inc") fire. New ingests are
-auto-dismissed at scoring time. m097 retroactively applies the same demotion to
+auto-dismissed at scoring time. m103 retroactively applies the same demotion to
 rows that were already classified before the gate existed.
 
 Guard (matches the live gate's state guard in scoring_runner.run_scoring):
@@ -60,7 +60,7 @@ def _heal(ctx: MigrationContext) -> None:
         "SELECT 1 FROM sqlite_master WHERE type='table' AND name = 'jobs'"
     ).fetchone()
     if table is None:
-        logger.info("m097: jobs table not present, no-op")
+        logger.info("m103: jobs table not present, no-op")
         return
 
     # Pull only the cohort the guard can act on: currently 'discovered'.
@@ -82,14 +82,14 @@ def _heal(ctx: MigrationContext) -> None:
             dismissed += 1
 
     logger.info(
-        "m097: dismissed %d historical aggregator/re-poster row(s) (#213) "
+        "m103: dismissed %d historical aggregator/re-poster row(s) (#213) "
         "(discovered -> dismissed; manual pipeline state untouched)",
         dismissed,
     )
 
 
 MIGRATION = Migration(
-    version=97,
+    version=103,
     description="dismiss historical aggregator/re-poster listings matching the #213 denylist seed",
     py=_heal,
 )

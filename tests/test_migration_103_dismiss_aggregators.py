@@ -1,4 +1,4 @@
-"""Migration 97 — guarded backfill that dismisses historical aggregator rows (#213).
+"""Migration 103 — guarded backfill that dismisses historical aggregator rows (#213).
 
 Verifies the state guard: only ``pipeline_status='discovered'`` rows whose
 normalized company is a seeded aggregator transition to ``'dismissed'``. Rows the
@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 
 from job_finder.web.db_migrate import run_migrations
-from job_finder.web.migrations.m097_dismiss_aggregator_reposters import _heal
+from job_finder.web.migrations.m103_dismiss_aggregator_reposters import _heal
 from job_finder.web.migrations.types import MigrationContext
 
 
@@ -120,7 +120,7 @@ def test_idempotent_rerun(conn):
 
 
 def test_runs_clean_via_full_migration_driver(conn):
-    """run_migrations applied m097 without error and left version >= 97."""
+    """run_migrations applied m103 without error and left version >= 103."""
     c, _ = conn
     version = c.execute("PRAGMA user_version").fetchone()[0]
-    assert version >= 97
+    assert version >= 103
