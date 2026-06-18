@@ -164,6 +164,49 @@ _HAS_DOLLAR_RE = re.compile(r"\$\s*\d")
 # digits run followed by a pipe and TitleCase text.
 _REQ_ID_PIPE_RE = re.compile(r"\d{4,}\s*\|\s*[A-Z]")
 
+# Result-count / category-landing tile pattern (#211): a leading integer
+# (optionally comma-grouped and/or `+`-suffixed) followed by descriptive text
+# that END-anchors on an aggregate-listing noun ("jobs", "positions",
+# "openings", "roles", "opportunities", "results"). These are category landing
+# pages — "84 Data Scientist Jobs", "1,200+ openings" — not single postings.
+#
+# The leading-digit + end-anchored-noun shape is what makes this safe: a real
+# posting that happens to start with a number ("100 Women in Finance — Analyst",
+# "3D Artist", "5G Network Engineer") does not end on a listing noun, so it
+# stays unmatched. The end anchor (`\s*$`) is load-bearing — it prevents
+# matching titles where a listing noun appears mid-string ("Jobs Data Analyst").
+_LISTING_TILE_RE = re.compile(
+    r"^\s*\d[\d,]*\+?\s+.*\b"
+    r"(?:jobs?|positions?|openings?|roles?|opportunities|results)"
+    r"\s*$",
+    re.IGNORECASE,
+)
+
+
+def _is_listing_tile(title: str) -> bool:
+    """Detect result-count / category-landing tiles masquerading as postings.
+
+    A "listing tile" is the anchor text of a careers-page category link —
+    "84 Data Scientist Jobs", "1,200+ openings", "12 results" — that the static
+    crawler can mistake for a single posting because it ordered-words-matches a
+    target title. A count tile is categorically not an applyable posting; it has
+    zero human-triage value, so callers HARD-DROP it (see ``ListingTileError``
+    in ``parsed_job``) rather than persisting it for review.
+
+    Shape (case-insensitive): a leading integer (optionally comma-grouped,
+    optionally `+`-suffixed) + whitespace + any text + an end-anchored
+    aggregate-listing noun. The leading-count requirement plus the end anchor
+    keep legitimate numeric-prefixed titles ("100 Women in Finance — Analyst")
+    unmatched.
+
+    Public (no leading underscore): the SERP/portal and static-crawler paths
+    plus ``ParsedJob.from_job`` all reuse this single predicate so the
+    "only real postings enter the pipeline" invariant has one definition.
+    """
+    if not title:
+        return False
+    return bool(_LISTING_TILE_RE.search(title))
+
 
 def _is_metadata_blob(title: str) -> bool:
     """Detect titles that are actually concatenated metadata/description text.
@@ -269,6 +312,13 @@ def clean_title(title: str) -> str:
 #: Imported by ``ParsedJob.from_job`` for universal metadata-blob detection
 #: across every ingestion path (Phase 48.01).
 is_metadata_blob = _is_metadata_blob
+
+#: Public alias for ``_is_listing_tile``.
+#: Imported by ``ParsedJob.from_job`` (#211) so result-count / category-landing
+#: tiles are hard-dropped at the universal posting-hygiene enforcement point,
+#: across every ingestion path. Reused by the static crawler tier for a cheap
+#: early exit before ParsedJob construction.
+is_listing_tile = _is_listing_tile
 
 
 def _strip_city_suffix_guarded(text: str) -> str:

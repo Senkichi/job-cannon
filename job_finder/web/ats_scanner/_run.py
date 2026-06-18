@@ -555,7 +555,7 @@ def _upsert_one_ats_api_job(
             ),
         )
         from job_finder.db import upsert_job
-        from job_finder.parsed_job import DenylistedCompanyError, ParsedJob
+        from job_finder.parsed_job import DenylistedCompanyError, ListingTileError, ParsedJob
 
         # Phase 48.07: construct ParsedJob explicitly. The structured
         # locations from the ATS payload ride in via source_meta — they
@@ -566,9 +566,10 @@ def _upsert_one_ats_api_job(
         }
         try:
             parsed = ParsedJob.from_job(job, source_meta=_source_meta)
-        except DenylistedCompanyError:
+        except (DenylistedCompanyError, ListingTileError):
             # Preserve the pre-48.07 shim early-return semantics: a
-            # denylisted company is skipped silently.
+            # denylisted company (I-10) — or a result-count tile (I-14, #211)
+            # — is skipped silently.
             return
 
         result = upsert_job(

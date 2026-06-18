@@ -487,7 +487,11 @@ def add_from_listing():
         # Phase 48.07: build ParsedJob explicitly; the upsert_job Job-shim
         # is gone. A denylist hit returns the same "could not save" path
         # the legacy shim used to silently swallow it under "unchanged".
-        from job_finder.parsed_job import DenylistedCompanyError, ParsedJob
+        from job_finder.parsed_job import (
+            DenylistedCompanyError,
+            ListingTileError,
+            ParsedJob,
+        )
 
         try:
             parsed = ParsedJob.from_job(job)
@@ -496,6 +500,18 @@ def add_from_listing():
                 render_template(
                     "jobs/_add_listing_manual_result.html",
                     error="That company is on your denylist.",
+                ),
+                200,
+            )
+        except ListingTileError:
+            # #211: a result-count / category-landing tile is not a posting.
+            return (
+                render_template(
+                    "jobs/_add_listing_manual_result.html",
+                    error=(
+                        "That looks like a search-results / category page "
+                        "(a job count), not a single posting."
+                    ),
                 ),
                 200,
             )
