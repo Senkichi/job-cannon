@@ -401,19 +401,30 @@ def profile_edit():
         state.write_wizard_data(_db(), slice_)
         return redirect(url_for("onboarding.imap_credentials"))
 
-    # Pre-fill skills from parsed resume if not already overridden by user (D-06)
+    # Pre-fill skills from parsed resume if not already overridden by user (D-06).
+    # Build new locals immutably — never mutate resume_profile/existing_edit.
     parsed_skills = resume_profile.get("skills") or []
-    if isinstance(parsed_skills, list):
-        parsed_skills_text = "\n".join(parsed_skills)
-    else:
-        parsed_skills_text = ""
+    if not isinstance(parsed_skills, list):
+        parsed_skills = []
+    parsed_skills_text = "\n".join(parsed_skills)
+
+    # Pre-fill target_titles from the resume parser's suggested roles, mirroring the
+    # skills precedence rule (Issue #398): a user-entered value always wins; the
+    # parser suggestion only fills the field when the user hasn't supplied one yet.
+    suggested_titles = resume_profile.get("target_roles_suggested") or []
+    if not isinstance(suggested_titles, list):
+        suggested_titles = []
+    suggested_titles_text = "\n".join(suggested_titles)
+
+    user_titles = existing_edit.get("target_titles") or ""
+    user_skills = existing_edit.get("skills") or ""
 
     # If a resume was uploaded but parsing produced no skills, the autofill promise
     # went unmet — tell the user plainly rather than rendering an empty field with
     # no explanation (Issue #397). Suppress once the user has supplied their own
     # skills so the notice doesn't linger after they've moved on.
     resume_parse_failed = data.get("resume_parse_failed") and not (
-        existing_edit.get("skills") or parsed_skills_text
+        user_skills or parsed_skills_text
     )
     notice = (
         "We couldn't read any skills from your resume — please enter them manually below."
@@ -423,10 +434,15 @@ def profile_edit():
 
     return render_template(
         "onboarding/profile_edit.html",
-        target_titles=existing_edit.get("target_titles", ""),
+        target_titles=user_titles or suggested_titles_text,
         target_locations=existing_edit.get("target_locations", ""),
-        skills=existing_edit.get("skills") or parsed_skills_text,
+        skills=user_skills or parsed_skills_text,
         min_salary=existing_edit.get("min_salary") or "",
+        # When the field has no user input, every initial chip originates from the
+        # parser suggestion and must render with the "suggested" styling so the user
+        # can tell autofilled chips apart from ones they typed.
+        titles_from_suggestion=(not user_titles) and bool(suggested_titles_text),
+        skills_from_suggestion=(not user_skills) and bool(parsed_skills_text),
         notice=notice,
         **_step("profile_edit"),
     )

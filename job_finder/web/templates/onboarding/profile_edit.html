@@ -12,16 +12,48 @@
 {% endif %}
 <form method="post" action="{{ url_for('onboarding.profile_edit') }}" class="space-y-4">
   <div>
-    <label class="block text-sm text-slate-200 mb-1">Target titles (one per line) <span class="text-red-400">*</span></label>
-    <textarea name="target_titles" rows="3" required class="w-full bg-slate-900 border border-slate-700 rounded px-3 py-2 text-slate-100">{{ target_titles | default('') }}</textarea>
+    <label class="block text-sm text-slate-200 mb-1">Target titles <span class="text-red-400">*</span></label>
+    <p class="text-xs text-slate-400 mb-2">Add at least one. Amber chips are suggested from your resume — keep or remove them.</p>
+    <div class="chips-field" data-field="target_titles">
+      <div class="chips-container flex flex-wrap gap-2 mb-2 min-h-8">
+        {% for t in (target_titles or '').split('\n') %}{% if t.strip() %}
+        <span class="onb-chip inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs {% if titles_from_suggestion | default(false) %}onb-chip-suggested bg-amber-900/40 border border-amber-600/60 text-amber-200{% else %}bg-slate-700 border border-slate-600 text-slate-200{% endif %}">
+          <span class="chip-name">{{ t.strip() | e }}</span>
+          <button type="button" class="chip-remove text-slate-500 hover:text-red-400 transition-colors leading-none">&#215;</button>
+        </span>
+        {% endif %}{% endfor %}
+      </div>
+      <div class="flex gap-2">
+        <input type="text" class="chip-input flex-1 bg-slate-900 border border-slate-700 rounded px-3 py-2 text-slate-100"
+               placeholder="Add a title and press Enter">
+        <button type="button" class="chip-add bg-slate-700 hover:bg-slate-600 text-slate-300 px-3 py-2 rounded">Add</button>
+      </div>
+      <textarea name="target_titles" class="chips-hidden hidden">{{ target_titles | default('') }}</textarea>
+    </div>
   </div>
   <div>
     <label class="block text-sm text-slate-200 mb-1">Target locations (one per line)</label>
     <textarea name="target_locations" rows="3" class="w-full bg-slate-900 border border-slate-700 rounded px-3 py-2 text-slate-100">{{ target_locations | default('') }}</textarea>
   </div>
   <div>
-    <label class="block text-sm text-slate-200 mb-1">Skills (one per line - auto-filled from your resume if uploaded)</label>
-    <textarea name="skills" rows="4" class="w-full bg-slate-900 border border-slate-700 rounded px-3 py-2 text-slate-100">{{ skills | default('') }}</textarea>
+    <label class="block text-sm text-slate-200 mb-1">Skills (auto-filled from your resume if uploaded)</label>
+    <p class="text-xs text-slate-400 mb-2">Amber chips are suggested from your resume — keep or remove them.</p>
+    <div class="chips-field" data-field="skills">
+      <div class="chips-container flex flex-wrap gap-2 mb-2 min-h-8">
+        {% for s in (skills or '').split('\n') %}{% if s.strip() %}
+        <span class="onb-chip inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs {% if skills_from_suggestion | default(false) %}onb-chip-suggested bg-amber-900/40 border border-amber-600/60 text-amber-200{% else %}bg-slate-700 border border-slate-600 text-slate-200{% endif %}">
+          <span class="chip-name">{{ s.strip() | e }}</span>
+          <button type="button" class="chip-remove text-slate-500 hover:text-red-400 transition-colors leading-none">&#215;</button>
+        </span>
+        {% endif %}{% endfor %}
+      </div>
+      <div class="flex gap-2">
+        <input type="text" class="chip-input flex-1 bg-slate-900 border border-slate-700 rounded px-3 py-2 text-slate-100"
+               placeholder="Add a skill and press Enter">
+        <button type="button" class="chip-add bg-slate-700 hover:bg-slate-600 text-slate-300 px-3 py-2 rounded">Add</button>
+      </div>
+      <textarea name="skills" class="chips-hidden hidden">{{ skills | default('') }}</textarea>
+    </div>
   </div>
   <div>
     <label class="block text-sm text-slate-200 mb-1">Minimum salary (USD)</label>
@@ -29,4 +61,74 @@
   </div>
   <button type="submit" class="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded">Continue</button>
 </form>
+
+<script>
+// Self-contained removable-chip widget (Issue #398). Copied/adapted from the
+// profile/index.html chip JS but keyed off each field's hidden <textarea> rather
+// than that page's DOM, so it is reusable here without refactoring that page.
+// Each .chips-field owns: a visible .chips-container, a .chip-input + .chip-add,
+// and a hidden .chips-hidden <textarea name="..."> that is rewritten as
+// newline-joined chip values on every add/remove (preserving the POST contract).
+(function () {
+  function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.appendChild(document.createTextNode(str));
+    return div.innerHTML;
+  }
+
+  function syncHidden(field) {
+    const container = field.querySelector('.chips-container');
+    const hidden = field.querySelector('.chips-hidden');
+    const values = Array.from(container.querySelectorAll('.chip-name'))
+      .map((el) => el.textContent.trim())
+      .filter((v) => v.length > 0);
+    hidden.value = values.join('\n');
+  }
+
+  function addChip(field, value) {
+    value = value.trim();
+    if (!value) return;
+    const container = field.querySelector('.chips-container');
+    const chip = document.createElement('span');
+    chip.className =
+      'onb-chip inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs ' +
+      'bg-slate-700 border border-slate-600 text-slate-200';
+    chip.innerHTML =
+      '<span class="chip-name">' + escapeHtml(value) + '</span>' +
+      '<button type="button" class="chip-remove text-slate-500 hover:text-red-400 ' +
+      'transition-colors leading-none">&#215;</button>';
+    container.appendChild(chip);
+    syncHidden(field);
+  }
+
+  document.querySelectorAll('.chips-field').forEach((field) => {
+    const input = field.querySelector('.chip-input');
+    const addBtn = field.querySelector('.chip-add');
+    const container = field.querySelector('.chips-container');
+
+    addBtn.addEventListener('click', () => {
+      addChip(field, input.value);
+      input.value = '';
+      input.focus();
+    });
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        addChip(field, input.value);
+        input.value = '';
+      }
+    });
+    container.addEventListener('click', (e) => {
+      const btn = e.target.closest('.chip-remove');
+      if (!btn) return;
+      btn.parentElement.remove();
+      syncHidden(field);
+    });
+
+    // Reconcile the hidden textarea with the server-rendered chips on load so the
+    // POST payload always matches what the user sees, even before any edit.
+    syncHidden(field);
+  });
+})();
+</script>
 {% endblock %}
