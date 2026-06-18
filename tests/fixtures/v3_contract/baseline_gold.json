@@ -1,0 +1,15 @@
+{
+  "synthetic-v3-contract-0001": {
+    "title_fit": 4,
+    "location_fit": 5,
+    "comp_fit": 3,
+    "domain_match": 4,
+    "seniority_match": 5,
+    "skills_match": 2,
+    "rationale": {
+      "strengths": ["synthetic strength"],
+      "concerns": ["synthetic concern"]
+    },
+    "legitimacy_note": null
+  }
+}
