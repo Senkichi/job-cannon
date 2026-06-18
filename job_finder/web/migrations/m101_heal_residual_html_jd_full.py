@@ -1,4 +1,4 @@
-"""Migration 97 — heal residual HTML-polluted jd_full rows (post-F2).
+"""Migration 101 — heal residual HTML-polluted jd_full rows (post-F2).
 
 Background: m079 (PR #273) ran a one-time pass that cleaned HTML-bloated
 ``jd_full`` via the lossless ``html_to_plain_text`` converter, and F2 (also
@@ -66,7 +66,7 @@ def _heal(ctx: MigrationContext) -> None:
         conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name = 'jobs'").fetchone()
         is None
     ):
-        logger.info("m097: jobs table not present, no-op")
+        logger.info("m101: jobs table not present, no-op")
         return
 
     # _HTML_SIGNAL_SQL is a module constant (no user data interpolated).
@@ -90,14 +90,14 @@ def _heal(ctx: MigrationContext) -> None:
             healed_count += 1
 
     logger.info(
-        "m097: healed residual HTML markup from %d of %d candidate jd_full row(s)",
+        "m101: healed residual HTML markup from %d of %d candidate jd_full row(s)",
         healed_count,
         len(candidates),
     )
 
 
 MIGRATION = Migration(
-    version=97,
+    version=101,
     description="heal residual HTML-polluted jd_full rows via the F2 normalize_jd boundary cleaner",
     py=_heal,
 )

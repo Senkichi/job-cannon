@@ -1,13 +1,13 @@
-"""Migration 97 unit tests — heal residual HTML-polluted jd_full rows (post-F2).
+"""Migration 101 unit tests — heal residual HTML-polluted jd_full rows (post-F2).
 
-Mirrors test_migration_079: m097 re-runs the same heal but routes through the
+Mirrors test_migration_079: m101 re-runs the same heal but routes through the
 F2 boundary cleaner (``normalize_jd``) instead of calling ``html_to_plain_text``
 directly, so healed rows are byte-identical to the live write path.
 """
 
 import sqlite3
 
-from job_finder.web.migrations.m097_heal_residual_html_jd_full import MIGRATION
+from job_finder.web.migrations.m101_heal_residual_html_jd_full import MIGRATION
 from job_finder.web.migrations.types import MigrationContext
 from tests.helpers.contract_triggers import (
     run_migrations_without_contract as run_migrations,
@@ -30,8 +30,8 @@ def _insert_job(conn, dedup_key, jd_full):
     conn.commit()
 
 
-def test_migration_version_is_97():
-    assert MIGRATION.version == 97
+def test_migration_version_is_101():
+    assert MIGRATION.version == 101
     assert MIGRATION.py is not None
 
 
