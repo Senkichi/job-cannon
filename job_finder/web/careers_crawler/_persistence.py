@@ -46,10 +46,20 @@ def _upsert_and_log(
     with standalone_connection(db_path) as upsert_conn:
         for scraped_job in jobs:
             try:
+                # P2.2 (D-1, D-5): set Job.location from the scraped dict.
+                # JSON-LD jobLocation and gazetteer-validated URL-slug hints
+                # are carried here; upsert_job routes them through
+                # parse_locations → locations_structured (D-5 funnel).
+                # Do NOT pass locations_raw via source_meta: a non-empty
+                # locations_raw with empty locations_structured triggers I-07
+                # (LocationShapeError in ParsedJob.from_job) and drops the job
+                # entirely. Only Job.location is set; upsert_job derives
+                # locations_raw via split_multi_locations and locations_structured
+                # via its parse_locations fallback (_jobs.py:316–342).
                 job = Job(
                     title=scraped_job["title"],
                     company=company_name,
-                    location="",
+                    location=scraped_job.get("location") or "",
                     source="careers_crawl",
                     source_url=scraped_job.get("url") or "",
                     salary_min=None,

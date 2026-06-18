@@ -5,6 +5,10 @@ This module owns:
   static fetch path and the Playwright tiers — it consumes a parsed
   BeautifulSoup tree and returns matched job dicts.
 - The recursive JSON-LD walker (`_extract_jsonld_postings`).
+- `_location_from_jsonld` — extracts a location string from a schema.org
+  JobPosting dict (D-1: lossless, no normalisation beyond whitespace).
+- `_location_from_url_slug` — gazetteer-validates a candidate location token
+  extracted from the job's URL path (D-3: discard if not resolved).
 - The static-tier entry point (`_try_static_extract`) that performs the
   pure-`requests` fetch, parses, and decides whether the result is
   conclusive (jobs found OR genuinely empty static page) or whether the
@@ -19,6 +23,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from urllib.parse import urljoin, urlparse
 
 import requests
@@ -44,10 +49,149 @@ logger = logging.getLogger(__name__)
 _STATIC_TEXT_RATIO = 0.02
 _STATIC_MIN_TEXT_LEN = 500
 
+# --- Location hint extraction from URL slugs ---
+# Matches a hyphenated token group that appears BEFORE the job-title slug in
+# common ATS URL patterns, e.g.:
+#   /job/Hyderabad-DE-Data-Scientist.../  -> candidate: "Hyderabad"
+#   /jobs/new-york-ny/senior-engineer-.../ -> candidate: "new york ny"
+# Strategy: take the last path segment, split on dashes, and offer the longest
+# prefix that could be a location (gazetteer-validated before accepting).
+# Only the FIRST contiguous word group is tried (greedy prefix) so we don't
+# accidentally submit job-title words as location candidates.
+_SLUG_SPLIT_RE = re.compile(r"[\-_]+")
+
 # Tile-container element names that bound the context-title search when an
 # <a> has empty inner text. Once we hit one of these we stop walking up.
 _TILE_CONTAINER_TAGS = {"li", "article", "section"}
 _MAX_CONTEXT_HOPS = 3
+
+
+def _location_from_jsonld(posting: dict) -> str:
+    """Extract a location string from a schema.org JobPosting dict (D-1: lossless).
+
+    Handles three schema.org ``jobLocation`` shapes:
+    - Plain string: ``"jobLocation": "Hyderabad, India"``
+    - Single ``Place`` with nested ``address`` (``PostalAddress``):
+      ``"jobLocation": {"@type": "Place", "address": {"@type": "PostalAddress",
+      "addressLocality": "Hyderabad", "addressRegion": "TG",
+      "addressCountry": "IN"}}``
+    - List of ``Place`` objects (multi-location postings) — assembled as
+      comma-joined ``"addressLocality, addressRegion, addressCountry"`` strings
+      joined by " | " (the unambiguous multi-location separator that
+      ``split_multi_locations`` recognises).
+
+    No normalisation beyond whitespace collapse and empty-part stripping — the
+    caller (``Job.location``) routes through ``upsert_job``'s ``parse_locations``
+    fallback, which is the single normaliser (D-2).
+
+    Returns "" when ``jobLocation`` is absent, ``None``, or structurally empty.
+    """
+    job_location = posting.get("jobLocation")
+    if not job_location:
+        return ""
+
+    def _place_to_string(place: dict) -> str:
+        """Assemble a human-readable string from a schema.org Place/PostalAddress.
+
+        Prefers ``addressLocality`` alone (e.g. "Hyderabad") as the location
+        string for ``parse_locations``. Short code subfields (``addressRegion``,
+        ``addressCountry``) are intentionally excluded: ISO alpha-2 country codes
+        and subdivision codes are ambiguous to ``parse_locations`` — the code
+        "TG" resolves as Togo before Telangana, and "IN" resolves as Indiana
+        (US) before India. The gazetteer correctly infers country + region from
+        the city name alone.
+
+        Fallback chain: locality → region → country (only the first non-empty
+        token in that order). Plain-string and Place.name inputs are returned
+        verbatim (D-1: no normalisation beyond whitespace strip).
+        """
+        if isinstance(place, str):
+            return place.strip()
+        if not isinstance(place, dict):
+            return ""
+        address = place.get("address")
+        if isinstance(address, str):
+            return address.strip()
+        if isinstance(address, dict):
+            locality = (address.get("addressLocality") or "").strip()
+            if locality:
+                return locality
+            region = (address.get("addressRegion") or "").strip()
+            if region:
+                return region
+            country = (address.get("addressCountry") or "").strip()
+            return country
+        # Place with no address — try the Place's name
+        return place.get("name", "").strip()
+
+    if isinstance(job_location, str):
+        return job_location.strip()
+    if isinstance(job_location, dict):
+        return _place_to_string(job_location)
+    if isinstance(job_location, list):
+        parts = [_place_to_string(p) for p in job_location if p]
+        assembled = " | ".join(p for p in parts if p)
+        return assembled
+
+    return ""
+
+
+def _location_from_url_slug(url: str) -> str | None:
+    """Extract a gazetteer-validated location hint from a job URL slug (D-3).
+
+    Candidate accepted ONLY if ``parse_locations(candidate)`` resolves it
+    with ``unresolved=False`` — gazetteer-validated or discarded (no guessing,
+    D-3 spirit). JSON-LD beats slug (callers prefer non-empty JSON-LD result).
+
+    Strategy:
+    - Take the last non-empty path segment of the URL.
+    - Split on hyphens/underscores → word list.
+    - Progressively try longer prefixes (1 word up to 4 words) joined by spaces.
+    - Accept the LONGEST prefix that ``parse_locations`` resolves without
+      ``unresolved=True``.  Returns ``None`` when nothing resolves.
+
+    Args:
+        url: An absolute or relative job URL.
+
+    Returns:
+        A location string (e.g. ``"Hyderabad"``, ``"New York"``), or ``None``
+        when no gazetteer-validated location is found in the slug.
+    """
+    if not url:
+        return None
+
+    try:
+        path = urlparse(url).path
+    except Exception:
+        return None
+
+    segments = [s for s in path.split("/") if s]
+    if not segments:
+        return None
+
+    # Use the last path segment (most likely the job-specific slug).
+    slug = segments[-1]
+    words = _SLUG_SPLIT_RE.split(slug)
+    words = [w for w in words if w and w.isalpha()]  # drop numeric/empty tokens
+    if not words:
+        return None
+
+    # Lazy import — same pattern as apply_location_observation to avoid a
+    # module-load-time circular import (web/ module importing web/).
+    from job_finder.web.location_parser import parse_locations
+
+    # Try progressively longer prefixes (1–4 words) and accept the longest
+    # prefix that resolves. Cap at 4 to avoid consuming job-title words.
+    best: str | None = None
+    for end in range(1, min(len(words) + 1, 5)):
+        candidate = " ".join(words[:end])
+        try:
+            parsed = parse_locations(candidate)
+        except Exception:
+            continue
+        if parsed and not parsed[0].unresolved:
+            best = candidate  # keep going — a longer prefix might match better
+    return best
 
 
 def _find_title_via_context(tag) -> str:
@@ -112,7 +256,13 @@ def _extract_candidates(soup: BeautifulSoup, base_url: str) -> list[dict]:
                 if (url, title) in seen_pairs:
                     continue
                 seen_pairs.add((url, title))
-            candidates.append({"title": title, "url": url, "description": ""})
+            # D-1: carry the JSON-LD jobLocation forward losslessly. The
+            # 'location' key is optional — absent when jobLocation was missing.
+            entry: dict = {"title": title, "url": url, "description": ""}
+            loc = posting.get("location", "")
+            if loc:
+                entry["location"] = loc
+            candidates.append(entry)
 
     # --- Pass 2: Link text matching ---
     for tag in soup.find_all("a", href=True):
@@ -159,7 +309,15 @@ def _extract_candidates(soup: BeautifulSoup, base_url: str) -> list[dict]:
         if (absolute_url, title) in seen_pairs:
             continue
         seen_pairs.add((absolute_url, title))
-        candidates.append({"title": title, "url": absolute_url, "description": ""})
+        # D-3: URL-slug location hint — accepted only when gazetteer-validated.
+        # JSON-LD location (if any) takes precedence over the slug; the slug
+        # provides a fallback for sites that embed city names in their URLs
+        # (e.g. /jobs/Hyderabad-DE-Data-Scientist...) but don't publish JSON-LD.
+        link_entry: dict = {"title": title, "url": absolute_url, "description": ""}
+        slug_loc = _location_from_url_slug(absolute_url)
+        if slug_loc:
+            link_entry["location"] = slug_loc
+        candidates.append(link_entry)
 
     return candidates
 
@@ -220,20 +378,28 @@ def _extract_jsonld_postings(data) -> list[dict]:
 
     Handles single objects, arrays, ItemList wrappers, and @graph arrays.
 
+    Each returned dict has at least 'title' key. When ``jobLocation`` is
+    present on the schema.org JobPosting, a 'location' key is added with
+    the assembled location string (see ``_location_from_jsonld``).
+
     Args:
         data: Parsed JSON-LD data (dict or list).
 
     Returns:
-        List of dicts with at least 'title' key.
+        List of dicts with at least 'title' key and optional 'location' key.
     """
-    postings = []
+    postings: list[dict] = []
     if isinstance(data, list):
         for item in data:
             postings.extend(_extract_jsonld_postings(item))
     elif isinstance(data, dict):
         dtype = data.get("@type", "")
         if dtype == "JobPosting":
-            postings.append(data)
+            entry: dict = dict(data)
+            loc = _location_from_jsonld(data)
+            if loc:
+                entry["location"] = loc
+            postings.append(entry)
         elif dtype == "ItemList":
             for item in data.get("itemListElement", []):
                 postings.extend(_extract_jsonld_postings(item))
