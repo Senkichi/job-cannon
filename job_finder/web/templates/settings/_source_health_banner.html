@@ -1,0 +1,47 @@
+{# Source health banner — credential/degraded source surface (reliability epic #436).
+   Context: source_attention (list[dict]) — each {source, status, kind, last_error,
+   last_error_at, renewal_url}. Renders nothing when the list is empty. The outer
+   #source-health-banner wrapper is the swap target for the /settings/source-health
+   HTMX fragment. #}
+<div id="source-health-banner">
+{% if source_attention %}
+  <div class="bg-amber-900/30 border border-amber-700/50 rounded-lg p-4">
+    <h3 class="text-sm font-semibold text-amber-200 mb-3 flex items-center gap-2">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+      </svg>
+      Source attention needed
+    </h3>
+    <ul class="space-y-3">
+      {% for s in source_attention %}
+        <li class="flex items-start justify-between gap-3 text-sm">
+          <div class="min-w-0">
+            <div class="flex items-center gap-2">
+              <span class="font-mono text-slate-100">{{ s.source }}</span>
+              {% if s.kind == 'credential' %}
+                <span class="bg-red-900/40 text-red-300 border border-red-700/50 rounded px-2 py-0.5 text-xs">
+                  credential invalid/expired
+                </span>
+              {% else %}
+                <span class="bg-amber-900/40 text-amber-300 border border-amber-700/50 rounded px-2 py-0.5 text-xs">
+                  persistently degraded
+                </span>
+              {% endif %}
+            </div>
+            {% if s.last_error %}
+              <p class="text-amber-100/80 text-xs mt-1 break-words">{{ s.last_error }}</p>
+            {% endif %}
+          </div>
+          {% if s.renewal_url %}
+            <a href="{{ s.renewal_url }}" target="_blank" rel="noopener noreferrer"
+               class="shrink-0 bg-amber-700/40 hover:bg-amber-700/60 text-amber-100 border border-amber-600/50 rounded px-3 py-1 text-xs">
+              Renew / update key
+            </a>
+          {% endif %}
+        </li>
+      {% endfor %}
+    </ul>
+  </div>
+{% endif %}
+</div>

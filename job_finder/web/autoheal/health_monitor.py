@@ -186,3 +186,101 @@ def degraded_sources(conn: sqlite3.Connection) -> list[dict]:
         "FROM source_health WHERE status='degraded' ORDER BY last_break_at DESC"
     ).fetchall()
     return [dict(r) for r in rows]
+
+
+# ---------------------------------------------------------------------------
+# Source credential / error surface (#436 — Settings banner)
+#
+# Two append-only columns on source_health (last_error / last_error_at, m104)
+# give the Settings-UI banner one durable reader for the per-source error
+# string ingestion already collects. record_source_error / clear_source_error
+# are the no-raise write path (observability must never break ingestion);
+# sources_needing_attention is the read path the banner consumes.
+# ---------------------------------------------------------------------------
+
+# Source name -> provider key/renewal page. The banner links here so a
+# credential-expired verdict is one click from the fix.
+SOURCE_RENEWAL_LINKS: dict[str, str] = {
+    "thordata": "https://console.thordata.com/",
+    "serpapi": "https://serpapi.com/manage-api-key",
+    "dataforseo": "https://app.dataforseo.com/api-access",
+    "google_cse": "https://programmablesearchengine.google.com/controlpanel/all",
+}
+
+# Substrings that mark an error as a credential/auth/expiry failure (vs a
+# generic parser/ingest degradation). Matched case-insensitively.
+_CREDENTIAL_ERROR_TOKENS: tuple[str, ...] = (
+    "rejected",
+    "401",
+    "403",
+    "expired",
+    "invalid",
+    "unauthorized",
+)
+
+
+def _classify_error_kind(last_error: str | None) -> str:
+    """'credential' when *last_error* looks like an auth/expiry failure, else 'degraded'."""
+    if last_error and any(tok in last_error.lower() for tok in _CREDENTIAL_ERROR_TOKENS):
+        return "credential"
+    return "degraded"
+
+
+def record_source_error(conn: sqlite3.Connection, source: str, message: str) -> None:
+    """Persist the latest per-source error string onto its source_health row. Never raises.
+
+    UPSERTs because keyed sources (serpapi/thordata/...) never call
+    record_extraction, so they may have no source_health row yet. Only the
+    error columns are touched on conflict — status/consecutive_breaks (parser
+    health) are left to the autoheal detection path.
+    """
+    try:
+        now = utc_now_iso()
+        conn.execute(
+            """INSERT INTO source_health
+                   (source, surface, status, consecutive_breaks, baseline_yield,
+                    updated_at, last_error, last_error_at)
+               VALUES (?, 'ingestion', 'healthy', 0, 0, ?, ?, ?)
+               ON CONFLICT(source) DO UPDATE SET
+                   last_error = excluded.last_error,
+                   last_error_at = excluded.last_error_at,
+                   updated_at = excluded.updated_at""",
+            (source, now, message, now),
+        )
+        conn.commit()
+    except Exception:  # observability must never break ingestion
+        logger.exception("autoheal record_source_error failed for source=%s", source)
+
+
+def clear_source_error(conn: sqlite3.Connection, source: str) -> None:
+    """Clear the persisted error on *source*'s row after a clean run. Never raises."""
+    try:
+        conn.execute(
+            "UPDATE source_health SET last_error = NULL, last_error_at = NULL WHERE source = ?",
+            (source,),
+        )
+        conn.commit()
+    except Exception:  # observability must never break ingestion
+        logger.exception("autoheal clear_source_error failed for source=%s", source)
+
+
+def sources_needing_attention(conn: sqlite3.Connection) -> list[dict]:
+    """Sources that are parser-degraded OR carrying a persisted error (Settings banner reader).
+
+    Each row gains a derived ``kind`` ('credential' | 'degraded') and a
+    ``renewal_url`` (None when the source has no mapped key page). Returns new
+    dicts; does not mutate.
+    """
+    rows = conn.execute(
+        "SELECT source, status, consecutive_breaks, last_error, last_error_at, "
+        "last_signal, last_break_at "
+        "FROM source_health WHERE status = 'degraded' OR last_error IS NOT NULL "
+        "ORDER BY COALESCE(last_error_at, last_break_at, updated_at) DESC"
+    ).fetchall()
+    result: list[dict] = []
+    for r in rows:
+        item = dict(r)
+        item["kind"] = _classify_error_kind(item.get("last_error"))
+        item["renewal_url"] = SOURCE_RENEWAL_LINKS.get(item["source"])
+        result.append(item)
+    return result

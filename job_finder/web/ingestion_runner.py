@@ -264,8 +264,40 @@ class SourceSpec:
     validate_config: Callable[[dict], str | None] = field(default=lambda _: None)
 
 
+def _record_source_error(db_path: str, source: str, message: str) -> None:
+    """Persist *source*'s latest error string via a db_path-scoped connection.
+
+    No-op without *db_path* (keeps the existing no-DB callers — benchmarks,
+    unit tests — unchanged). Mirrors the ``_fetch_imap`` ``_drain`` pattern:
+    a fresh ``standalone_connection`` on the explicit db_path, never the
+    config's db section. Never raises — observability must not break ingestion.
+    """
+    if not db_path:
+        return
+    try:
+        from job_finder.web.autoheal import health_monitor
+
+        with standalone_connection(db_path) as conn:
+            health_monitor.record_source_error(conn, source, message)
+    except Exception:
+        logger.exception("persist source error failed for %s", source)
+
+
+def _clear_source_error(db_path: str, source: str) -> None:
+    """Clear *source*'s persisted error after a clean run. No-op without db_path; never raises."""
+    if not db_path:
+        return
+    try:
+        from job_finder.web.autoheal import health_monitor
+
+        with standalone_connection(db_path) as conn:
+            health_monitor.clear_source_error(conn, source)
+    except Exception:
+        logger.exception("clear source error failed for %s", source)
+
+
 def _run_simple_source(
-    spec: SourceSpec, config: dict, summary: dict, post_extract=None
+    spec: SourceSpec, config: dict, summary: dict, post_extract=None, db_path: str = ""
 ) -> list[Job]:
     """Fetch from a simple source with the standard enabled/secret/error envelope.
 
@@ -285,6 +317,7 @@ def _run_simple_source(
     err = spec.validate_config(source_cfg)
     if err is not None:
         summary[f"{spec.name}_errors"].append(err)
+        _record_source_error(db_path, spec.name, err)
         logger.warning(err)
         return []
 
@@ -294,6 +327,7 @@ def _run_simple_source(
         if not secret:
             msg = f"{spec.name} key not configured"
             summary[f"{spec.name}_errors"].append(msg)
+            _record_source_error(db_path, spec.name, msg)
             logger.warning(msg)
             return []
 
@@ -313,11 +347,13 @@ def _run_simple_source(
                 logger.exception("post_extract hook failed for %s", spec.name)
         jobs = _apply_title_gate(jobs, config, spec.name)
         summary[f"{spec.name}_fetched"] = len(jobs)
+        _clear_source_error(db_path, spec.name)
         logger.info("%s: fetched %d jobs", spec.name, len(jobs))
         return jobs
     except Exception as e:
         error_msg = str(e)
         summary[f"{spec.name}_errors"].append(error_msg)
+        _record_source_error(db_path, spec.name, error_msg)
         logger.warning("%s ingestion failed: %s", spec.name, error_msg)
         return []
 
@@ -374,12 +410,12 @@ _IMAP_SPEC = SourceSpec(
 )
 
 
-def _fetch_serpapi(config: dict, summary: dict) -> list[Job]:
-    return _run_simple_source(_SERPAPI_SPEC, config, summary)
+def _fetch_serpapi(config: dict, summary: dict, db_path: str = "") -> list[Job]:
+    return _run_simple_source(_SERPAPI_SPEC, config, summary, db_path=db_path)
 
 
-def _fetch_thordata(config: dict, summary: dict) -> list[Job]:
-    return _run_simple_source(_THORDATA_SPEC, config, summary)
+def _fetch_thordata(config: dict, summary: dict, db_path: str = "") -> list[Job]:
+    return _run_simple_source(_THORDATA_SPEC, config, summary, db_path=db_path)
 
 
 def _fetch_imap(config: dict, summary: dict, db_path: str = "") -> list[Job]:
@@ -395,7 +431,9 @@ def _fetch_imap(config: dict, summary: dict, db_path: str = "") -> list[Job]:
             with standalone_connection(db_path) as c:
                 _record_email_extractions(source, c, config)
 
-        return _run_simple_source(_IMAP_SPEC, config, summary, post_extract=_drain)
+        return _run_simple_source(
+            _IMAP_SPEC, config, summary, post_extract=_drain, db_path=db_path
+        )
     return _run_simple_source(_IMAP_SPEC, config, summary)
 
 
