@@ -1,8 +1,14 @@
 """Onboarding wizard blueprint (Phase 42, STRANGE-WIZ-02/05).
 
-Seven routes, one screen each, numbered sequentially 1..7:
+Six wizard screens, one each, numbered sequentially 1..6:
     welcome (1), provider_select (2), resume_upload (3), profile_edit (4),
-    imap_credentials (5), schedule (6), done (7).
+    imap_credentials (5), done (6).
+
+The /schedule route is still registered and directly navigable (Settings links
+to it), but it was folded out of the wizard chain (Issue #442): the Gmail step
+advances straight to done, and the cadence preset is now an inline editable
+default on the done/review screen. schedule is therefore NOT in _WIZARD_STEPS
+and renders with no step indicator.
 
 provider_select folds AI-provider choice and credential entry into a single
 screen (Issue #441): the inline API-key field renders only for BYO-key
@@ -112,7 +118,6 @@ _WIZARD_STEPS: Final[tuple[tuple[str, str], ...]] = (
     ("resume_upload", "Resume"),
     ("profile_edit", "Profile"),
     ("imap_credentials", "Gmail"),
-    ("schedule", "Schedule"),
     ("done", "Ready"),
 )
 _WIZARD_STEP_NUMS: Final[dict[str, int]] = {
@@ -179,7 +184,7 @@ def _move_secret_or_warn(config_slice: dict, path: tuple[str, ...], canonical: s
         )
 
 
-# --- Routes (7 total) ---
+# --- Routes (6 wizard steps + the Settings-only /schedule route) ---
 
 
 @onboarding_bp.route("/welcome", methods=["GET", "POST"], strict_slashes=False)
@@ -474,7 +479,7 @@ def imap_credentials():
                     }
                 },
             )
-            return redirect(url_for("onboarding.schedule"))
+            return redirect(url_for("onboarding.done"))
 
         if not email or not app_password:
             return render_template(
@@ -520,7 +525,7 @@ def imap_credentials():
                 }
             },
         )
-        return redirect(url_for("onboarding.schedule"))
+        return redirect(url_for("onboarding.done"))
 
     # Prefill the Gmail field: prefer an address the user already entered on this
     # step, otherwise fall back to the contact email lifted from their resume
@@ -538,7 +543,15 @@ def imap_credentials():
 
 @onboarding_bp.route("/schedule", methods=["GET", "POST"], strict_slashes=False)
 def schedule():
-    """Step 6: cadence preset (D-12)."""
+    """Cadence preset (D-12) — Settings-only since Issue #442.
+
+    This route is NO LONGER part of the wizard chain: the Gmail step advances
+    straight to done, and the cadence is an inline editable default on the
+    done/review screen. The route stays registered and directly navigable so
+    Settings can link to it (wiring that link is out of scope for #442). Because
+    schedule is not in _WIZARD_STEPS, it must NOT call ``_step("schedule")``
+    (that would KeyError); it renders with no step-indicator context.
+    """
     if request.method == "POST":
         preset = request.form.get("cadence_preset", "standard")
         if preset not in ("light", "standard", "heavy"):
@@ -546,10 +559,7 @@ def schedule():
         state.write_wizard_data(_db(), {"schedule": {"cadence_preset": preset}})
         return redirect(url_for("onboarding.done"))
 
-    return render_template(
-        "onboarding/schedule.html",
-        **_step("schedule"),
-    )
+    return render_template("onboarding/schedule.html")
 
 
 @onboarding_bp.route("/done", methods=["GET", "POST"], strict_slashes=False)
@@ -590,7 +600,13 @@ def done():
         provider_block = wizard_data.get("provider") or {}
         imap_block = wizard_data.get("imap") or {}
         profile_edit = wizard_data.get("profile_edit") or {}
-        schedule_block = wizard_data.get("schedule") or {"cadence_preset": "standard"}
+        # Issue #442: the cadence is chosen inline on this review screen, not on a
+        # standalone schedule step. Read it from the submitted form (authoritative —
+        # whatever the user picked here wins) and sanitize exactly as schedule()
+        # does, falling back to "standard" on anything unexpected.
+        cadence_preset = request.form.get("cadence_preset", "standard")
+        if cadence_preset not in ("light", "standard", "heavy"):
+            cadence_preset = "standard"
         # Issue #289: portal_search toggle written by imap_credentials step.
         # Default True so a wizard completed entirely via skip paths still enables
         # free portals — the zero-key path works out-of-the-box.
@@ -669,7 +685,7 @@ def done():
                 "skills": _split_lines(profile_edit.get("skills", "")),
             },
             "scheduler": {
-                "cadence_preset": schedule_block.get("cadence_preset", "standard"),
+                "cadence_preset": cadence_preset,
             },
         }
         # Populate scoring and db defaults only when absent from the merge base
@@ -811,15 +827,19 @@ def done():
         flash("First ingest in progress — check back in a minute.", "success")
         return redirect(url_for("jobs.index"))
 
-    # GET handler (unchanged from plan 42-05)
+    # GET handler. Issue #442: the cadence is rendered as an inline editable
+    # control on this review screen (not a static summary line). Pre-select the
+    # user's prior choice if they visited the Settings-only schedule route,
+    # otherwise default to "standard".
     summary = {
         "provider": (data.get("provider") or {}).get("name", "—"),
         "email": (data.get("imap") or {}).get("email", "—"),
-        "cadence": (data.get("schedule") or {}).get("cadence_preset", "—"),
         "target_titles": (data.get("profile_edit") or {}).get("target_titles", "—"),
     }
+    cadence_preset = (data.get("schedule") or {}).get("cadence_preset") or "standard"
     return render_template(
         "onboarding/done.html",
         summary=summary,
+        cadence_preset=cadence_preset,
         **_step("done"),
     )
