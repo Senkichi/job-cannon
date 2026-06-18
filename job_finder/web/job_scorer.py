@@ -20,11 +20,13 @@ gates (Plan 4 G1-G4) capture the same intent via G3 correlation.
 
 from __future__ import annotations
 
+import json
 import logging
 import sqlite3
 from dataclasses import dataclass
 
 from job_finder.db import JobAssessment
+from job_finder.db._classification import _TERMINAL_ENRICHMENT_TIERS
 from job_finder.web.model_provider import call_model
 from job_finder.web.scoring_prompts.v3_scoring_prompt import JOB_ASSESSMENT_SCHEMA
 from job_finder.web.scoring_types import build_comp_context
@@ -72,7 +74,10 @@ class ScoringResult:
     - status="ok": data is a JobAssessment, provider + model are the attribution
       strings reported by the cascade.
     - status="skipped": data is None, provider/model are None, error is None —
-      precondition (jd_full present) was not met. SCORER-05.
+      a precondition was not met (SCORER-05). ``reason`` names which gate fired:
+        "awaiting_jd"       — jd_full absent/empty; job needs enrichment.
+        "awaiting_location" — locations_structured + location both empty and the
+                              job is still enrichable (D-7 / P3.2 gate, issue #391).
     - status="error": data is None, provider/model are whatever the dispatcher
       reported if the call reached it, error is a human-readable reason.
     """
@@ -82,6 +87,7 @@ class ScoringResult:
     provider: str | None = None
     model: str | None = None
     error: str | None = None
+    reason: str | None = None
 
 
 def _variant_name(config: dict | None) -> str:
@@ -282,8 +288,18 @@ def score_job(
 ) -> ScoringResult:
     """Score a single job with the v3.0 ordinal rubric.
 
-    Per SCORER-05: empty or missing jd_full returns status='skipped' without
-    invoking call_model (no API call, no cost, no log spam).
+    Two completeness gates (D-7, no garbage-in scoring):
+
+    SCORER-05 (jd_full gate): empty or missing jd_full returns
+    status='skipped' (reason='awaiting_jd') without invoking call_model —
+    no API call, no cost, no log spam.
+
+    P3.2 (location gate, issue #391): when locations_structured AND location
+    are both empty AND the job is not at a terminal enrichment tier AND the
+    row does not carry "location_missing" in unresolved_reasons, returns
+    status='skipped' (reason='awaiting_location'). Batch scoring re-selects
+    classification IS NULL continuously, so the gate self-heals once P2.3
+    fills location — it cannot orphan jobs.
 
     Routes through call_model(tier='scoring', output_schema=JOB_ASSESSMENT_SCHEMA)
     per CONTEXT D-09 — inherits schema retry, cascade fallback (Ollama → Groq →
@@ -291,7 +307,8 @@ def score_job(
 
     Args:
         job: Job row dict with dedup_key, title, company_canonical (or company),
-            location, salary_min, salary_max, jd_full.
+            location, locations_structured, salary_min, salary_max, jd_full,
+            enrichment_tier, unresolved_reasons.
         conn: Open sqlite3 connection (used by call_model for cost recording
             and rate-limit bootstrap).
         config: Application config dict.
@@ -309,7 +326,7 @@ def score_job(
     Returns:
         ScoringResult envelope.
           ok      → data is JobAssessment, provider is attribution string.
-          skipped → data is None (jd_full absent).
+          skipped → data is None; reason='awaiting_jd' or 'awaiting_location'.
           error   → data is None, error is reason string.
     """
     jd = job.get("jd_full")
@@ -318,7 +335,63 @@ def score_job(
             "score_job: skip dedup_key=%s (empty jd_full)",
             job.get("dedup_key"),
         )
-        return ScoringResult(status="skipped", data=None)
+        return ScoringResult(status="skipped", data=None, reason="awaiting_jd")
+
+    # D-7 (Completeness gates, not garbage-in scoring) / P3.2 (issue #391):
+    # Gate on location resolvability — mirrors the jd_full gate above.
+    #
+    # A job is gated when ALL of the following hold:
+    #   1. locations_structured is empty (no gazetteer-resolved JobLocation objects)
+    #   2. location flat string is also empty (no display string either)
+    #   3. enrichment_tier is NOT in _TERMINAL_ENRICHMENT_TIERS — the job can still
+    #      be enriched (P2.3 will fill location), so scoring now would be premature.
+    #      Terminal-tier rows pass through: their location is as good as it will
+    #      ever get, so the LLM must judge from JD prose.
+    #   4. The row does NOT carry "location_missing" in unresolved_reasons — that
+    #      code (introduced by P2.3/P2.4, issue #388/#389) signals that location
+    #      was explicitly confirmed unresolvable from all available evidence, so
+    #      blocking forever would orphan the row.
+    #
+    # Rationale: batch scoring re-selects classification IS NULL continuously, so
+    # the gate self-heals once P2.3 fills location — it cannot orphan jobs.
+    # _TERMINAL_ENRICHMENT_TIERS is imported from job_finder.db._classification
+    # (the three-element scoring-terminal set: exhausted, agentic, agentic_exhausted)
+    # NOT from enrichment_states.TERMINAL (the seven-tier backfill-exclusion list).
+    _locs_structured_raw = job.get("locations_structured")
+    _locs_structured: list = []
+    if _locs_structured_raw:
+        try:
+            _parsed = json.loads(_locs_structured_raw)
+            if isinstance(_parsed, list):
+                _locs_structured = _parsed
+        except (json.JSONDecodeError, TypeError):
+            pass  # treat malformed JSON as empty — no structured data
+
+    _location_flat = job.get("location") or ""
+    _enrichment_tier = job.get("enrichment_tier")
+    _unresolved_reasons: list[str] = []
+    _unresolved_raw = job.get("unresolved_reasons")
+    if _unresolved_raw:
+        try:
+            _parsed_reasons = json.loads(_unresolved_raw)
+            if isinstance(_parsed_reasons, list):
+                _unresolved_reasons = _parsed_reasons
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    if (
+        not _locs_structured
+        and not _location_flat.strip()
+        and _enrichment_tier not in _TERMINAL_ENRICHMENT_TIERS
+        and "location_missing" not in _unresolved_reasons
+    ):
+        log.info(
+            "score_job: skip dedup_key=%s (empty location, enrichment_tier=%r, "
+            "awaiting P2.3 location fill — D-7/P3.2)",
+            job.get("dedup_key"),
+            _enrichment_tier,
+        )
+        return ScoringResult(status="skipped", data=None, reason="awaiting_location")
 
     system = _build_system_prompt(candidate_context=candidate_context, config=config)
     user_content = _build_user_message(job)
