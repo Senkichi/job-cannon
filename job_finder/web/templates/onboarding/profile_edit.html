@@ -7,6 +7,9 @@
 {% if error %}
 <div class="mb-4 rounded border border-red-500 bg-red-900/30 px-4 py-2 text-red-300">{{ error }}</div>
 {% endif %}
+{% if notice %}
+<div class="mb-4 rounded border border-amber-500 bg-amber-900/30 px-4 py-2 text-amber-200">{{ notice }}</div>
+{% endif %}
 <form method="post" action="{{ url_for('onboarding.profile_edit') }}" class="space-y-4">
   <div>
     <label class="block text-sm text-slate-200 mb-1">Target titles (one per line) <span class="text-red-400">*</span></label>

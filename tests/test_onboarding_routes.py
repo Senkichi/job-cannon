@@ -188,6 +188,57 @@ def test_resume_upload_unlinks_temp_file(client, monkeypatch):
     assert len(unlinked) == 1, f"Expected exactly 1 unlink call, got {unlinked}"
 
 
+def test_resume_parse_failure_surfaces_notice_on_profile_edit(client, monkeypatch):
+    """Issue #397: a resume upload whose parse yields no skills must not be swallowed.
+
+    Uploading a file the parser can't read writes resume_parse_failed=True to wizard
+    data; the subsequent profile_edit GET surfaces a non-blocking notice instead of
+    rendering an empty skills field with no explanation.
+    """
+
+    def boom(p, conn=None, config=None):
+        raise RuntimeError("unreadable resume")
+
+    monkeypatch.setattr("job_finder.web.onboarding.blueprint.resume_parser.parse_resume", boom)
+
+    data = {"resume": (io.BytesIO(b"%PDF-1.4 fake content"), "resume.pdf")}
+    resp = client.post("/onboarding/resume_upload", data=data, content_type="multipart/form-data")
+    assert resp.status_code == 302  # parse failure still advances (non-blocking)
+
+    page = client.get("/onboarding/profile_edit")
+    body = page.get_data(as_text=True)
+    assert "read any skills from your resume" in body
+
+
+def test_resume_skip_shows_no_parse_notice(client):
+    """Issue #397: skipping the resume is a deliberate choice, not a failure —
+    profile_edit must NOT show the parse-failure notice."""
+    resp = client.post("/onboarding/resume_upload", data={"skip": "1"})
+    assert resp.status_code == 302
+
+    page = client.get("/onboarding/profile_edit")
+    body = page.get_data(as_text=True)
+    assert "read any skills from your resume" not in body
+
+
+def test_resume_parse_success_shows_no_notice_and_prefills_skills(client, monkeypatch):
+    """A successful parse prefills the skills field and shows no failure notice."""
+    monkeypatch.setattr(
+        "job_finder.web.onboarding.blueprint.resume_parser.parse_resume",
+        lambda p, conn=None, config=None: {"skills": ["python", "sql"]},
+    )
+
+    data = {"resume": (io.BytesIO(b"%PDF-1.4 fake content"), "resume.pdf")}
+    resp = client.post("/onboarding/resume_upload", data=data, content_type="multipart/form-data")
+    assert resp.status_code == 302
+
+    page = client.get("/onboarding/profile_edit")
+    body = page.get_data(as_text=True)
+    assert "read any skills from your resume" not in body
+    assert "python" in body
+    assert "sql" in body
+
+
 def test_imap_credentials_renders_app_password_hand_holding(client):
     """UAT F3 (2026-05-21) + WP13 (2026-06): IMAP step must include the two
     Google links, current-UI App-Passwords steps, and the collapsible 2FA
