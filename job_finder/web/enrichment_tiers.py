@@ -765,8 +765,8 @@ def fetch_linkedin_jd(url: str) -> str | None:
             logger.debug("LinkedIn JD container not found for '%s'", url)
             return None
 
-        text = jd_el.get_text(separator="\n", strip=True)
-        if not text.strip():
+        text = html_to_clean_text(str(jd_el))
+        if not text or not text.strip():
             return None
 
         return text[:_MAX_JD_CHARS]
