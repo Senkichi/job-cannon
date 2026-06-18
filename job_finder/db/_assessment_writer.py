@@ -138,3 +138,53 @@ def persist_job_assessment(
     )
     conn.commit()
     return final_classification
+
+
+def invalidate_job_score(conn: sqlite3.Connection, dedup_key: str) -> bool:
+    """Clear a job's LLM scoring tuple so the existing scoring sweeps re-queue it (#226).
+
+    The single sanctioned point that *unsets* the LLM-scoring columns
+    ``(classification, sub_scores_json, fit_analysis, scoring_model)``. It lives
+    here — alongside ``persist_job_assessment`` — so the assessment-writer
+    singleton invariant (``tests/test_assessment_writer_singleton.py``) holds and
+    so the m078 triggers are honoured. The four columns are nulled atomically:
+
+      - I-04 (``sub_scores_json`` required when ``scoring_model`` set) and I-05
+        (``classification`` required when ``scoring_model`` set) stay satisfied
+        because ``scoring_model`` is cleared in the same statement.
+      - ``scoring_provider`` is deliberately LEFT intact: the heuristic ``score``
+        written at ingestion is non-NULL, and I-03 (``scoring_provider`` required
+        when ``score`` is set) would abort if we nulled it. ``scoring_provider``
+        is re-stamped by ``persist_job_assessment`` (COALESCE) on the next score,
+        so leaving the prior value is correct and trigger-safe.
+
+    Why this closes the two-stage leak: the v3.0 pipeline's Stage-2 scoring sweeps
+    select ``classification IS NULL AND jd_full IS NOT NULL`` (see
+    ``scheduler/_runners.run_enrichment_backfill_two_stage`` and
+    ``backfill_enrichment.run_scoring_backfill``). A job scored on thin input and
+    later enriched with a real ``jd_full`` keeps its stale ``classification`` and is
+    never re-queued. Clearing the tuple at the moment the scoring-relevant content
+    (``jd_full``) materially changes re-enrols the row into the existing sweep with
+    no scheduler plumbing — the invalidation invariant enforced at a single point.
+
+    Called by ``set_jd_full`` (the sole sanctioned ``jd_full`` writer) only when the
+    stored text actually transitions, so trivial re-sightings (same jd_full, or a
+    re-sight that never touches jd_full) never invalidate a prior score.
+
+    Returns:
+        True if a row was matched and its scoring tuple cleared; False if the
+        dedup_key matched no row (SQLite UPDATE-no-match semantics).
+    """
+    cur = conn.execute(
+        """
+        UPDATE jobs
+           SET classification   = NULL,
+               sub_scores_json  = NULL,
+               fit_analysis     = NULL,
+               scoring_model    = NULL
+         WHERE dedup_key = ?
+        """,
+        (dedup_key,),
+    )
+    conn.commit()
+    return cur.rowcount > 0

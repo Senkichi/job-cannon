@@ -23,6 +23,7 @@ from job_finder.json_utils import utc_now_iso
 # persist_job_assessment moved to _assessment_writer.py (Phase 49.04) — the sole
 # sanctioned writer of the scoring tuple. Re-exported here so existing
 # `from job_finder.db._persistence import persist_job_assessment` paths keep working.
+from ._assessment_writer import invalidate_job_score as invalidate_job_score
 from ._assessment_writer import persist_job_assessment as persist_job_assessment
 
 _log = logging.getLogger(__name__)
