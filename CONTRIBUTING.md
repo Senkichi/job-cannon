@@ -103,6 +103,43 @@ type — `chore(repo): ...` is correct.)
 
 If a change is large or architecturally significant, open an issue first to discuss the approach before writing code.
 
+## Releasing
+
+Releases are tag-driven. `release.yml` (manual `workflow_dispatch`) runs
+`cz bump --yes --changelog && git push --follow-tags`, and the resulting
+`v*` tag triggers `publish.yml` → build → cross-platform smoke matrix →
+trusted-publish to PyPI. Pre-release tags (`v*a*`, `v*b*`, `v*rc*`) route
+to `publish-testpypi.yml` instead.
+
+**Before tagging — verify the PyPI trusted publisher is registered.**
+PyPI uses OIDC trusted publishing (no stored API token). If the publisher
+isn't registered on PyPI's side, the OIDC exchange fails with
+`invalid-publisher` — but only *after* the build + smoke matrix run and a
+human approves the `pypi` environment gate, so the failure is both slow
+and late. This bit the v5.1.0 release (issue #406): the project was new
+(404 on PyPI), so it required a **pending** publisher that nobody had
+registered.
+
+Pre-tag checklist:
+
+1. [ ] **PyPI publisher exists.** At
+   <https://pypi.org/manage/account/publishing/> (pending publishers) or
+   <https://pypi.org/manage/project/job-cannon/settings/publishing/>
+   (existing project), confirm a trusted publisher matching
+   **owner=`Senkichi`, repo=`job-cannon`, workflow=`publish.yml`,
+   environment=`pypi`**. For a brand-new project (no PyPI release yet),
+   register a **pending publisher** before tagging.
+2. [ ] **TestPyPI publisher exists** (only if cutting a pre-release tag):
+   same check at <https://test.pypi.org/manage/account/publishing/> with
+   workflow=`publish-testpypi.yml`, environment=`testpypi`.
+
+The `preflight` job in `publish.yml` / `publish-testpypi.yml` automates
+the *project-missing* half of this check — it fails fast (before the build
+and the gate) if the project 404s on PyPI. It **cannot** detect a project
+that exists but has a *misconfigured* publisher, because PyPI exposes no
+public endpoint to introspect publisher config; that case is what step 1
+above guards manually.
+
 ## What not to add
 
 A few specific anti-patterns are documented in
