@@ -281,6 +281,11 @@ careers_crawl:
   enabled: true
   # Re-crawl companies after this many days
   freshness_days: 1
+  # Origination lane (#220): max never-crawled companies (careers_url present,
+  # no apply/consider history yet — often NULL-ATS) added per run so the
+  # crawler can *originate* discovery without flooding. ~25/run drains a
+  # ~1,000-company backlog in ~6 weeks.
+  origination_batch_limit: 25
   # Parallel browser instances for careers page crawling
   max_workers: 4
   # Max "Load more" button clicks per company (prevents runaway loops)
