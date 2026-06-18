@@ -324,15 +324,23 @@ class TestDeriveClassification:
             ({**dict.fromkeys(_ALL_KEYS, 5), "title_fit": 1}, None, "reject"),
             ({**dict.fromkeys(_ALL_KEYS, 5), "skills_match": 1}, None, "reject"),
             ({**dict.fromkeys(_ALL_KEYS, 5), "location_fit": 1}, "", "reject"),
-            # all sub-scores >= 3 -> apply
-            (dict.fromkeys(_ALL_KEYS, 3), None, "apply"),
-            (dict.fromkeys(_ALL_KEYS, 5), None, "apply"),
-            ({**dict.fromkeys(_ALL_KEYS, 3), "title_fit": 5, "skills_match": 4}, None, "apply"),
+            # positive-evidence "apply" (issue #210): all >= 3, >= 3 strong
+            # axes (>= 4), AND mean >= 3.5.
+            (dict.fromkeys(_ALL_KEYS, 5), None, "apply"),  # mean 5.0, 6 strong
+            (dict.fromkeys(_ALL_KEYS, 4), None, "apply"),  # mean 4.0, 6 strong
+            # flat-neutral vector -> low_signal, NOT apply (issue #210 branch C).
+            (dict.fromkeys(_ALL_KEYS, 3), None, "low_signal"),
+            # near-neutral / insufficient-strength vectors -> consider, not apply.
+            # {5,4,3,3,3,3}: mean 3.5 but only 2 strong axes (< 3) -> consider.
+            ({**dict.fromkeys(_ALL_KEYS, 3), "title_fit": 5, "skills_match": 4}, None, "consider"),
+            # {4,3,3,3,3,3}: mean 3.17, 1 strong axis -> consider.
+            ({**dict.fromkeys(_ALL_KEYS, 3), "title_fit": 4}, None, "consider"),
             # all >= 2 but not all >= 3 -> consider
             (dict.fromkeys(_ALL_KEYS, 2), None, "consider"),
             ({**dict.fromkeys(_ALL_KEYS, 2), "title_fit": 3, "skills_match": 3}, None, "consider"),
             ({**dict.fromkeys(_ALL_KEYS, 5), "title_fit": 2}, None, "consider"),
-            # empty legitimacy_note is falsy and does not trigger reject
+            # empty legitimacy_note is falsy and does not trigger reject; all-4s
+            # carries positive evidence -> apply.
             (dict.fromkeys(_ALL_KEYS, 4), "", "apply"),
         ],
     )
@@ -345,8 +353,8 @@ class TestDeriveClassification:
     def test_derive_classification_skip_branch_documented_edge(self):
         """The "skip" branch is unreachable for valid integer 1-5 sub-scores.
 
-        Rule order: domain-guard -> reject (any==1) -> apply (all>=3) ->
-        consider (all>=2) -> skip.
+        Rule order: domain-guard -> low_signal (all==3) -> reject (any==1) ->
+        apply (positive evidence) -> consider (all>=2) -> skip.
         With domain {1..5}, any value <2 is 1 which already triggers reject.
         The skip branch is retained for defense-in-depth but is effectively dead.
 
@@ -412,9 +420,10 @@ class TestPersistJobAssessment:
         _insert_job(migrated_conn, "acme|v3-derive")
 
         # Pass "reject" on the assessment object — should be IGNORED.
-        # Sub-scores all 3 -> should derive "apply" since legitimacy_note is NULL.
+        # A strong all-4s vector -> should derive "apply" since legitimacy_note
+        # is NULL (positive-evidence rule, issue #210).
         assessment = JobAssessment(
-            sub_scores=dict.fromkeys(_ALL_KEYS, 3),
+            sub_scores=dict.fromkeys(_ALL_KEYS, 4),
             classification="reject",  # stale / lying field — must be ignored
             rationale=_rationale_sample(),
         )

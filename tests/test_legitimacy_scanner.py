@@ -67,7 +67,12 @@ def _insert_job(conn: sqlite3.Connection, dedup_key: str, jd_full: str | None) -
 
 
 def _make_good_scorer():
-    """Return a scorer stub that always produces all-3 sub-scores ('apply')."""
+    """Return a scorer stub that produces a strong sub-score vector ('apply').
+
+    All-4s carries positive fit evidence (6 strong axes, mean 4.0), so
+    derive_classification yields 'apply' — distinct from a flat-neutral all-3s
+    vector, which now classifies 'low_signal' (issue #210).
+    """
     from job_finder.db import JobAssessment
     from job_finder.web.job_scorer import ScoringResult
 
@@ -76,12 +81,12 @@ def _make_good_scorer():
             status="ok",
             data=JobAssessment(
                 sub_scores={
-                    "title_fit": 3,
-                    "location_fit": 3,
-                    "comp_fit": 3,
-                    "domain_match": 3,
-                    "seniority_match": 3,
-                    "skills_match": 3,
+                    "title_fit": 4,
+                    "location_fit": 4,
+                    "comp_fit": 4,
+                    "domain_match": 4,
+                    "seniority_match": 4,
+                    "skills_match": 4,
                 },
                 classification="",
                 rationale={
@@ -231,8 +236,8 @@ class TestLegitimacyScannerE2E:
     def test_clean_jd_leaves_legitimacy_note_null(self, migrated_db) -> None:
         """E2E: Clean JD → legitimacy_note is NULL; classification from sub-scores.
 
-        The mock scorer returns all-3 sub-scores → derive_classification gives
-        'apply'.  Confirms the scanner does NOT fire on legitimate content.
+        The mock scorer returns a strong sub-score vector → derive_classification
+        gives 'apply'.  Confirms the scanner does NOT fire on legitimate content.
         """
         db_path, setup_conn = migrated_db
         # JD must be ≥ 200 chars (I-13 trigger) and contain no scam patterns.
@@ -268,7 +273,7 @@ class TestLegitimacyScannerE2E:
             f"legitimacy_note should be NULL for clean JD, got {row['legitimacy_note']!r}"
         )
         assert row["classification"] == "apply", (
-            f"Expected 'apply' from all-3 sub-scores, got {row['classification']!r}"
+            f"Expected 'apply' from a strong sub-score vector, got {row['classification']!r}"
         )
 
     def test_preexisting_legitimacy_note_not_overwritten(self, migrated_db) -> None:

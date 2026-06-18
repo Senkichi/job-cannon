@@ -100,13 +100,15 @@ def base_config():
 
 def _make_assessment(sub_scores=None, rationale=None, provider="ollama"):
     if sub_scores is None:
+        # Strong all-4s vector -> "apply" under the positive-evidence rule
+        # (issue #210). All-3s would now derive to "low_signal".
         sub_scores = {
-            "title_fit": 3,
-            "location_fit": 3,
-            "comp_fit": 3,
-            "domain_match": 3,
-            "seniority_match": 3,
-            "skills_match": 3,
+            "title_fit": 4,
+            "location_fit": 4,
+            "comp_fit": 4,
+            "domain_match": 4,
+            "seniority_match": 4,
+            "skills_match": 4,
         }
     if rationale is None:
         rationale = {
@@ -156,15 +158,15 @@ class TestScoreAndPersistJob:
             ("job-abc",),
         ).fetchone()
         assert row is not None
-        assert row["classification"] == "apply"  # all 3s -> apply
+        assert row["classification"] == "apply"  # all 4s -> apply (positive evidence)
         parsed = json.loads(row["sub_scores_json"])
         assert parsed == {
-            "title_fit": 3,
-            "location_fit": 3,
-            "comp_fit": 3,
-            "domain_match": 3,
-            "seniority_match": 3,
-            "skills_match": 3,
+            "title_fit": 4,
+            "location_fit": 4,
+            "comp_fit": 4,
+            "domain_match": 4,
+            "seniority_match": 4,
+            "skills_match": 4,
         }
         rationale = json.loads(row["fit_analysis"])
         assert rationale["strengths"] == ["strong skills match"]

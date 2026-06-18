@@ -554,9 +554,13 @@ class TestBatchScoringEndToEnd:
                 "Likely cause: arg-order mismatch between _run_batch_bg call site "
                 "and score_and_persist_job(job, conn, config) signature."
             )
-            assert row["classification"] in ("apply", "consider", "skip", "reject"), (
-                f"Unexpected classification value: {row['classification']!r}"
-            )
+            assert row["classification"] in (
+                "apply",
+                "consider",
+                "skip",
+                "reject",
+                "low_signal",
+            ), f"Unexpected classification value: {row['classification']!r}"
             assert row["sub_scores_json"] is not None, "sub_scores_json not persisted"
             assert row["scoring_provider"] == "test_provider"
 

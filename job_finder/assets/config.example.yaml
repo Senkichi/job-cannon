@@ -205,6 +205,15 @@ scoring:
   # is classified 'low_signal' instead of being rolled into apply/consider/skip
   # via rubric outputs (which are unreliable when the model has no real JD to read).
   low_signal_jd_chars: 1500
+  # Positive-evidence thresholds for the 'apply' verdict (issue #210). On the
+  # 1-5 ordinal scale, 3 means "neutral / couldn't tell", so 'apply' (the class
+  # the user acts on) must require the presence of strength, not just the
+  # absence of weakness. A job is 'apply' only when no axis is weak (all >= 3),
+  # at least apply_min_strong_axes axes are strong (>= 4), AND the mean of the
+  # six sub-scores is at least apply_mean_floor. An all-3s (flat-neutral) vector
+  # is classified 'low_signal' instead.
+  apply_mean_floor: 3.5
+  apply_min_strong_axes: 3
   # Daily API spending cap in USD. Applies only to non-free BYO-key
   # providers in the cascade — Ollama, the two Claude/Gemini CLIs, Groq,
   # Cerebras, and the Anthropic CLI fallback ($0 via Claude.ai subscription)

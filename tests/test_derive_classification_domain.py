@@ -120,9 +120,10 @@ def test_all_twos_returns_consider():
     assert derive_classification(scores, None) == "consider"
 
 
-def test_all_threes_returns_apply():
+def test_all_threes_returns_low_signal():
+    # Flat-neutral vector is no-signal, not apply (issue #210 branch C).
     scores = dict.fromkeys(_ALL_KEYS, 3)
-    assert derive_classification(scores, None) == "apply"
+    assert derive_classification(scores, None) == "low_signal"
 
 
 # ---------------------------------------------------------------------------
@@ -185,7 +186,8 @@ def test_redrive_batch_skips_malformed_and_continues(conn, caplog):
     """find_divergences skips malformed rows; batch over valid rows completes."""
     from scripts.redrive_classification import find_divergences
 
-    # Valid row: stored "reject" but rule says "apply" (all-3s, no legit note) → divergent
+    # Valid row: stored "reject" but rule says "low_signal" (all-3s flat-neutral,
+    # no legit note) → divergent
     _insert_scored_job(
         conn,
         "k|valid",
@@ -236,5 +238,5 @@ def test_redrive_remediate_skips_malformed_row(conn, caplog):
     stored = conn.execute("SELECT classification FROM jobs WHERE dedup_key='k|valid'").fetchone()[
         0
     ]
-    assert stored == "apply"
+    assert stored == "low_signal"
     # Batch completed without exception

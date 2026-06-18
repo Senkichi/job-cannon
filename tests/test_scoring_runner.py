@@ -556,13 +556,15 @@ class TestRunScoring:
             return ScoringResult(
                 status="ok",
                 data=JobAssessment(
+                    # Strong all-4s vector -> "apply" (positive-evidence rule,
+                    # issue #210). All-3s would now derive to "low_signal".
                     sub_scores={
-                        "title_fit": 3,
-                        "location_fit": 3,
-                        "comp_fit": 3,
-                        "domain_match": 3,
-                        "seniority_match": 3,
-                        "skills_match": 3,
+                        "title_fit": 4,
+                        "location_fit": 4,
+                        "comp_fit": 4,
+                        "domain_match": 4,
+                        "seniority_match": 4,
+                        "skills_match": 4,
                     },
                     classification="",
                     rationale={
