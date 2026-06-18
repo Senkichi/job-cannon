@@ -386,6 +386,78 @@ def test_imap_skip_persists_credentials_unverified(client, app):
         conn.close()
 
 
+def test_imap_credentials_field_has_autocomplete_and_pattern(client):
+    """Issue #399: Gmail field advertises autocomplete=email + an HTML pattern."""
+    resp = client.get("/onboarding/imap_credentials")
+    assert resp.status_code == 200
+    body = resp.get_data(as_text=True)
+    assert 'autocomplete="email"' in body
+    assert 'inputmode="email"' in body
+    assert "pattern=" in body
+
+
+def test_imap_credentials_prefills_email_from_resume(client, app):
+    """Issue #399: GET prefills the Gmail field from the parsed-resume email."""
+    conn = sqlite3.connect(app.config["DB_PATH"])
+    try:
+        conn.execute(
+            "UPDATE onboarding_state SET "
+            'wizard_data=\'{"resume_profile":{"email":"jane.doe@gmail.com"}}\' WHERE id=1'
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    resp = client.get("/onboarding/imap_credentials")
+    assert resp.status_code == 200
+    body = resp.get_data(as_text=True)
+    assert 'value="jane.doe@gmail.com"' in body
+
+
+def test_imap_credentials_existing_email_wins_over_resume(client, app):
+    """An email already entered on the IMAP step takes precedence over the resume one."""
+    conn = sqlite3.connect(app.config["DB_PATH"])
+    try:
+        conn.execute(
+            "UPDATE onboarding_state SET "
+            'wizard_data=\'{"imap":{"email":"chosen@gmail.com"},'
+            '"resume_profile":{"email":"resume@gmail.com"}}\' WHERE id=1'
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    resp = client.get("/onboarding/imap_credentials")
+    body = resp.get_data(as_text=True)
+    assert 'value="chosen@gmail.com"' in body
+    assert "resume@gmail.com" not in body
+
+
+def test_imap_credentials_rejects_malformed_email(client, monkeypatch):
+    """Issue #399: a malformed address is rejected before the IMAP smoke test."""
+    called = False
+
+    def _fail_if_called(**kwargs):
+        nonlocal called
+        called = True
+        raise AssertionError("check_imap must not run for an invalid address")
+
+    monkeypatch.setattr(
+        "job_finder.web.onboarding.blueprint.imap_test.check_imap",
+        _fail_if_called,
+    )
+
+    resp = client.post(
+        "/onboarding/imap_credentials",
+        data={"email": "not-an-email", "app_password": "good pass word here"},
+    )
+    assert resp.status_code == 200
+    body = resp.get_data(as_text=True)
+    assert "valid email" in body
+    assert "not-an-email" in body  # preserved for correction
+    assert called is False
+
+
 def test_schedule_post_writes_cadence_and_redirects_to_done(client, app):
     """POST /onboarding/schedule writes {schedule: {cadence_preset}}, redirects to /onboarding/done."""
     resp = client.post("/onboarding/schedule", data={"cadence_preset": "heavy"})

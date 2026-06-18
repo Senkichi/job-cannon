@@ -6,6 +6,7 @@ for manual profile extraction.
 
 import json
 import logging
+import re
 import sqlite3
 from pathlib import Path
 
@@ -15,6 +16,27 @@ from pdfplumber import PDF
 from job_finder.web.model_provider import call_model
 
 logger = logging.getLogger(__name__)
+
+# Email-address matcher used to lift a contact address out of raw resume text so
+# the IMAP step can prefill the Gmail field (Issue #399). Kept deterministic and
+# zero-cost: a regex over the extracted text is more reliable than asking the LLM
+# to surface an email and adds no provider round-trip. Conservative pattern — no
+# attempt at full RFC 5322; just the common "local@domain.tld" shape.
+_EMAIL_RE = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
+
+
+def _extract_email(text: str) -> str:
+    """Return the first plausible email address found in ``text``, else ''.
+
+    Args:
+        text: Raw resume text.
+
+    Returns:
+        The first matched email address (lowercased), or '' when none is found.
+    """
+    match = _EMAIL_RE.search(text or "")
+    return match.group(0).lower() if match else ""
+
 
 # JSON schema for experience profile extraction
 EXPERIENCE_PROFILE_SCHEMA = {
@@ -188,7 +210,14 @@ def parse_resume(path: str | Path, conn: sqlite3.Connection, config: dict) -> di
 
         if not profile:
             logger.warning("LLM returned empty profile for resume: %s", path)
-            return _empty_profile()
+            profile = _empty_profile()
+
+        # Surface a contact email for the IMAP-step prefill (Issue #399). Derived
+        # deterministically from the raw text, not the LLM, so it works even when
+        # the model returns an empty profile.
+        email = _extract_email(text)
+        if email:
+            profile = {**profile, "email": email}
 
         return profile
     except ValueError as e:

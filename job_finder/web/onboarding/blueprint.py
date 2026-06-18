@@ -26,6 +26,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import tempfile
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -79,6 +80,20 @@ _MAX_RESUME_BYTES: Final[int] = 10 * 1024 * 1024
 _NO_CREDS_PROVIDERS: Final[frozenset[str]] = frozenset(
     {"claude_code_cli", "gemini_cli", "ollama", "local_bundled", "none"}
 )
+
+# Server-side guard for the Gmail-address field (Issue #399). The template's
+# type="email" + pattern only blocks the obvious cases in the browser; a malformed
+# address that slips past (paste with trailing junk, scripted POST, autofill quirk)
+# would otherwise reach check_imap and surface as a confusing auth/connection error
+# instead of a clear "that's not a valid address". Conservative shape check only —
+# the IMAP smoke test is the real proof the address works.
+_EMAIL_RE: Final = re.compile(r"^[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}$")
+
+
+def _is_valid_email(value: str) -> bool:
+    """Return True when ``value`` has the basic ``local@domain.tld`` shape."""
+    return bool(_EMAIL_RE.match(value or ""))
+
 
 # Canonical ordered list of wizard screens (key, label) — the single source of
 # truth for the step indicator (D-21). The "Step N of M" number and denominator
@@ -463,6 +478,16 @@ def imap_credentials():
                 **_step("imap_credentials"),
             )
 
+        if not _is_valid_email(email):
+            # Issue #399: reject a malformed address before the IMAP smoke test so
+            # the user gets a clear format error instead of a cryptic connection one.
+            return render_template(
+                "onboarding/imap_credentials.html",
+                error="That doesn't look like a valid email address.",
+                email=email,
+                **_step("imap_credentials"),
+            )
+
         result = imap_test.check_imap(
             host="imap.gmail.com", port=993, email=email, app_password=app_password
         )
@@ -491,9 +516,16 @@ def imap_credentials():
         )
         return redirect(url_for("onboarding.schedule"))
 
+    # Prefill the Gmail field: prefer an address the user already entered on this
+    # step, otherwise fall back to the contact email lifted from their resume
+    # (Issue #399). The IMAP address need not match the resume's, so this is only
+    # a convenience default the user can overwrite.
+    resume_profile = data.get("resume_profile") or {}
+    prefill_email = existing_imap.get("email") or resume_profile.get("email", "")
+
     return render_template(
         "onboarding/imap_credentials.html",
-        email=existing_imap.get("email", ""),
+        email=prefill_email,
         **_step("imap_credentials"),
     )
 
