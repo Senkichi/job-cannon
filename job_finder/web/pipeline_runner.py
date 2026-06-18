@@ -253,7 +253,7 @@ def run_ingestion(
     # opening its own connection cannot self-lock.
     from job_finder.web.autoheal.health_monitor import run_detection
 
-    summary["degraded_sources"] = run_detection(db_path)
+    summary["degraded_sources"] = run_detection(db_path, config)
 
     # Phase C / C5: attempt auto-heal for newly-degraded sources. Flag-gated
     # (autoheal.heal_enabled, default true since D6) and fully error-isolated —
