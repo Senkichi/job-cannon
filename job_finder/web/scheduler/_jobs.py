@@ -700,6 +700,42 @@ def register_health_heartbeat(scheduler, app) -> None:
     )
 
 
+# ---------------------------------------------------------------------------
+# Liveness heartbeat (every 60s -- serve-path freshness signal)
+# ---------------------------------------------------------------------------
+
+
+def register_heartbeat(scheduler, app) -> None:
+    """Register the short-cadence liveness heartbeat job.
+
+    Touches ``last_alive`` every ``HEARTBEAT_INTERVAL_S`` seconds so an
+    out-of-process healthcheck can judge liveness by file freshness. Writes one
+    heartbeat immediately (before the first interval tick) so ``last_alive``
+    exists at boot rather than only after 60s — this closes the cold-start
+    window where a healthcheck would otherwise see a missing/stale file.
+
+    Unlike the daily ``health_heartbeat`` this writes no DB row: it must not
+    compete for the WAL write lock every minute, so it is not a heavy writer and
+    does not participate in ``assert_no_heavy_writer_collisions``. ``app`` is
+    accepted for registrar-signature symmetry; the write resolves its path from
+    the user-data root and needs no app context.
+    """
+    from job_finder.web.scheduler._heartbeat import HEARTBEAT_INTERVAL_S, write_heartbeat
+
+    # Boot write: make last_alive exist immediately (cold-start window).
+    write_heartbeat()
+
+    scheduler.add_job(
+        write_heartbeat,
+        trigger=IntervalTrigger(seconds=HEARTBEAT_INTERVAL_S),
+        id="heartbeat",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=LIGHT_MISFIRE_GRACE_S,
+    )
+
+
 def register_all_jobs(scheduler, app) -> None:
     """Register all scheduled jobs on the given scheduler instance.
 
@@ -745,3 +781,4 @@ def register_all_jobs(scheduler, app) -> None:
     register_registry_hygiene(scheduler, app)
     register_enrichment_backfill(scheduler, app)
     register_health_heartbeat(scheduler, app)
+    register_heartbeat(scheduler, app)

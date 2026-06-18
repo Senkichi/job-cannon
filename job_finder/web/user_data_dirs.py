@@ -72,6 +72,21 @@ def logs_path() -> Path:
     return user_data_root() / "logs" / "app.log"
 
 
+def last_alive_path() -> Path:
+    """Return the path to the ``last_alive`` liveness-heartbeat marker.
+
+    Touched on a short recurring interval by the serve-path heartbeat job
+    (``scheduler/_heartbeat.py``) so an out-of-process healthcheck can judge
+    app liveness by the file's *freshness* — even when the in-process
+    scheduler's daily health heartbeat hasn't fired and the HTTP listener is
+    unreachable. Respects ``JOB_CANNON_USER_DATA_DIR``.
+
+    Returns:
+        Path to ``last_alive`` under the user data root.
+    """
+    return user_data_root() / "last_alive"
+
+
 def cache_path() -> Path:
     """Return the path to the cache directory.
 
