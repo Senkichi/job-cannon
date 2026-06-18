@@ -141,8 +141,14 @@ def record_extraction(
         logger.exception("autoheal record_extraction failed for source=%s", source)
 
 
-def run_detection(db_path: str) -> list[str]:
-    """Flip any source whose counter reached threshold to DEGRADED. Returns names."""
+def run_detection(db_path: str, config: dict | None = None) -> list[str]:
+    """Flip any source whose counter reached threshold to DEGRADED. Returns names.
+
+    When *config* is supplied and ≥1 source is newly flagged, pushes a single
+    best-effort egress alert (#438) summarizing the degraded sources. The notify
+    call is wrapped in its own guard so a notification failure can never widen
+    into the detection path.
+    """
     flagged: list[str] = []
     try:
         with standalone_connection(db_path) as conn:
@@ -176,6 +182,23 @@ def run_detection(db_path: str) -> list[str]:
                 metadata={"reason": "consecutive_zero_yields", "threshold": BREAK_THRESHOLD},
             )
             logger.warning("autoheal: source '%s' flagged DEGRADED", src)
+
+        # C2-7 egress: push a single best-effort alert out of the app so the
+        # user learns about a degradation even when away from localhost:5000.
+        # Isolated guard — a notification failure must never break detection.
+        if config is not None:
+            try:
+                from job_finder.web.notifications import notify
+
+                names = ", ".join(flagged)
+                notify(
+                    "Job Cannon: source degraded",
+                    f"{len(flagged)} source(s) flagged degraded: {names}",
+                    severity="critical",
+                    config=config,
+                )
+            except Exception:
+                logger.exception("autoheal run_detection notify failed")
     return flagged
 
 

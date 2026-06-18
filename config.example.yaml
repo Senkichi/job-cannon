@@ -192,6 +192,16 @@ sources:
     api_key: ""
     cse_id: ""
 
+# --- Notifications (alerts when sources degrade / pipeline stalls) ---
+notifications:
+  desktop:
+    enabled: true        # native OS toast (no setup required)
+  email:
+    enabled: false       # optional durable fallback; reuses the IMAP app password
+    to: ""               # your own address; blank disables even when enabled
+    smtp_host: smtp.gmail.com
+    smtp_port: 465
+
 # --- AI scoring configuration ---
 scoring:
   # How much each factor contributes to the overall score (must sum to 1.0)

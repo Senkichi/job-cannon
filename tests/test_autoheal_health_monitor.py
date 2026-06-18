@@ -1,8 +1,11 @@
 import sqlite3
 
+from job_finder.web import notifications
 from job_finder.web.autoheal import BREAK_THRESHOLD
 from job_finder.web.autoheal import health_monitor as hm
 from job_finder.web.db_migrate import run_migrations
+
+_NOTIFY_CONFIG = {"notifications": {"desktop": {"enabled": True}, "email": {"enabled": False}}}
 
 
 def _conn(tmp_path):
@@ -79,6 +82,48 @@ def test_degraded_sources_reader(tmp_path):
     hm.run_detection(db)
     degraded = hm.degraded_sources(conn)
     assert any(d["source"] == "linkedin" for d in degraded)
+
+
+def test_run_detection_notifies_once_when_sources_flagged(tmp_path, monkeypatch):
+    """#438: a single notify() fires when ≥1 source newly flips to degraded."""
+    db, conn = _conn(tmp_path)
+    calls: list[dict] = []
+    monkeypatch.setattr(
+        notifications,
+        "notify",
+        lambda *a, **kw: calls.append({"args": a, "kwargs": kw}) or (),
+    )
+    _establish_baseline(conn, "linkedin")
+    for _ in range(BREAK_THRESHOLD):
+        hm.record_extraction(conn, "linkedin", "email", "x" * 400, job_count=0)
+    flagged = hm.run_detection(db, _NOTIFY_CONFIG)
+    assert "linkedin" in flagged
+    assert len(calls) == 1
+    assert calls[0]["kwargs"]["severity"] == "critical"
+
+
+def test_run_detection_does_not_notify_when_nothing_flagged(tmp_path, monkeypatch):
+    """#438: no notify() when zero sources flip (healthy detection pass)."""
+    db, conn = _conn(tmp_path)
+    calls: list = []
+    monkeypatch.setattr(notifications, "notify", lambda *a, **kw: calls.append(1) or ())
+    _establish_baseline(conn, "linkedin")  # healthy, never breaks
+    flagged = hm.run_detection(db, _NOTIFY_CONFIG)
+    assert flagged == []
+    assert calls == []
+
+
+def test_run_detection_without_config_skips_notify(tmp_path, monkeypatch):
+    """#438: legacy callers (config=None) never reach the egress path."""
+    db, conn = _conn(tmp_path)
+    calls: list = []
+    monkeypatch.setattr(notifications, "notify", lambda *a, **kw: calls.append(1) or ())
+    _establish_baseline(conn, "linkedin")
+    for _ in range(BREAK_THRESHOLD):
+        hm.record_extraction(conn, "linkedin", "email", "x" * 400, job_count=0)
+    flagged = hm.run_detection(db)
+    assert "linkedin" in flagged
+    assert calls == []
 
 
 def test_detect_false_captures_but_never_breaks(tmp_path):

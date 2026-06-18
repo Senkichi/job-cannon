@@ -41,6 +41,11 @@ classifiers = [
     "Topic :: Internet :: WWW/HTTP :: Dynamic Content",
 ]
 dependencies = [
+    # Cross-platform desktop notifications (egress backend, #438). Ships native
+    # backends for all three OSes (WinRT toast / UNUserNotificationCenter /
+    # dbus-next libnotify), pure-Python with no compiled extension, and no-ops
+    # cleanly on headless hosts. Chosen over the stale `plyer`.
+    "desktop-notifier>=5.0,<7",
     # Google APIs
     "google-api-python-client~=2.100",
     "google-auth-httplib2~=0.2",
