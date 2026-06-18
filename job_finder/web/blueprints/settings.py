@@ -29,6 +29,7 @@ from job_finder.config import (
     load_config,
 )
 from job_finder.web import user_data_dirs
+from job_finder.web.autoheal.health_monitor import sources_needing_attention
 from job_finder.web.db_helpers import get_db, refresh_jf_config
 from job_finder.web.onboarding.inbox_check import run_inbox_check
 
@@ -104,6 +105,7 @@ def index():
         config_mtime=config_mtime,
         secret_set=secret_set,
         inbox_status=inbox_status,
+        source_attention=_safe_source_attention(),
     )
 
 
@@ -124,6 +126,21 @@ def inbox_check_fragment():
     )
 
 
+@settings_bp.route("/source-health", strict_slashes=False)
+def source_health_fragment():
+    """HTMX fragment — the source credential/degraded banner, swapped in place.
+
+    Non-HTMX direct hits redirect to the Settings index so the banner is never
+    rendered as a bare standalone page (mirrors dashboard.degraded_sources_fragment).
+    """
+    if not request.headers.get("HX-Request"):
+        return redirect(url_for("settings.index"))
+    return render_template(
+        "settings/_source_health_banner.html",
+        source_attention=_safe_source_attention(),
+    )
+
+
 def _safe_run_inbox_check(config: dict):
     """Run `run_inbox_check` with the request-scoped DB connection.
 
@@ -140,6 +157,23 @@ def _safe_run_inbox_check(config: dict):
     except Exception as exc:
         logger.warning("inbox_check failed in settings.index: %s", type(exc).__name__)
         return None
+
+
+def _safe_source_attention() -> list[dict]:
+    """Read sources needing attention with the configured DB; never 500s the page.
+
+    Returns [] when no DB is available (e.g. tests without DB_PATH) or the read
+    raises — the banner simply renders nothing. Mirrors `_safe_run_inbox_check`.
+    """
+    try:
+        db_path = current_app.config.get("DB_PATH")
+        if not db_path:
+            return []
+        conn = get_db(db_path)
+        return sources_needing_attention(conn)
+    except Exception as exc:
+        logger.warning("source attention check failed in settings: %s", type(exc).__name__)
+        return []
 
 
 @settings_bp.route("/save", methods=["POST"], strict_slashes=False)

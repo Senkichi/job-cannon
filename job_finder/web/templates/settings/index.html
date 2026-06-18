@@ -14,6 +14,9 @@
   {# F1 — inbox-wiring system check tile #}
   {% include "settings/_inbox_status_tile.html" %}
 
+  {# #436 — source credential/degraded health banner (reliability epic) #}
+  {% include "settings/_source_health_banner.html" %}
+
   <form action="{{ url_for('settings.save') }}" method="post" class="space-y-6">
     <input type="hidden" name="_config_mtime" value="{{ config_mtime | default(0) }}">
 

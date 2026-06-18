@@ -167,10 +167,10 @@ def run_ingestion(
             imap_jobs = []
 
         # --- SerpAPI ingestion ---
-        serpapi_jobs = _fetch_serpapi(config, summary)
+        serpapi_jobs = _fetch_serpapi(config, summary, db_path)
 
         # --- Additional sources ---
-        thordata_jobs = _fetch_thordata(config, summary)
+        thordata_jobs = _fetch_thordata(config, summary, db_path)
         portal_jobs = _fetch_portal_search(
             config, summary, include_cse=include_cse, db_path=db_path
         )
