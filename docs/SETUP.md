@@ -236,6 +236,39 @@ Set it before running `uv run job-cannon` so the app sees it at boot. Add to you
 
 `$JOB_CANNON_CONFIG` (different env var) points at a specific `config.yaml` file regardless of the user-data dir — useful for swapping profiles.
 
+### Out-of-process health probe
+
+`job-cannon healthcheck` prints a one-line JSON verdict and exits with a status code, **without starting the app** (no server, no scheduler, no pidfile lock). It reads the on-disk liveness marker and the database directly, so it works even when the app — and its in-process scheduler — is down. Use it from your OS scheduler to alert when Job Cannon stops or a source degrades.
+
+| Exit code | Status | Meaning |
+|---|---|---|
+| `0` | `ok` | Live process, fresh non-degraded heartbeat, no degraded sources |
+| `1` | `degraded` | Degraded/stale daily heartbeat, or a source flagged degraded |
+| `2` | `down` | No live process, unreadable database, or no heartbeat ever recorded |
+
+```bash
+job-cannon healthcheck
+# {"status": "ok", "exit_code": 0, "reasons": [], "degraded_sources": [], "checked_at_utc": "2026-06-18T17:00:00"}
+```
+
+**Linux (cron)** — alert on any non-zero exit, every 15 minutes:
+
+```cron
+*/15 * * * * job-cannon healthcheck >/dev/null || echo "Job Cannon unhealthy" | mail -s "JC alert" you@example.com
+```
+
+**macOS (launchd)** — `StartInterval` 900s running `job-cannon healthcheck`; wire the exit code into your notifier of choice.
+
+**Windows (Task Scheduler)** — a 15-minute trigger whose action is `job-cannon healthcheck`; Task Scheduler records the last exit code (`0`/`1`/`2`) you can act on:
+
+```powershell
+$action  = New-ScheduledTaskAction -Execute "job-cannon" -Argument "healthcheck"
+$trigger = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes 15)
+Register-ScheduledTask -TaskName "JobCannon Healthcheck" -Action $action -Trigger $trigger
+```
+
+Flags: `--heartbeat-max-age-hours N` (staleness window for the daily heartbeat, default 26) and `--user-data-dir PATH` (override the data directory).
+
 ---
 
 ## 7. Self-Healing Parsers (default on)
