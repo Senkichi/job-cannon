@@ -831,18 +831,66 @@ class TestCrawlCareersBatch:
         assert result["companies_crawled"] == 0
         mock_static.assert_not_called()
 
+    @patch("job_finder.web.careers_crawler._score_new_jobs")
     @patch("job_finder.web.careers_crawler.sync_playwright", new_callable=MagicMock)
     @patch("job_finder.web.careers_crawler._try_static_extract")
-    def test_skips_companies_without_high_scoring_jobs(self, mock_static, mock_pw, tmp_db_path):
-        """Companies with no high-priority classification jobs should not be crawled.
+    def test_originates_never_crawled_company_without_history(
+        self, mock_static, mock_pw, mock_score, tmp_db_path
+    ):
+        """#220 lane 2: a never-crawled company with a careers_url but no
+        apply/consider history (typically NULL-ATS) is now eligible for crawling.
 
-        v3.0 (Phase 34 Plan 3 Commit A): replaces the legacy haiku_score >= 42
-        threshold with classification IN ('apply','consider'). A 'skip'-classified
-        job does not qualify the company for crawling.
+        This was previously EXCLUDED — the crawler could only re-discover
+        companies that already had a high-scoring job, never originate discovery.
         """
-        cid = _insert_company(tmp_db_path, "LowCo", "https://lowco.com/careers")
-        # Insert a low-priority job (skip classification — not apply/consider).
-        _insert_high_scoring_job(tmp_db_path, cid, classification="skip")
+        cid = _insert_company(tmp_db_path, "OriginCo", "https://originco.com/careers")
+        # No jobs at all → no apply/consider history. ats_platform defaults NULL.
+        # careers_crawl_last_at defaults NULL → eligible for origination lane.
+
+        mock_static.return_value = [
+            {
+                "title": "Software Engineer",
+                "url": "https://originco.com/jobs/1",
+                "description": "",
+            },
+        ]
+
+        mock_browser = MagicMock()
+        mock_pw_instance = MagicMock()
+        mock_pw_instance.chromium.launch.return_value = mock_browser
+        mock_pw.return_value.__enter__ = MagicMock(return_value=mock_pw_instance)
+        mock_pw.return_value.__exit__ = MagicMock(return_value=False)
+
+        config = {"profile": {"target_titles": ["engineer"], "exclusions": {}}}
+        result = crawl_careers_batch(tmp_db_path, config)
+
+        assert result["companies_crawled"] == 1
+        assert result["jobs_found"] == 1
+        mock_static.assert_called_once()
+
+        # The company is stamped so it won't re-enter the origination lane.
+        conn = sqlite3.connect(tmp_db_path)
+        row = conn.execute(
+            "SELECT careers_crawl_last_at FROM companies WHERE id = ?", (cid,)
+        ).fetchone()
+        conn.close()
+        assert row[0] is not None
+
+    @patch("job_finder.web.careers_crawler.sync_playwright", new_callable=MagicMock)
+    @patch("job_finder.web.careers_crawler._try_static_extract")
+    def test_origination_skips_already_crawled_company(self, mock_static, mock_pw, tmp_db_path):
+        """A company already crawled once (careers_crawl_last_at set) but still
+        without apply/consider history does NOT re-enter the origination lane —
+        origination is a one-shot per company; re-crawls require lane-1 relevance.
+        """
+        cid = _insert_company(tmp_db_path, "DoneCo", "https://doneco.com/careers")
+        conn = sqlite3.connect(tmp_db_path)
+        conn.execute(
+            "UPDATE companies SET careers_crawl_last_at = datetime('now') WHERE id = ?",
+            (cid,),
+        )
+        conn.commit()
+        conn.close()
 
         mock_browser = MagicMock()
         mock_pw_instance = MagicMock()
@@ -855,6 +903,96 @@ class TestCrawlCareersBatch:
 
         assert result["companies_crawled"] == 0
         mock_static.assert_not_called()
+
+    @patch("job_finder.web.careers_crawler._score_new_jobs")
+    @patch("job_finder.web.careers_crawler.sync_playwright", new_callable=MagicMock)
+    @patch("job_finder.web.careers_crawler._try_static_extract")
+    def test_origination_batch_limit_caps_cohort(
+        self, mock_static, mock_pw, mock_score, tmp_db_path
+    ):
+        """The origination lane is capped by careers_crawl.origination_batch_limit
+        so never-crawled companies cannot flood a single run.
+        """
+        for i in range(5):
+            _insert_company(tmp_db_path, f"BulkCo{i}", f"https://bulk{i}.com/careers")
+
+        mock_static.return_value = []
+
+        mock_browser = MagicMock()
+        mock_pw_instance = MagicMock()
+        mock_pw_instance.chromium.launch.return_value = mock_browser
+        mock_pw.return_value.__enter__ = MagicMock(return_value=mock_pw_instance)
+        mock_pw.return_value.__exit__ = MagicMock(return_value=False)
+
+        config = {
+            "profile": {"target_titles": ["engineer"], "exclusions": {}},
+            "careers_crawl": {"origination_batch_limit": 2},
+        }
+        result = crawl_careers_batch(tmp_db_path, config)
+
+        # Only 2 of the 5 never-crawled companies should be crawled this run.
+        assert result["companies_crawled"] == 2
+
+    @patch("job_finder.web.careers_crawler.sync_playwright", new_callable=MagicMock)
+    @patch("job_finder.web.careers_crawler._try_static_extract")
+    def test_origination_excludes_penalty_box(self, mock_static, mock_pw, tmp_db_path):
+        """A never-crawled company in the 5-strike penalty box (>=5 scans, 0 hits)
+        is excluded from the origination lane just like the re-discovery lane.
+        """
+        cid = _insert_company(tmp_db_path, "PenaltyCo", "https://penaltyco.com/careers")
+        # 5 zero-hit scans → penalty box. (careers_crawl_last_at left NULL so the
+        # only reason it would be excluded is the penalty-box predicate.)
+        conn = sqlite3.connect(tmp_db_path)
+        for _ in range(5):
+            conn.execute(
+                """INSERT INTO company_scan_log
+                   (company_id, scanned_at, jobs_found, jobs_matched)
+                   VALUES (?, datetime('now'), 0, 0)""",
+                (cid,),
+            )
+        conn.commit()
+        conn.close()
+
+        mock_browser = MagicMock()
+        mock_pw_instance = MagicMock()
+        mock_pw_instance.chromium.launch.return_value = mock_browser
+        mock_pw.return_value.__enter__ = MagicMock(return_value=mock_pw_instance)
+        mock_pw.return_value.__exit__ = MagicMock(return_value=False)
+
+        config = {"profile": {"target_titles": ["engineer"], "exclusions": {}}}
+        result = crawl_careers_batch(tmp_db_path, config)
+
+        assert result["companies_crawled"] == 0
+        mock_static.assert_not_called()
+
+    @patch("job_finder.web.careers_crawler._score_new_jobs")
+    @patch("job_finder.web.careers_crawler.sync_playwright", new_callable=MagicMock)
+    @patch("job_finder.web.careers_crawler._try_static_extract")
+    def test_rediscovery_lane_unaffected_by_origination(
+        self, mock_static, mock_pw, mock_score, tmp_db_path
+    ):
+        """Lane 1 (re-discovery) still crawls proven-relevant companies and is
+        not capped by origination_batch_limit.
+        """
+        cid = _insert_company(tmp_db_path, "ProvenCo", "https://provenco.com/careers")
+        _insert_high_scoring_job(tmp_db_path, cid, classification="apply")
+
+        mock_static.return_value = []
+
+        mock_browser = MagicMock()
+        mock_pw_instance = MagicMock()
+        mock_pw_instance.chromium.launch.return_value = mock_browser
+        mock_pw.return_value.__enter__ = MagicMock(return_value=mock_pw_instance)
+        mock_pw.return_value.__exit__ = MagicMock(return_value=False)
+
+        # origination_batch_limit=0 must NOT suppress the re-discovery lane.
+        config = {
+            "profile": {"target_titles": ["engineer"], "exclusions": {}},
+            "careers_crawl": {"origination_batch_limit": 0},
+        }
+        result = crawl_careers_batch(tmp_db_path, config)
+
+        assert result["companies_crawled"] == 1
 
     @patch("job_finder.web.careers_crawler._score_new_jobs")
     @patch("job_finder.web.careers_crawler.sync_playwright", new_callable=MagicMock)

@@ -1,7 +1,14 @@
-"""Active careers page crawler for companies with proven relevance.
+"""Active careers page crawler — re-discovers and originates job discovery.
 
-Provides crawl_careers_batch() — a daily scheduled job that:
-1. Loads all companies that have ever had a high-scoring job (classification IN ('apply','consider'))
+Provides crawl_careers_batch() — a daily scheduled job that selects companies
+in two lanes (#220):
+1a. RE-DISCOVERY (uncapped): companies that have ever had a high-scoring job
+    (classification IN ('apply','consider')), due for a re-crawl.
+1b. ORIGINATION (capped at careers_crawl.origination_batch_limit, default 25):
+    never-crawled companies that have a careers_url but no apply/consider
+    history yet — typically NULL-ATS companies the crawler has never touched.
+    This lets the crawler *originate* discovery rather than only re-discover
+    proven-relevant companies.
 2. Multi-tier extraction: cached API → static HTML → URL param search →
    Playwright with interaction (load-more, scroll, pagination, search)
 3. Feeds matched jobs into the existing upsert/score pipeline
@@ -43,6 +50,11 @@ logger = logging.getLogger(__name__)
 
 _FRESHNESS_DAYS = 1  # Re-crawl daily to catch new postings early
 _POLITE_DELAY = 1.0  # Seconds between companies
+# Origination lane: never-crawled companies with a careers_url but no
+# apply/consider history yet (often NULL-ATS). Capped per run so the
+# crawler can *originate* discovery without flooding (#220). At 25/run a
+# ~1,000-company backlog drains in ~6 weeks.
+_ORIGINATION_BATCH_LIMIT = 25
 
 # Static extraction — extracted to _static_tier. Re-exported here so
 # both internal callers (_try_cached_tier, _crawl_companies) and the
@@ -204,13 +216,26 @@ def crawl_careers_batch(db_path: str, config: dict) -> dict:
     summary: dict[str, Any] = _new_summary()
     all_new_job_keys: list[str] = []
 
-    # Load all companies that have ever had a high-scoring job
-    # (v3.0 Phase 34 Plan 3 Commit A: classification IN ('apply','consider')
-    # replaces haiku_score >= threshold)
+    # Two-lane company selection (#220):
+    #   Lane 1 — RE-DISCOVERY (unchanged, uncapped): companies that have ever
+    #     had a high-scoring job (classification IN ('apply','consider')).
+    #   Lane 2 — ORIGINATION (new, capped): never-crawled companies that have a
+    #     careers_url but NO apply/consider history yet — typically NULL-ATS
+    #     companies the crawler has never touched. This lets the crawler
+    #     *originate* discovery (detect an ATS / find a careers page) instead of
+    #     only re-discovering known-good companies.
+    # Both lanes share the same hard gates (careers_url present, scan_enabled,
+    # not an ATS 'hit', and not in the 5-strike penalty box). Lane 2 is bounded
+    # by `careers_crawl.origination_batch_limit` (default 25/run) so origination
+    # cannot flood the run; the title-filter gate bounds blast radius downstream.
     with standalone_connection(db_path) as conn:
         freshness_days = config.get("careers_crawl", {}).get("freshness_days", _FRESHNESS_DAYS)
+        origination_limit = config.get("careers_crawl", {}).get(
+            "origination_batch_limit", _ORIGINATION_BATCH_LIMIT
+        )
 
-        companies = conn.execute(
+        # Lane 1: re-discovery — proven-relevant companies due for a re-crawl.
+        rediscovery = conn.execute(
             """SELECT c.id, c.name_raw, c.careers_url, c.careers_api_endpoint,
                       c.careers_crawl_tier, c.careers_nav_recipe
                FROM companies c
@@ -235,11 +260,55 @@ def crawl_careers_batch(db_path: str, config: dict) -> dict:
             (f"-{freshness_days}",),
         ).fetchall()
 
+        # Lane 2: origination — never-crawled companies with a careers_url and
+        # no apply/consider history. Capped and ordered by id for determinism.
+        origination = conn.execute(
+            """SELECT c.id, c.name_raw, c.careers_url, c.careers_api_endpoint,
+                      c.careers_crawl_tier, c.careers_nav_recipe
+               FROM companies c
+               WHERE c.careers_url IS NOT NULL
+                 AND c.scan_enabled = 1
+                 AND c.ats_probe_status != 'hit'
+                 AND c.careers_crawl_last_at IS NULL
+                 AND NOT EXISTS (
+                     SELECT 1 FROM jobs j
+                     WHERE j.company_id = c.id
+                       AND j.classification IN ('apply', 'consider')
+                 )
+                 AND NOT EXISTS (
+                     SELECT 1 FROM (
+                         SELECT COUNT(*) AS total,
+                                SUM(CASE WHEN jobs_matched > 0 THEN 1 ELSE 0 END) AS hits
+                         FROM company_scan_log WHERE company_id = c.id
+                     ) s WHERE s.total >= 5 AND s.hits = 0
+                 )
+               ORDER BY c.id ASC
+               LIMIT ?""",
+            (origination_limit,),
+        ).fetchall()
+
+    # Re-discovery runs first (proven relevance), then the capped origination
+    # cohort. De-dup defensively in case a company qualifies for both lanes
+    # (it cannot today — lane 2 requires no apply/consider history — but the
+    # guard keeps the contract robust against future lane-predicate drift).
+    seen_ids: set[int] = set()
+    companies = []
+    for row in (*rediscovery, *origination):
+        if row[0] in seen_ids:
+            continue
+        seen_ids.add(row[0])
+        companies.append(row)
+
     if not companies:
         logger.info("careers_crawler: no companies due for crawling")
         return summary
 
-    logger.info("careers_crawler: %d companies in batch", len(companies))
+    logger.info(
+        "careers_crawler: %d companies in batch (%d re-discovery, %d origination)",
+        len(companies),
+        len(rediscovery),
+        len(origination),
+    )
 
     merged_summary, merged_keys = _crawl_companies(
         companies,
