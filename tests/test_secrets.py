@@ -257,3 +257,104 @@ def test_probe_clears_unavailable_flag(monkeypatch):
     secrets_mod.probe_keyring_backend()
 
     assert secrets_mod._KEYRING_UNAVAILABLE is False
+
+
+# ---------------------------------------------------------------------------
+# Data-dir namespacing (Issue #396)
+# ---------------------------------------------------------------------------
+
+
+def test_service_name_is_namespaced_by_data_dir(monkeypatch, tmp_path):
+    """The keyring service is derived from the resolved user-data root."""
+    from job_finder.secrets import _LEGACY_SERVICE, _service_name
+
+    monkeypatch.setenv("JOB_CANNON_USER_DATA_DIR", str(tmp_path / "install_a"))
+    name = _service_name()
+
+    assert name.startswith(f"{_LEGACY_SERVICE}:")
+    assert name != _LEGACY_SERVICE
+
+
+def test_service_name_differs_across_data_dirs(monkeypatch, tmp_path):
+    """Two distinct data-dirs produce distinct service names (no collision)."""
+    from job_finder.secrets import _service_name
+
+    monkeypatch.setenv("JOB_CANNON_USER_DATA_DIR", str(tmp_path / "install_a"))
+    name_a = _service_name()
+    monkeypatch.setenv("JOB_CANNON_USER_DATA_DIR", str(tmp_path / "install_b"))
+    name_b = _service_name()
+
+    assert name_a != name_b
+
+
+def test_service_name_stable_for_same_data_dir(monkeypatch, tmp_path):
+    """The service name is deterministic for a given data-dir."""
+    from job_finder.secrets import _service_name
+
+    monkeypatch.setenv("JOB_CANNON_USER_DATA_DIR", str(tmp_path / "install_a"))
+    assert _service_name() == _service_name()
+
+
+def test_two_installs_do_not_clobber_each_others_secret(monkeypatch, tmp_path):
+    """Issue #396: writing in one data-dir must not overwrite another's value.
+
+    This is the exact hazard from the issue — a re-run of onboarding in one
+    install silently destroyed another install's Gmail app password because
+    the keyring entry was machine-global.
+    """
+    from job_finder.secrets import get_secret, set_secret
+
+    monkeypatch.delenv("SERPAPI_API_KEY", raising=False)
+
+    monkeypatch.setenv("JOB_CANNON_USER_DATA_DIR", str(tmp_path / "install_a"))
+    set_secret("sources.serpapi.api_key", "key-for-a")
+
+    # Switch to a second install and write a different value.
+    monkeypatch.setenv("JOB_CANNON_USER_DATA_DIR", str(tmp_path / "install_b"))
+    set_secret("sources.serpapi.api_key", "key-for-b")
+    assert get_secret("sources.serpapi.api_key") == "key-for-b"
+
+    # Install A's value survived install B's write.
+    monkeypatch.setenv("JOB_CANNON_USER_DATA_DIR", str(tmp_path / "install_a"))
+    assert get_secret("sources.serpapi.api_key") == "key-for-a"
+
+
+def test_legacy_service_value_resolves_via_fallback(isolated_keyring, monkeypatch, tmp_path):
+    """Secrets written before #396 (under the bare 'job-cannon' service) still resolve."""
+    from job_finder.secrets import _LEGACY_SERVICE, get_secret
+
+    monkeypatch.delenv("SERPAPI_API_KEY", raising=False)
+    monkeypatch.setenv("JOB_CANNON_USER_DATA_DIR", str(tmp_path / "install_a"))
+
+    # Simulate a pre-upgrade entry stored under the legacy service.
+    isolated_keyring.set_password(_LEGACY_SERVICE, "sources.serpapi.api_key", "legacy-value")
+
+    assert get_secret("sources.serpapi.api_key") == "legacy-value"
+
+
+def test_namespaced_value_wins_over_legacy(isolated_keyring, monkeypatch, tmp_path):
+    """When both services hold a value, the namespaced one takes precedence."""
+    from job_finder.secrets import _LEGACY_SERVICE, get_secret, set_secret
+
+    monkeypatch.delenv("SERPAPI_API_KEY", raising=False)
+    monkeypatch.setenv("JOB_CANNON_USER_DATA_DIR", str(tmp_path / "install_a"))
+
+    isolated_keyring.set_password(_LEGACY_SERVICE, "sources.serpapi.api_key", "legacy-value")
+    set_secret("sources.serpapi.api_key", "namespaced-value")
+
+    assert get_secret("sources.serpapi.api_key") == "namespaced-value"
+
+
+def test_delete_clears_legacy_so_it_cannot_resurface(isolated_keyring, monkeypatch, tmp_path):
+    """delete_secret must remove the legacy entry too, or the fallback resurrects it."""
+    from job_finder.secrets import _LEGACY_SERVICE, delete_secret, get_secret, set_secret
+
+    monkeypatch.delenv("SERPAPI_API_KEY", raising=False)
+    monkeypatch.setenv("JOB_CANNON_USER_DATA_DIR", str(tmp_path / "install_a"))
+
+    isolated_keyring.set_password(_LEGACY_SERVICE, "sources.serpapi.api_key", "legacy-value")
+    set_secret("sources.serpapi.api_key", "namespaced-value")
+
+    delete_secret("sources.serpapi.api_key")
+
+    assert get_secret("sources.serpapi.api_key") is None

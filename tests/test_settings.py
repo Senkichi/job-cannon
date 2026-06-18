@@ -137,6 +137,8 @@ class TestSettingsKeyringWrite:
         """Non-empty serpapi_api_key submission → keyring set, plaintext cleared."""
         import keyring
 
+        from job_finder.secrets import _service_name
+
         resp = settings_client.post(
             "/settings/save",
             data={
@@ -148,7 +150,7 @@ class TestSettingsKeyringWrite:
         assert resp.status_code == 302
 
         assert (
-            keyring.get_password("job-cannon", "sources.serpapi.api_key")
+            keyring.get_password(_service_name(), "sources.serpapi.api_key")
             == "sk-test-from-form-abc"
         )
 
@@ -364,6 +366,8 @@ class TestSettingsDataForSEOPersistence:
     def test_save_dataforseo_api_key_writes_to_keyring(self, settings_client, settings_app):
         import keyring
 
+        from job_finder.secrets import _service_name
+
         resp = settings_client.post(
             "/settings/save",
             data={
@@ -375,7 +379,7 @@ class TestSettingsDataForSEOPersistence:
         assert resp.status_code == 302
         try:
             assert (
-                keyring.get_password("job-cannon", "sources.dataforseo.api_key")
+                keyring.get_password(_service_name(), "sources.dataforseo.api_key")
                 == "base64-encoded-creds-xyz"
             )
             with open(settings_app._test_config_path, encoding="utf-8") as f:
@@ -443,6 +447,8 @@ class TestSettingsGoogleCSEPersistence:
     ):
         import keyring
 
+        from job_finder.secrets import _service_name
+
         resp = settings_client.post(
             "/settings/save",
             data={
@@ -455,11 +461,11 @@ class TestSettingsGoogleCSEPersistence:
         assert resp.status_code == 302
         try:
             assert (
-                keyring.get_password("job-cannon", "sources.google_cse.api_key")
+                keyring.get_password(_service_name(), "sources.google_cse.api_key")
                 == "AIzaTEST-google-api-key"
             )
             assert (
-                keyring.get_password("job-cannon", "sources.google_cse.cse_id")
+                keyring.get_password(_service_name(), "sources.google_cse.cse_id")
                 == "0123456789abcdef:cse-id"
             )
             # Both plaintext leaf values cleared in config.yaml after the
@@ -538,6 +544,8 @@ class TestSettingsThordataPersistence:
     def test_save_thordata_api_key_writes_to_keyring(self, settings_client, settings_app):
         import keyring
 
+        from job_finder.secrets import _service_name
+
         resp = settings_client.post(
             "/settings/save",
             data={
@@ -548,7 +556,9 @@ class TestSettingsThordataPersistence:
         )
         assert resp.status_code == 302
         try:
-            assert keyring.get_password("job-cannon", "sources.thordata.api_key") == "td-test-key"
+            assert (
+                keyring.get_password(_service_name(), "sources.thordata.api_key") == "td-test-key"
+            )
             with open(settings_app._test_config_path, encoding="utf-8") as f:
                 saved = yaml.safe_load(f)
             api_key = saved.get("sources", {}).get("thordata", {}).get("api_key", "<missing>")
@@ -631,6 +641,8 @@ class TestSettingsStage7FreePortalsTile:
         """Stage 7.1: USAJobs creds route to OS keyring; plaintext is wiped."""
         import keyring
 
+        from job_finder.secrets import _service_name
+
         resp = settings_client.post(
             "/settings/save",
             data={
@@ -645,13 +657,13 @@ class TestSettingsStage7FreePortalsTile:
         try:
             assert (
                 keyring.get_password(
-                    "job-cannon", "sources.portal_search.usajobs.user_agent_email"
+                    _service_name(), "sources.portal_search.usajobs.user_agent_email"
                 )
                 == "me@example.com"
             )
             assert (
                 keyring.get_password(
-                    "job-cannon", "sources.portal_search.usajobs.authorization_key"
+                    _service_name(), "sources.portal_search.usajobs.authorization_key"
                 )
                 == "usajobs-test-key"
             )
@@ -676,6 +688,8 @@ class TestSettingsStage7FreePortalsTile:
         """Stage 7.1: Adzuna creds route to OS keyring; country stays plaintext."""
         import keyring
 
+        from job_finder.secrets import _service_name
+
         resp = settings_client.post(
             "/settings/save",
             data={
@@ -690,11 +704,11 @@ class TestSettingsStage7FreePortalsTile:
         assert resp.status_code == 302
         try:
             assert (
-                keyring.get_password("job-cannon", "sources.portal_search.adzuna.app_id")
+                keyring.get_password(_service_name(), "sources.portal_search.adzuna.app_id")
                 == "adzuna-id"
             )
             assert (
-                keyring.get_password("job-cannon", "sources.portal_search.adzuna.app_key")
+                keyring.get_password(_service_name(), "sources.portal_search.adzuna.app_key")
                 == "adzuna-key"
             )
             with open(settings_app._test_config_path, encoding="utf-8") as f:
@@ -719,6 +733,8 @@ class TestSettingsStage7FreePortalsTile:
         """Stage 7.1: Jooble api_key routes to OS keyring; plaintext is wiped."""
         import keyring
 
+        from job_finder.secrets import _service_name
+
         resp = settings_client.post(
             "/settings/save",
             data={
@@ -731,7 +747,7 @@ class TestSettingsStage7FreePortalsTile:
         assert resp.status_code == 302
         try:
             assert (
-                keyring.get_password("job-cannon", "sources.portal_search.jooble.api_key")
+                keyring.get_password(_service_name(), "sources.portal_search.jooble.api_key")
                 == "jooble-test-key"
             )
             with open(settings_app._test_config_path, encoding="utf-8") as f:
@@ -865,6 +881,8 @@ class TestSettingsStage72ImapTile:
         """app_password routes to OS keyring; other fields stay plaintext."""
         import keyring
 
+        from job_finder.secrets import _service_name
+
         resp = settings_client.post(
             "/settings/save",
             data={
@@ -881,7 +899,7 @@ class TestSettingsStage72ImapTile:
         assert resp.status_code == 302
         try:
             assert (
-                keyring.get_password("job-cannon", "sources.imap.app_password")
+                keyring.get_password(_service_name(), "sources.imap.app_password")
                 == "abcd efgh ijkl mnop"
             )
             with open(settings_app._test_config_path, encoding="utf-8") as f:
@@ -935,6 +953,8 @@ class TestSettingsStage72ImapTile:
         """App passwords from Google may include spaces; never strip()."""
         import keyring
 
+        from job_finder.secrets import _service_name
+
         # Includes leading + trailing + middle spaces — must survive verbatim.
         raw = " abcd efgh ijkl mnop "
         resp = settings_client.post(
@@ -949,7 +969,7 @@ class TestSettingsStage72ImapTile:
         )
         assert resp.status_code == 302
         try:
-            assert keyring.get_password("job-cannon", "sources.imap.app_password") == raw
+            assert keyring.get_password(_service_name(), "sources.imap.app_password") == raw
         finally:
             try:
                 keyring.delete_password("job-cannon", "sources.imap.app_password")
