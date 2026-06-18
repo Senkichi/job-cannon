@@ -1,0 +1,46 @@
+# jobcannon — typo-squat alias metapackage for the real `job-cannon` package.
+#
+# This is a SELF-CONTAINED build, isolated from the root project. It ships no
+# importable module of its own; its sole purpose is to make
+# `pip install jobcannon` (the common misspelling, no hyphen) pull the real,
+# hyphenated `job-cannon` distribution. Build it from inside this directory:
+#
+#     cd packaging/metapackage && uv build && uvx twine check --strict dist/*
+#
+# See PUBLISH.md for the (human-gated) PyPI upload path. Do NOT wire this into
+# the root publish.yml — jobcannon is a distinct PyPI project needing its own
+# pending trusted publisher.
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+# This distribution ships only metadata + a README — no importable package.
+# hatchling's documented escape hatch tells it not to look for a module to
+# include (otherwise the build fails trying to auto-discover one). Do NOT
+# declare `packages = [...]` here: the `job_finder` source lives in the root
+# project, not this subdirectory.
+bypass-selection = true
+
+[project]
+name = "jobcannon"
+# Pinned to the real package's version so the alias does not silently drift
+# behind it. Keep in sync with the root pyproject.toml's project.version
+# (a test, tests/test_metapackage_skeleton.py, enforces this equality).
+version = "5.1.0"
+description = "Alias metapackage — installs `job-cannon`, the real package"
+requires-python = ">=3.12"
+authors = [{ name = "Senkichi", email = "Senkichi@users.noreply.github.com" }]
+readme = "README.md"
+license = "AGPL-3.0-only"
+# Unconstrained on purpose: this is a pure alias whose intent is "always pull
+# the latest real package". A version floor here would only create a second
+# place to bump on every release, so we let the real package's own metadata
+# govern compatibility.
+dependencies = ["job-cannon"]
+
+[project.urls]
+Homepage = "https://github.com/Senkichi/job-cannon"
+Repository = "https://github.com/Senkichi/job-cannon"
+Issues = "https://github.com/Senkichi/job-cannon/issues"
