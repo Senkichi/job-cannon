@@ -34,9 +34,35 @@ permissions:
   contents: read
 
 jobs:
+  # ── Pre-flight: fail fast if the TestPyPI trusted publisher isn't registered ──
+  #
+  # #406 mirror: same invalid-publisher failure mode as publish.yml, but on the
+  # test.pypi.org channel. A brand-new (404) project on TestPyPI needs a PENDING
+  # publisher registered before the first pre-release tag is pushed, else the
+  # OIDC exchange fails after the environment gate. Cheap unauthenticated read
+  # of the TestPyPI JSON API; only detects the project-missing case (PyPI has no
+  # public endpoint to introspect publisher config). Non-destructive.
+  preflight:
+    name: Pre-flight (TestPyPI publisher)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify TestPyPI project exists (pending-publisher sanity check)
+        run: |
+          code=$(curl -sS -o /dev/null -w '%{http_code}' https://test.pypi.org/pypi/job-cannon/json)
+          echo "test.pypi.org/pypi/job-cannon/json -> HTTP ${code}"
+          if [[ "${code}" == "404" ]]; then
+            echo "::error::TestPyPI project 'job-cannon' does not exist (HTTP 404). A first pre-release publish via trusted publishing requires a PENDING publisher registered BEFORE tagging, or the OIDC exchange fails with 'invalid-publisher' after the environment gate (see issue #406). Register one at https://test.pypi.org/manage/account/publishing/ matching owner=Senkichi, repo=job-cannon, workflow=publish-testpypi.yml, environment=testpypi, then re-run."
+            exit 1
+          fi
+          if [[ "${code}" != "200" ]]; then
+            echo "::error::Unexpected HTTP ${code} from TestPyPI while checking project existence; aborting before the gate. Re-run if TestPyPI is having a transient outage."
+            exit 1
+          fi
+
   # ── Build sdist + wheel (single producer; D-10 artifact identity) ────
   build:
     name: Build
+    needs: [preflight]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6

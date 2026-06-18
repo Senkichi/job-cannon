@@ -48,10 +48,46 @@ jobs:
             exit 1
           fi
 
+  # ── Pre-flight: fail fast if the PyPI trusted publisher isn't registered ──
+  #
+  # #406: v5.1.0's first publish died with `invalid-publisher` AFTER the
+  # environment gate was approved — the trusted publisher had never been
+  # registered on PyPI, and a brand-new (404) project requires a *pending*
+  # publisher. That failure mode is silent until the OIDC exchange in the
+  # publish step, by which point the build + 4-way smoke matrix have already
+  # run and a human has clicked through the `pypi` environment gate.
+  #
+  # This job is a cheap, unauthenticated read of the PyPI JSON API. It can
+  # only detect the *project-missing* case (the most common cause of
+  # invalid-publisher on a first release) — PyPI exposes no public endpoint
+  # to introspect a project's trusted-publisher config, so a project that
+  # exists but has a *misconfigured* publisher still surfaces at the OIDC
+  # exchange. The error message below points at the manual checklist in
+  # CONTRIBUTING.md ("Releasing") for that case. Non-destructive: read-only,
+  # no credentials, no side effects.
+  preflight:
+    name: Pre-flight (PyPI publisher)
+    needs: [guard]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify PyPI project exists (pending-publisher sanity check)
+        run: |
+          code=$(curl -sS -o /dev/null -w '%{http_code}' https://pypi.org/pypi/job-cannon/json)
+          echo "pypi.org/pypi/job-cannon/json -> HTTP ${code}"
+          if [[ "${code}" == "404" ]]; then
+            echo "::error::PyPI project 'job-cannon' does not exist (HTTP 404). A first publish via trusted publishing requires a PENDING publisher registered BEFORE tagging — otherwise the OIDC exchange fails with 'invalid-publisher' after the environment gate is approved (this is exactly what stalled v5.1.0; see issue #406). Register one at https://pypi.org/manage/account/publishing/ matching owner=Senkichi, repo=job-cannon, workflow=publish.yml, environment=pypi, then re-run."
+            exit 1
+          fi
+          if [[ "${code}" != "200" ]]; then
+            echo "::error::Unexpected HTTP ${code} from PyPI while checking project existence; aborting before the gate. Re-run if PyPI is having a transient outage."
+            exit 1
+          fi
+          echo "Project exists on PyPI — trusted publisher should already be registered. If the publish step still fails with 'invalid-publisher', the publisher config is mismatched: verify owner=Senkichi, repo=job-cannon, workflow=publish.yml, environment=pypi at https://pypi.org/manage/project/job-cannon/settings/publishing/"
+
   # ── Build sdist + wheel (single producer; D-10 artifact identity) ────
   build:
     name: Build
-    needs: [guard]
+    needs: [preflight]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
