@@ -687,3 +687,113 @@ def test_done_post_redirects_to_jobs(client):
     # Plan 42-06 replaced the 501 stub with full atomic-finish implementation
     assert resp.status_code == 302
     assert "/jobs" in resp.headers["Location"]
+
+
+# ---------------------------------------------------------------------------
+# Issue #398 — profile_edit autofill-confirm: target_titles prefill + chips
+# ---------------------------------------------------------------------------
+_PARSE_RESUME = "job_finder.web.onboarding.blueprint.resume_parser.parse_resume"
+
+
+def _upload_resume(client):
+    """Drive a resume_upload POST so the mocked parser output lands in wizard_data."""
+    data = {"resume": (io.BytesIO(b"%PDF-1.4 fake content"), "resume.pdf")}
+    return client.post("/onboarding/resume_upload", data=data, content_type="multipart/form-data")
+
+
+def test_profile_edit_prefills_target_titles_from_suggested(client, monkeypatch):
+    """Issue #398 (a): parser-suggested titles prefill the field as suggested chips.
+
+    A resume parse returning target_roles_suggested=["Staff Engineer"] with no prior
+    user edit renders the title as a chip carrying the "suggested" class marker, and
+    the hidden target_titles textarea (the POST contract) is seeded with the value.
+    """
+    monkeypatch.setattr(
+        _PARSE_RESUME,
+        lambda p, conn=None, config=None: {
+            "skills": ["python"],
+            "target_roles_suggested": ["Staff Engineer"],
+        },
+    )
+    assert _upload_resume(client).status_code == 302
+
+    body = client.get("/onboarding/profile_edit").get_data(as_text=True)
+    assert "Staff Engineer" in body
+    assert "onb-chip-suggested" in body  # suggested visual marker
+    # Hidden textarea preserves the name="target_titles" POST contract + seeded value.
+    assert re.search(r'name="target_titles"[^>]*>Staff Engineer</textarea>', body), (
+        "hidden target_titles textarea not seeded with the suggested value"
+    )
+
+
+def test_profile_edit_user_titles_override_suggested(client, monkeypatch):
+    """Issue #398 (b): a user-entered target_titles value wins over the suggestion."""
+    monkeypatch.setattr(
+        _PARSE_RESUME,
+        lambda p, conn=None, config=None: {
+            "skills": ["python"],
+            "target_roles_suggested": ["Staff Engineer"],
+        },
+    )
+    assert _upload_resume(client).status_code == 302
+
+    # User confirms their own title — valid POST persists the profile_edit slice.
+    resp = client.post(
+        "/onboarding/profile_edit",
+        data={"target_titles": "My Own Title", "skills": "python"},
+    )
+    assert resp.status_code == 302
+
+    body = client.get("/onboarding/profile_edit").get_data(as_text=True)
+    assert "My Own Title" in body
+    assert "Staff Engineer" not in body  # suggestion does NOT override the user value
+
+
+@pytest.mark.parametrize(
+    "parsed",
+    [
+        {"skills": ["python"]},  # key absent
+        {"skills": ["python"], "target_roles_suggested": []},  # empty list
+        {"skills": ["python"], "target_roles_suggested": "not-a-list"},  # non-list
+    ],
+)
+def test_profile_edit_handles_missing_target_roles_suggested(client, monkeypatch, parsed):
+    """Issue #398 (c): absent/empty/non-list target_roles_suggested renders empty, no crash."""
+    monkeypatch.setattr(_PARSE_RESUME, lambda p, conn=None, config=None: parsed)
+    assert _upload_resume(client).status_code == 302
+
+    page = client.get("/onboarding/profile_edit")
+    assert page.status_code == 200
+    body = page.get_data(as_text=True)
+    # Empty hidden textarea — no None text, no leftover suggestion content.
+    assert '<textarea name="target_titles" class="chips-hidden hidden"></textarea>' in body
+
+
+def test_profile_edit_chip_serialization_roundtrips(client):
+    """Issue #398 (d): a POST with the hidden-textarea contents redirects and persists
+    the raw newline string that the done-step _split_lines turns into the split list."""
+    import json as _json
+
+    resp = client.post(
+        "/onboarding/profile_edit",
+        data={
+            "target_titles": "Title A\nTitle B",
+            "target_locations": "Remote",
+            "skills": "go\nrust",
+            "min_salary": "120000",
+        },
+    )
+    assert resp.status_code == 302
+    assert "/onboarding/imap_credentials" in resp.headers["Location"]
+
+    conn = sqlite3.connect(client.application.config["DB_PATH"])
+    try:
+        row = conn.execute("SELECT wizard_data FROM onboarding_state WHERE id=1").fetchone()
+    finally:
+        conn.close()
+    persisted = _json.loads(row[0])["profile_edit"]
+    assert persisted["target_titles"] == "Title A\nTitle B"
+    # Mirror the done-step _split_lines contract (blueprint.py:633-634): the persisted
+    # newline string splits into the target_titles list written to config/profile.
+    split = [ln.strip() for ln in persisted["target_titles"].splitlines() if ln.strip()]
+    assert split == ["Title A", "Title B"]
