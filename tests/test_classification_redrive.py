@@ -9,13 +9,16 @@ import pytest
 
 from scripts.redrive_classification import find_divergences, remediate
 
+# Strong, non-flat vector that derives to "apply" under the positive-evidence
+# rule (issue #210): mean 4.0, 6 strong axes. An all-3s vector would now derive
+# to "low_signal", which would defeat these apply-vs-drift fixtures.
 _APPLY_SUB_SCORES = {
-    "title_fit": 3,
-    "location_fit": 3,
-    "comp_fit": 3,
-    "domain_match": 3,
-    "seniority_match": 3,
-    "skills_match": 3,
+    "title_fit": 4,
+    "location_fit": 4,
+    "comp_fit": 4,
+    "domain_match": 4,
+    "seniority_match": 4,
+    "skills_match": 4,
 }
 
 

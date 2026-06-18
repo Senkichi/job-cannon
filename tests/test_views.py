@@ -2259,12 +2259,14 @@ def app_with_scored_jobs(tmp_db_path):
             '{"title_fit": 5, "location_fit": 5, "comp_fit": 5, "domain_match": 5, "seniority_match": 5, "skills_match": 5}',
             '{"strengths": ["Deep platform experience aligns with infra-heavy stack"], "gaps": ["No published Kubernetes operator work"], "talking_points": [], "resume_priority_skills": []}',
         ),
-        # Apply, min sum 18 (all 3s)
+        # Apply, minimum positive-evidence vector (3 strong axes, mean 3.5).
+        # All-3s would now classify low_signal (issue #210), so the min apply
+        # fixture uses a vector the rule can actually produce.
         (
             "ax|min-apply|remote",
             "Min Apply Role",
             "apply",
-            '{"title_fit": 3, "location_fit": 3, "comp_fit": 3, "domain_match": 3, "seniority_match": 3, "skills_match": 3}',
+            '{"title_fit": 4, "location_fit": 4, "comp_fit": 4, "domain_match": 3, "seniority_match": 3, "skills_match": 3}',
             '{"strengths": ["Adequate match"], "gaps": ["Borderline fit"], "talking_points": [], "resume_priority_skills": []}',
         ),
         # Consider, sum 22
@@ -3152,13 +3154,17 @@ class TestCompositeScoreCell:
         cell = html[idx : idx + 800]
         assert 'data-sort-score="18"' in cell
 
-    def test_apply_min_renders_composite_18(self, scored_client):
-        """Apply with all 3s (boundary) renders '18'."""
+    def test_apply_min_renders_composite_21(self, scored_client):
+        """Min positive-evidence apply vector {4,4,4,3,3,3} (sum 21) renders '21'.
+
+        All-3s (sum 18) is no longer an apply vector (issue #210); the minimum
+        apply row now carries sum 21.
+        """
         response = scored_client.get("/jobs")
         html = response.data.decode()
         idx = html.find('id="score-ax%7Cmin-apply%7Cremote"')
         cell = html[idx : idx + 800]
-        assert ">18<" in cell
+        assert ">21<" in cell
 
     def test_badge_text_no_longer_present(self, scored_client):
         """Old badge background classes are removed from compact-row score cells."""
@@ -3187,13 +3193,13 @@ class TestCompositeScoreCell:
         cell = html[idx : idx + 800]
         assert 'data-sort-score="30"' in cell
 
-    def test_apply_min_sort_score_is_18(self, scored_client):
-        """Composite 18 -> data-sort-score='18'."""
+    def test_apply_min_sort_score_is_21(self, scored_client):
+        """Composite 21 -> data-sort-score='21' (min positive-evidence apply)."""
         response = scored_client.get("/jobs")
         html = response.data.decode()
         idx = html.find('id="score-ax%7Cmin-apply%7Cremote"')
         cell = html[idx : idx + 800]
-        assert 'data-sort-score="18"' in cell
+        assert 'data-sort-score="21"' in cell
 
     def test_consider_sort_score_is_22(self, scored_client):
         """Composite 22 -> data-sort-score='22'."""

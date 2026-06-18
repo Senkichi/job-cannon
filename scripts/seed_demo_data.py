@@ -253,15 +253,16 @@ def _rationale(strengths: list[str], gaps: list[str]) -> dict:
 
 
 def _derive_classification(sub_scores: dict) -> str:
-    """Mirror derive_classification logic (no legitimacy_note, no low_signal path)."""
-    vals = list(sub_scores.values())
-    if any(v == 1 for v in vals):
-        return "reject"
-    if all(v >= 3 for v in vals):
-        return "apply"
-    if all(v >= 2 for v in vals):
-        return "consider"
-    return "skip"
+    """Delegate to the canonical rule so seeded labels never drift (issue #210).
+
+    Previously this re-implemented an older copy of the rule and silently fell
+    out of sync when the canonical positive-evidence / flat-neutral branches
+    landed. The seed has no legitimacy_note or enrichment context, so those
+    arguments default away — the sub-score-driven branches are what matters.
+    """
+    from job_finder.db._classification import derive_classification
+
+    return derive_classification(sub_scores, None)
 
 
 # Each entry: (dedup_key, title, company, location, description, jd_full,

@@ -65,6 +65,22 @@ def _threshold(config: dict | None) -> int:
     return int(scoring_cfg.get("low_signal_jd_chars", 1500))
 
 
+def _apply_knobs(config: dict | None) -> tuple[float, int]:
+    """Resolve (apply_mean_floor, apply_min_strong_axes) from config (issue #210)."""
+    from job_finder.db._classification import (
+        DEFAULT_APPLY_MEAN_FLOOR,
+        DEFAULT_APPLY_MIN_STRONG_AXES,
+    )
+
+    if config is None:
+        return DEFAULT_APPLY_MEAN_FLOOR, DEFAULT_APPLY_MIN_STRONG_AXES
+    scoring_cfg = config.get("scoring") or {}
+    return (
+        float(scoring_cfg.get("apply_mean_floor", DEFAULT_APPLY_MEAN_FLOOR)),
+        int(scoring_cfg.get("apply_min_strong_axes", DEFAULT_APPLY_MIN_STRONG_AXES)),
+    )
+
+
 def find_divergences(conn: sqlite3.Connection, config: dict | None = None) -> list[Divergence]:
     """Return every LLM-scored row whose stored classification != the current rule.
 
@@ -72,6 +88,7 @@ def find_divergences(conn: sqlite3.Connection, config: dict | None = None) -> li
     to reconcile).
     """
     threshold = _threshold(config)
+    apply_mean_floor, apply_min_strong_axes = _apply_knobs(config)
     out: list[Divergence] = []
     for row in conn.execute(_LLM_SCORED_SQL).fetchall():
         dedup_key, stored, sub_json, _fit, _provider, legit, tier, jd_len = row
@@ -88,6 +105,8 @@ def find_divergences(conn: sqlite3.Connection, config: dict | None = None) -> li
                 enrichment_tier=tier,
                 jd_full_length=jd_len or 0,
                 low_signal_threshold=threshold,
+                apply_mean_floor=apply_mean_floor,
+                apply_min_strong_axes=apply_min_strong_axes,
             )
         except ValueError as exc:
             _log.warning("redrive_classification: skipping malformed row %r — %s", dedup_key, exc)

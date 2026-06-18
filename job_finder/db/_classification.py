@@ -33,6 +33,18 @@ _SUB_SCORE_KEYS: tuple[str, ...] = (
 # membership tests against raw enrichment_tier strings are unchanged).
 _TERMINAL_ENRICHMENT_TIERS: frozenset[str] = frozenset(LOW_SIGNAL_TERMINAL)
 
+# Positive-evidence thresholds for the "apply" verdict (issue #210). On the 1-5
+# ordinal scale, 3 means "neutral / couldn't tell" — the *absence of weakness*,
+# not the *presence of strength*. "apply" (the strongest positive class, the one
+# the user acts on) must require affirmative fit evidence: a minimum mean AND a
+# minimum count of genuinely strong (>= 4) axes. Defaults are overridable via
+# config.scoring.apply_mean_floor / scoring.apply_min_strong_axes, threaded
+# through persist_job_assessment the same way low_signal_threshold is.
+DEFAULT_APPLY_MEAN_FLOOR: float = 3.5
+DEFAULT_APPLY_MIN_STRONG_AXES: int = 3
+# An axis is "strong" when it carries positive (not merely non-negative) signal.
+_STRONG_AXIS_FLOOR: int = 4
+
 
 @dataclass(frozen=True)
 class JobAssessment:
@@ -64,16 +76,19 @@ def derive_classification(
     enrichment_tier: str | None = None,
     jd_full_length: int = 0,
     low_signal_threshold: int = 1500,
+    apply_mean_floor: float = DEFAULT_APPLY_MEAN_FLOOR,
+    apply_min_strong_axes: int = DEFAULT_APPLY_MIN_STRONG_AXES,
 ) -> str:
     """Python-derived 5-way classification — NOT LLM-emitted (CONTEXT D-06, anti-pattern 3).
 
-    Rule precedence (per spec D-2.5, Phase 2d sub-fix 2/4):
+    Rule precedence (per spec D-2.5; positive-evidence rule per issue #210):
       1. legitimacy_note truthy            -> "reject"
       2. enrichment exhausted + short jd   -> "low_signal"
-      3. any sub-score == 1                -> "reject"
-      4. all sub-scores >= 3               -> "apply"
-      5. all sub-scores >= 2               -> "consider"
-      6. otherwise                         -> "skip"
+      3. flat-neutral vector (all == 3)    -> "low_signal"
+      4. any sub-score == 1                -> "reject"
+      5. positive evidence                 -> "apply"
+      6. all sub-scores >= 2               -> "consider"
+      7. otherwise                         -> "skip"
 
     The low_signal branch surfaces genuinely-no-signal jobs (enrichment cascade
     exhausted AND jd_full below threshold) honestly instead of rolling them
@@ -82,8 +97,27 @@ def derive_classification(
     text cannot be confidently rejected on rubric outputs (the 1 itself may be
     a hallucination from the model scoring against an empty prompt).
 
-    For integer 1-5 sub-scores, branch 6 ("skip") is effectively unreachable —
-    any value below 2 is 1, which already triggered reject at branch 3. The
+    The flat-neutral branch (3) is the issue #210 fix's branch (C): on the 1-5
+    scale 3 means "couldn't tell", so a vector that is degenerate at the neutral
+    midpoint (all six axes present AND all == 3) is a strong tell the model did
+    not discriminate. It is surfaced as low_signal honestly, independent of JD
+    length and enrichment_tier — which also covers the agentic-tier cohort that
+    the exact-string enrichment match in branch 2 misses (issue #225).
+
+    The "apply" branch (5) is issue #210's branch (B): "apply" is the strongest
+    positive class (the one the user acts on) and must require the *presence of
+    strength*, not merely the *absence of weakness*. It fires only when no axis
+    is weak (all >= 3), at least ``apply_min_strong_axes`` axes are strong
+    (>= 4), AND the mean is at least ``apply_mean_floor``. An all-3s vector
+    (mean 3.0, 0 strong axes) never reaches here — it is caught by branch 3 —
+    and near-neutral vectors like {4,3,3,3,3,3} fall through to "consider".
+
+    Partial-vector defense (couples #227): the domain guard below requires all
+    six canonical keys before any sub-score branch runs, so a vector missing an
+    axis raises ValueError rather than reaching "apply" over a partial dict.
+
+    For integer 1-5 sub-scores, branch 7 ("skip") is effectively unreachable —
+    any value below 2 is 1, which already triggered reject at branch 4. The
     branch remains for defense-in-depth against future sub-score domain changes
     (e.g., 0 added as a sentinel).
 
@@ -100,6 +134,11 @@ def derive_classification(
         low_signal_threshold: jd_full_length below this triggers low_signal
             when enrichment is exhausted. Configurable via
             scoring.low_signal_jd_chars.
+        apply_mean_floor: minimum mean across the six axes for an "apply"
+            verdict. Configurable via scoring.apply_mean_floor (default 3.5).
+        apply_min_strong_axes: minimum count of strong axes (>= 4) for an
+            "apply" verdict. Configurable via scoring.apply_min_strong_axes
+            (default 3).
 
     Returns:
         One of "reject", "low_signal", "apply", "consider", "skip".
@@ -132,10 +171,30 @@ def derive_classification(
     if _bad:
         raise ValueError(f"sub_scores values must be int in 1..5 (got {_bad})")
 
-    if any(v == 1 for v in sub_scores.values()):
+    # Branch (C): flat-neutral vector -> low_signal (issue #210). All six axes
+    # at the neutral midpoint means the model did not discriminate; surface it
+    # honestly rather than promoting it. Runs before the any-axis-1 reject and
+    # the apply branch; independent of JD length / enrichment_tier. The domain
+    # guard above guarantees all six keys are present here.
+    _values = list(sub_scores.values())
+    if all(v == 3 for v in _values):
+        return "low_signal"
+
+    if any(v == 1 for v in _values):
         return "reject"
-    if all(v >= 3 for v in sub_scores.values()):
+
+    # Branch (B): "apply" requires affirmative fit evidence (issue #210), not
+    # merely the absence of weakness. No weak axis (all >= 3), enough strong
+    # axes (>= 4), AND a mean at or above the floor.
+    _strong_axes = sum(1 for v in _values if v >= _STRONG_AXIS_FLOOR)
+    _mean = sum(_values) / len(_values)
+    if (
+        all(v >= 3 for v in _values)
+        and _strong_axes >= apply_min_strong_axes
+        and _mean >= apply_mean_floor
+    ):
         return "apply"
-    if all(v >= 2 for v in sub_scores.values()):
+
+    if all(v >= 2 for v in _values):
         return "consider"
     return "skip"

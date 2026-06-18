@@ -25,7 +25,13 @@ from __future__ import annotations
 import json
 import sqlite3
 
-from ._classification import _SUB_SCORE_KEYS, JobAssessment, derive_classification
+from ._classification import (
+    _SUB_SCORE_KEYS,
+    DEFAULT_APPLY_MEAN_FLOOR,
+    DEFAULT_APPLY_MIN_STRONG_AXES,
+    JobAssessment,
+    derive_classification,
+)
 
 
 def persist_job_assessment(
@@ -65,8 +71,10 @@ def persist_job_assessment(
         provider: Cascade-attribution string; None preserves the existing value.
         model: Model identifier (e.g., "qwen2.5:14b"); None preserves existing.
         config: Optional application config dict. When provided, reads
-            scoring.low_signal_jd_chars to set the low_signal threshold;
-            otherwise the default (1500 chars) is used.
+            scoring.low_signal_jd_chars to set the low_signal threshold and
+            scoring.apply_mean_floor / scoring.apply_min_strong_axes to set the
+            positive-evidence "apply" thresholds (issue #210); otherwise the
+            module defaults are used.
 
     Returns:
         The Python-derived ``final_classification`` string just written to the
@@ -100,9 +108,15 @@ def persist_job_assessment(
     # 1500 chars matches scoring.low_signal_jd_chars.example. None config keeps
     # backwards compatibility for tests/scripts that call directly.
     threshold = 1500
+    apply_mean_floor = DEFAULT_APPLY_MEAN_FLOOR
+    apply_min_strong_axes = DEFAULT_APPLY_MIN_STRONG_AXES
     if config is not None:
         scoring_cfg = config.get("scoring") or {}
         threshold = int(scoring_cfg.get("low_signal_jd_chars", 1500))
+        apply_mean_floor = float(scoring_cfg.get("apply_mean_floor", DEFAULT_APPLY_MEAN_FLOOR))
+        apply_min_strong_axes = int(
+            scoring_cfg.get("apply_min_strong_axes", DEFAULT_APPLY_MIN_STRONG_AXES)
+        )
 
     final_classification = derive_classification(
         assessment.sub_scores,
@@ -110,6 +124,8 @@ def persist_job_assessment(
         enrichment_tier=enrichment_tier,
         jd_full_length=jd_full_length,
         low_signal_threshold=threshold,
+        apply_mean_floor=apply_mean_floor,
+        apply_min_strong_axes=apply_min_strong_axes,
     )
 
     # Serialize sub_scores with stable key order for diff-friendliness.
