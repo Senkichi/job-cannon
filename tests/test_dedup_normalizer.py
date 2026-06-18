@@ -895,18 +895,18 @@ class TestNormalizerVersionCanary:
         "Staff DS - L5",
     ]
     # Update this hash ONLY together with a NORMALIZER_VERSION bump.
-    # Foundation hash: pins job_finder.normalizers, the AUTHORITATIVE dedup_key
-    # derivation path (Job.dedup_key / derive_dedup_key both route here).
+    # Single pinned hash for the AUTHORITATIVE dedup_key derivation path
+    # (Job.dedup_key / derive_dedup_key both route through
+    # job_finder.normalizers). The web/dedup_normalizer twin now produces the
+    # SAME hash: normalize_company delegates to the foundation copy and
+    # normalize_title is a byte-for-byte duplicate (parity-asserted), so the two
+    # copies agree over the full corpus. The former EXPECTED_WEB_HASH divergence
+    # (web copy skipped HTML decode / tag strip / leading-numeric-junk strip)
+    # was the architectural-debt-B canonical-field-ownership hole and is now
+    # closed. Cross-copy parity is asserted directly by
+    # test_foundation_and_web_copies_agree_on_company and
+    # test_foundation_and_web_copies_agree_on_boundary.
     EXPECTED_HASH = "96704e50dc764ea686aab1eed375083066e122121fe3e3d41ed763b6fb6c9f7e"
-    # Web-copy hash: the web/dedup_normalizer twin's OWN behavior over the same
-    # corpus. It differs from the foundation hash today because the web copy's
-    # normalize_company is intentionally lighter (no HTML decode / tag strip /
-    # leading-numeric-junk strip) — that pre-existing divergence is in
-    # architectural-debt-B scope (P1/P2), NOT P4.1. We pin it independently so a
-    # future web-copy edit still trips a version-bump requirement. The
-    # title-boundary cross-copy parity that dedup correctness depends on is
-    # asserted separately by test_foundation_and_web_copies_agree_on_boundary.
-    EXPECTED_WEB_HASH = "24621a1457e2c7a49cc98f5b920a9a2863d99c0bde10d1ce0ebf896899caea25"
     EXPECTED_VERSION = 2
 
     def _corpus_hash(self, normalize_company, normalize_title) -> str:
@@ -941,19 +941,46 @@ class TestNormalizerVersionCanary:
         )
 
     def test_web_copy_behavior_pinned(self):
-        """The web-layer copy's own behavior is pinned independently.
+        """The web-layer copy now hashes IDENTICALLY to the foundation copy.
 
-        Catches drift in web/dedup_normalizer.normalize_* without asserting full
-        cross-copy parity on normalize_company (which legitimately differs today
-        — see EXPECTED_WEB_HASH note).
+        normalize_company delegates to the foundation copy and normalize_title is
+        a byte-for-byte duplicate, so the web twin's corpus hash equals
+        EXPECTED_HASH. If this drifts, either a web-only edit reintroduced
+        divergence or the normalizer semantics changed -- in the latter case bump
+        NORMALIZER_VERSION and the single pinned hash.
         """
         from job_finder.web.dedup_normalizer import normalize_company, normalize_title
 
         got = self._corpus_hash(normalize_company, normalize_title)
-        assert got == self.EXPECTED_WEB_HASH, (
-            "web-layer normalizer semantics changed -- bump NORMALIZER_VERSION "
-            "(and the pinned web hash)."
+        assert got == self.EXPECTED_HASH, (
+            "web-layer normalizer semantics drifted from the foundation copy -- "
+            "the web/dedup_normalizer twin must hash identically to "
+            "job_finder.normalizers. If the change was intentional, bump "
+            "NORMALIZER_VERSION and the single pinned hash."
         )
+
+    def test_foundation_and_web_copies_agree_on_company(self):
+        """normalize_company must agree byte-for-byte across the two copies.
+
+        The web copy delegates to the foundation copy (single source of truth),
+        so this is the company analogue of
+        test_foundation_and_web_copies_agree_on_boundary. It guards the dedup
+        invariant directly: the merge engine (run_retroactive_dedup) and the
+        upsert path (Job.dedup_key) must compute the same company key for inputs
+        with HTML entities/tags, leading numeric junk, and internal whitespace —
+        the exact cases the old lighter web copy diverged on.
+        """
+        from job_finder.normalizers import normalize_company as foundation_normalize
+        from job_finder.web.dedup_normalizer import normalize_company as web_normalize
+
+        for raw in self.CORPUS_COMPANY + [
+            "<b>Acme</b> Inc.",
+            "&amp;T Corp",
+            "1. Acme Corp",
+            "Foo   Bar  Inc",
+            "Big&nbsp;Co LLC",
+        ]:
+            assert foundation_normalize(raw) == web_normalize(raw), raw
 
 
 class TestDeriveDedupKey:

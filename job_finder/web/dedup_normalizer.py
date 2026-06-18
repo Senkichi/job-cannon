@@ -37,38 +37,6 @@ ALLOWED_FK_TABLES: frozenset = frozenset(
 )
 
 # ---------------------------------------------------------------------------
-# Company suffix stripping
-# Strip common legal entity suffixes, with or without preceding comma/period.
-# Pattern: optional whitespace + optional comma + whitespace + suffix + optional period
-# ---------------------------------------------------------------------------
-
-_COMPANY_SUFFIXES = re.compile(
-    r"""
-    [,\s]+                          # optional comma then whitespace before suffix
-    (?:
-        inc\.?
-        | incorporated\.?
-        | llc\.?
-        | corp\.?
-        | corporation\.?
-        | ltd\.?
-        | limited\.?
-        | co\.?
-        | company\.?
-        | technologies\.?
-        | technology\.?
-        | tech\.?
-        | group\.?
-        | holdings?\.?
-        | services?\.?
-        | solutions?\.?
-    )
-    \s*$                            # must be at end of string
-    """,
-    re.IGNORECASE | re.VERBOSE,
-)
-
-# ---------------------------------------------------------------------------
 # Title abbreviation expansion
 # Each tuple is (compiled_pattern, replacement_string).
 # Order matters: sr. before sr (to handle period variant first).
@@ -142,10 +110,16 @@ _STATUS_PRECEDENCE = {
 def normalize_company(company: str) -> str:
     """Normalize a company name for dedup key generation.
 
-    Strips Workday/aggregator legal-entity code prefixes (e.g. "HC1316 ",
-    "1144 ", "USA016 "), then strips common legal entity suffixes and
-    lowercases. Handles variants like "Google LLC", "Intuit, Inc.", "Acme
-    Corp." all normalizing to their bare name.
+    Thin delegating wrapper around ``job_finder.normalizers.normalize_company``,
+    the single source of truth for company normalization. The web layer cannot
+    be imported by the foundation layer, but it CAN import from it, so the merge
+    engine (``run_retroactive_dedup`` / ``derive_dedup_key``) computes the exact
+    same key as ``Job.dedup_key`` and the upsert path. This eliminates the
+    pre-existing drift where the web copy skipped HTML-entity decode, HTML-tag
+    strip, leading-numeric-junk strip, and internal whitespace collapse — a
+    latent dedup-correctness hole (architectural-debt-B, canonical-field
+    ownership). See the cross-copy parity assertions in
+    tests/test_dedup_normalizer.py.
 
     Args:
         company: Raw company name string.
@@ -153,15 +127,9 @@ def normalize_company(company: str) -> str:
     Returns:
         Lowercased, prefix- and suffix-stripped company name.
     """
-    from job_finder.normalizers import strip_legal_entity_prefix
+    from job_finder.normalizers import normalize_company as _foundation_normalize_company
 
-    normalized = strip_legal_entity_prefix(company).strip().lower()
-    # Strip suffixes repeatedly (e.g., "Acme Corp. Inc." -> "acme")
-    prev = None
-    while normalized != prev:
-        prev = normalized
-        normalized = _COMPANY_SUFFIXES.sub("", normalized).strip()
-    return normalized
+    return _foundation_normalize_company(company)
 
 
 def normalize_title(title: str) -> str:
@@ -198,11 +166,12 @@ def normalize_title(title: str) -> str:
 def derive_dedup_key(company: str, title: str) -> str:
     """Derive the current-version dedup_key using the web-layer normalizers.
 
-    Web-layer twin of ``job_finder.normalizers.derive_dedup_key``. Uses this
-    module's own ``normalize_company`` / ``normalize_title`` copies (foundation
-    cannot depend on web); the parity test guarantees byte-for-byte agreement so
-    the merge engine produces the same key as ``Job.dedup_key`` and the upsert
-    path. See D-8 and ``NORMALIZER_VERSION`` in ``job_finder.normalizers``.
+    Web-layer twin of ``job_finder.normalizers.derive_dedup_key``.
+    ``normalize_company`` delegates directly to the foundation copy;
+    ``normalize_title`` is a byte-for-byte duplicate guarded by a parity test
+    (foundation cannot depend on web). Either way the merge engine produces the
+    same key as ``Job.dedup_key`` and the upsert path. See D-8 and
+    ``NORMALIZER_VERSION`` in ``job_finder.normalizers``.
 
     Args:
         company: Raw company name.
