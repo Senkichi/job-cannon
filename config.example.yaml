@@ -366,6 +366,13 @@ direct_link:
     llm_tiebreak_max_board: 40
 
 # --- Scheduler cadence (Phase 42 wizard writes this; Settings allows custom edits) ---
+# cadence_preset drives BOTH the ingestion poll AND its enrichment backfill
+# (the backfill runs one hour after each ingestion slot so freshly-ingested rows
+# get jd_full + scoring same cycle):
+#   light    → ingest 08:00            ; enrich 09:00
+#   standard → ingest 00:00/08:00/16:00; enrich 01:00/09:00/17:00
+#   heavy    → ingest every 4h         ; enrich every 4h + 1h
+# Rescheduling takes effect on app restart (no live-reschedule path).
 scheduler:
   cadence_preset: standard  # one of: light (1x/day 08:00), standard (3x/day 0/8/16), heavy (6x/day every 4h)
 
