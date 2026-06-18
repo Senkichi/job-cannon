@@ -951,6 +951,7 @@ def _seed_db(db_path: str, target: Path) -> None:
     with standalone_connection(db_path) as conn:
         _wipe_demo_rows(conn)
         _insert_jobs(conn)
+        _insert_companies(conn)
         _insert_costs(conn)
         _seed_onboarding_complete(conn)
         conn.commit()
@@ -964,6 +965,7 @@ def _wipe_demo_rows(conn: sqlite3.Connection) -> None:
     """
     conn.execute("DELETE FROM jobs")
     conn.execute("DELETE FROM scoring_costs")
+    conn.execute("DELETE FROM companies")
     conn.commit()
 
 
@@ -1108,6 +1110,72 @@ def _insert_jobs(conn: sqlite3.Connection) -> None:
             )
 
 
+# ---------------------------------------------------------------------------
+# Scan-ready demo companies — power the hero-GIF "ATS scan fills the table"
+# frame (storyboard state 1, issue #291).  Names reuse _DEMO_JOBS companies so
+# the board and the /companies/ page agree.  Each row is scan-ready: an ATS
+# platform in {greenhouse, lever, ashby}, ats_probe_status='hit', scan_enabled=1,
+# and a non-empty careers_url (column contract mirrors
+# tests/test_demo_seed.py::test_companies_are_scan_ready).
+# ---------------------------------------------------------------------------
+_DEMO_COMPANIES = [
+    # (name, ats_platform, ats_slug, careers_url, jobs_found_total)
+    ("Nexalytix", "greenhouse", "nexalytix", "https://boards.greenhouse.io/nexalytix", 12),
+    ("Vantaflow", "lever", "vantaflow", "https://jobs.lever.co/vantaflow", 8),
+    ("Quorbit", "ashby", "quorbit", "https://jobs.ashbyhq.com/quorbit", 5),
+    ("Meridian AI", "greenhouse", "meridianai", "https://boards.greenhouse.io/meridianai", 9),
+    ("Pulsar Financial", "lever", "pulsarfinancial", "https://jobs.lever.co/pulsarfinancial", 6),
+]
+
+
+def _insert_companies(conn: sqlite3.Connection) -> None:
+    """Insert a handful of scan-ready fictional companies.
+
+    Each row satisfies the scan-ready contract so the /companies/ page renders a
+    populated, scannable table for the hero-GIF recorder (storyboard state 1).
+    Uses INSERT OR REPLACE with explicit ids for re-seed idempotence (the
+    companies table has no UNIQUE(name) constraint); _wipe_demo_rows() also
+    clears the table first.
+    """
+    from job_finder.web.dedup_normalizer import normalize_company
+
+    created = _ts(2.0)  # ~2 days ago — companies discovered before the demo run
+    scanned = _ts(0.25)  # ~6 hours ago — recent successful scan
+
+    for idx, (name, ats_platform, ats_slug, careers_url, jobs_found) in enumerate(
+        _DEMO_COMPANIES, start=1
+    ):
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO companies (
+                id, name, name_raw, homepage_url, ats_platform, ats_slug,
+                ats_probe_status, ats_probe_attempted_at, scan_enabled,
+                last_scanned_at, jobs_found_total, careers_url,
+                created_at, updated_at
+            ) VALUES (
+                ?, ?, ?, ?, ?, ?,
+                'hit', ?, 1,
+                ?, ?, ?,
+                ?, ?
+            )
+            """,
+            (
+                idx,
+                normalize_company(name),
+                name,
+                f"https://{ats_slug}.example.com",
+                ats_platform,
+                ats_slug,
+                scanned,
+                scanned,
+                jobs_found,
+                careers_url,
+                created,
+                scanned,
+            ),
+        )
+
+
 def _insert_costs(conn: sqlite3.Connection) -> None:
     """Insert a few ollama-attributed cost rows summing to $0.00."""
     now = datetime.now(UTC).replace(tzinfo=None)
@@ -1174,6 +1242,7 @@ def seed(target_dir: Path) -> None:
     print(f"Seeded {job_count} jobs into {target_dir}")
     print(f"  apply={apply_count}  consider={consider_count}  other={reject_count}")
     print("  config.yaml written (all paid sources disabled)")
+    print(f"  companies: {len(_DEMO_COMPANIES)} scan-ready rows (greenhouse/lever/ashby)")
     print("  scoring_costs: 5 ollama rows @ $0.00")
     print()
     print("Boot the app with:")
