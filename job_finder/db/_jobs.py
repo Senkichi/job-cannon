@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING, Literal
 
 from job_finder.config import JD_STORAGE_MAX_CHARS
 from job_finder.json_utils import safe_json_load, to_naive_utc_iso, utc_now_iso
+from job_finder.salary_normalizer import PROVENANCE_RANK
 from job_finder.web.location_canonical import JobLocation
 from job_finder.web.location_canonical import to_json as _locations_to_json
 
@@ -55,7 +56,8 @@ JOBS_ALL_COLUMNS = (
 # needs plus salary_min/salary_max for "changed" detection (Phase 47.02).
 _UPSERT_MERGE_COLUMNS = (
     "sources, source_urls, locations_raw, description, jd_full, pipeline_status, "
-    "salary_min, salary_max, posted_date, posted_date_precision"
+    "salary_min, salary_max, salary_period, salary_currency, salary_provenance, "
+    "salary_observations, posted_date, posted_date_precision"
 )
 
 # Posted-date provenance precedence (#363). A more trustworthy incoming date
@@ -182,11 +184,130 @@ def _normalize_salary(
     return lo, hi
 
 
+# Maximum number of observations retained per row (oldest-dropped). Bounds the
+# growth of the append-only salary_observations JSON array (P1.5, D-4).
+_MAX_SALARY_OBSERVATIONS = 20
+
+
+def _provenance_rank(provenance: str | None) -> int:
+    """Trust rank for a salary provenance label (D-4).
+
+    NULL / unknown -> 0 so a legacy or unranked stored pair is overwritable by
+    any genuine writer. Higher rank wins; ats_structured(4) > jd_regex(3) >
+    llm_extract(2) > email_snippet(1) = feed_string(1). Mirrors the posted_date
+    ``_precision_rank`` design (#363).
+    """
+    return PROVENANCE_RANK.get(provenance or "", 0)
+
+
+def _observation_dedup_key(obs: dict) -> tuple:
+    """Identity tuple for observation dedup: (provenance, raw_text, min, max)."""
+    return (
+        obs.get("provenance"),
+        obs.get("raw_text"),
+        obs.get("min_value"),
+        obs.get("max_value"),
+    )
+
+
+def _merge_salary_observations(
+    stored: list[dict], incoming: list[dict]
+) -> tuple[list[dict], bool]:
+    """Append incoming observations to the stored log (D-1, D-4).
+
+    Dedupes by ``(provenance, raw_text, min_value, max_value)`` so a re-sighting
+    of the identical assertion does not grow the array; caps the result at
+    ``_MAX_SALARY_OBSERVATIONS`` entries, dropping oldest first to bound growth.
+
+    Returns ``(merged_list, changed)`` where ``changed`` is True iff the merged
+    array differs from ``stored`` (so the touch path can avoid a needless write).
+    """
+    if not incoming:
+        return list(stored), False
+    seen = {_observation_dedup_key(o) for o in stored}
+    merged = list(stored)
+    changed = False
+    for obs in incoming:
+        key = _observation_dedup_key(obs)
+        if key in seen:
+            continue
+        seen.add(key)
+        merged.append(obs)
+        changed = True
+    if len(merged) > _MAX_SALARY_OBSERVATIONS:
+        merged = merged[-_MAX_SALARY_OBSERVATIONS:]
+        changed = True
+    return merged, changed
+
+
+def _reconcile_salary_pair_for_upsert(
+    incoming_min: int | None,
+    incoming_max: int | None,
+    incoming_period: str,
+    incoming_currency: str,
+    incoming_provenance: str | None,
+    stored_min: int | None,
+    stored_max: int | None,
+    stored_period: str | None,
+    stored_currency: str | None,
+    stored_provenance: str | None,
+) -> tuple[dict[str, object | None], bool]:
+    """Trust-ranked, pair-atomic salary reconciliation for the upsert UPDATE branch (D-4).
+
+    Canonical salary is written only as a whole
+    ``(min, max, period, currency, provenance)`` tuple — never field-by-field
+    (the per-field COALESCE this replaces was a D-4 violation that stapled a min
+    and a max from different sources/units, the S2 bug). The incoming tuple wins
+    when EITHER:
+
+      * its provenance ranks ``>=`` the stored provenance (equal rank ⇒ incoming
+        replaces — latest sighting within a trust class wins, so a Greenhouse
+        re-scan with a corrected range can refresh a Greenhouse-written pair;
+        only strictly-lower-rank sources are frozen out), OR
+      * the stored pair is NULL-NULL (legacy/empty slot fills regardless of rank).
+
+    A NULL-NULL incoming pair never overwrites a stored pair (no canonical write),
+    matching the long-standing behaviour that an empty salary leaves the stored
+    one intact.
+
+    Returns ``(columns_to_write, canonical_changed)``. ``columns_to_write`` maps
+    canonical salary column names to the full tuple to SET (empty when the stored
+    tuple is kept). ``canonical_changed`` is True only when the canonical
+    ``(min, max)`` pair actually changes value (preserves touch-path semantics:
+    a same-value re-assertion is not an update).
+    """
+    incoming_empty = incoming_min is None and incoming_max is None
+    stored_empty = stored_min is None and stored_max is None
+
+    # A NULL-NULL incoming pair never clobbers a stored pair.
+    if incoming_empty:
+        return {}, False
+
+    incoming_wins = stored_empty or (
+        _provenance_rank(incoming_provenance) >= _provenance_rank(stored_provenance)
+    )
+    if not incoming_wins:
+        return {}, False
+
+    columns = {
+        "salary_min": incoming_min,
+        "salary_max": incoming_max,
+        "salary_period": incoming_period,
+        "salary_currency": incoming_currency,
+        "salary_provenance": incoming_provenance,
+    }
+    canonical_changed = (incoming_min != stored_min) or (incoming_max != stored_max)
+    return columns, canonical_changed
+
+
 def _reconcile_salary_for_write(
     sal_min: int | None,
     sal_max: int | None,
     existing_min: int | None,
     existing_max: int | None,
+    *,
+    incoming_provenance: str | None = None,
+    stored_provenance: str | None = None,
 ) -> tuple[dict[str, int | None], bool]:
     """Decide which salary columns to write so the I-02 trigger never aborts.
 
@@ -197,6 +318,13 @@ def _reconcile_salary_for_write(
     (jd_full survives via its own write; location + tier fall back). Because the
     trigger guards every write, any stored pair is already consistent — so an
     effective inversion can only originate from the incoming value.
+
+    Trust ranking (P1.5, D-4): when an ``incoming_provenance`` and
+    ``stored_provenance`` are supplied, an incoming value whose provenance ranks
+    *strictly lower* than the stored pair's is dropped wholesale — enrichment's
+    ``llm_extract`` (2) / ``jd_regex`` (3) must never overwrite an
+    ``ats_structured`` (4) pair (today it can). Equal or higher rank, or an
+    unranked stored pair (None -> 0), proceeds to the inversion policy below.
 
     Policy:
       * Both fields supplied → normalise the incoming pair (swap/drop) exactly as
@@ -211,6 +339,15 @@ def _reconcile_salary_for_write(
     """
     if sal_min is None and sal_max is None:
         return {}, False
+
+    # D-4 trust gate: a strictly-lower-rank source cannot overwrite a stored
+    # canonical pair. Only enforced when the stored pair actually has values —
+    # an empty stored slot is always fillable regardless of rank.
+    stored_has_value = existing_min is not None or existing_max is not None
+    if stored_has_value and _provenance_rank(incoming_provenance) < _provenance_rank(
+        stored_provenance
+    ):
+        return {}, True
 
     if sal_min is not None and sal_max is not None:
         norm_min, norm_max = _normalize_salary(sal_min, sal_max)
@@ -440,12 +577,46 @@ def upsert_job(
         if _jd_promote:
             canonical_changed = True
 
-        # Salary change detection (COALESCE writes new value when non-NULL)
+        # Salary: trust-ranked, pair-atomic reconciliation (P1.5, D-4). Replaces
+        # the per-field COALESCE that stapled a min from one source to a max from
+        # another (the S2 bug). The incoming (min, max, period, currency,
+        # provenance) tuple is written WHOLE only when its provenance ranks >= the
+        # stored pair's (equal rank ⇒ incoming refreshes — a Greenhouse re-scan
+        # with a corrected range wins over a prior Greenhouse pair) or the stored
+        # pair is empty. A strictly-lower-rank source is frozen out; either way the
+        # incoming observation(s) are appended to the lossless log.
         norm_salary_min, norm_salary_max = _normalize_salary(parsed.salary_min, parsed.salary_max)
-        if norm_salary_min is not None and norm_salary_min != existing["salary_min"]:
+        salary_cols, salary_canonical_changed = _reconcile_salary_pair_for_upsert(
+            norm_salary_min,
+            norm_salary_max,
+            parsed.salary_period,
+            parsed.salary_currency,
+            parsed.salary_provenance,
+            existing["salary_min"],
+            existing["salary_max"],
+            existing["salary_period"],
+            existing["salary_currency"],
+            existing["salary_provenance"],
+        )
+        if salary_canonical_changed:
             canonical_changed = True
-        if norm_salary_max is not None and norm_salary_max != existing["salary_max"]:
-            canonical_changed = True
+
+        # Observation log: append incoming observation(s) regardless of which pair
+        # won the canonical slot (evidence is never discarded, D-1). Deduped +
+        # capped inside the helper. The append alone does NOT mark canonical_changed
+        # (it is not a canonical field) — but it must still be persisted, so it
+        # piggybacks on the UPDATE that runs whenever the row is written.
+        stored_observations = safe_json_load(existing["salary_observations"], default=[])
+        if not isinstance(stored_observations, list):
+            stored_observations = []
+        merged_observations, observations_changed = _merge_salary_observations(
+            stored_observations, list(parsed.salary_observations)
+        )
+        # A genuinely-new observation is a fresh sighting of known data — it makes
+        # the write a "touched", not "unchanged", but does not re-apply the parser
+        # contract (it is not a canonical field).
+        if observations_changed:
+            source_merged = True
 
         # Posted-date precedence (#363): incoming wins only when strictly more
         # trustworthy than what's stored. Legacy rows with a date but no
@@ -470,15 +641,37 @@ def upsert_job(
             unresolved_clause = ""
             unresolved_value = ()
 
+        # Build the canonical-salary SET fragment + params from the pair-atomic
+        # reconciliation. When the incoming pair lost (or was empty), the whole
+        # tuple — min, max, period, currency, provenance — is left untouched. The
+        # observation log is written separately whenever it grew (sighting-level,
+        # not gated on the canonical write).
+        salary_set_parts: list[str] = []
+        salary_params: list[object | None] = []
+        if salary_cols:
+            salary_set_parts.append(
+                "salary_min = ?, salary_max = ?, salary_period = ?, "
+                "salary_currency = ?, salary_provenance = ?"
+            )
+            salary_params.extend(
+                [
+                    salary_cols["salary_min"],
+                    salary_cols["salary_max"],
+                    salary_cols["salary_period"],
+                    salary_cols["salary_currency"],
+                    salary_cols["salary_provenance"],
+                ]
+            )
+        if observations_changed:
+            salary_set_parts.append("salary_observations = ?")
+            salary_params.append(json.dumps(merged_observations))
+        salary_clause = ("," + ", ".join(salary_set_parts)) if salary_set_parts else ""
+
         try:
             conn.execute(
                 f"""UPDATE jobs SET
                     sources = ?, source_urls = ?, last_seen = ?,
-                    score = ?, score_breakdown = ?,
-                    salary_min = COALESCE(?, salary_min),
-                    salary_max = COALESCE(?, salary_max),
-                    salary_currency = CASE WHEN ? = 1 THEN ? ELSE salary_currency END,
-                    salary_period = CASE WHEN ? = 1 THEN ? ELSE salary_period END,
+                    score = ?, score_breakdown = ?{salary_clause},
                     description = ?,
                     locations_raw = ?,
                     location = ?,
@@ -495,15 +688,7 @@ def upsert_job(
                     now,
                     _score,
                     json.dumps(_score_breakdown),
-                    norm_salary_min,
-                    norm_salary_max,
-                    # Salary metadata follows a genuine new salary (first-seen-wins
-                    # for salary is enforced upstream; here a NULL salary leaves
-                    # currency/period untouched).
-                    1 if (norm_salary_min is not None or norm_salary_max is not None) else 0,
-                    parsed.salary_currency,
-                    1 if (norm_salary_min is not None or norm_salary_max is not None) else 0,
-                    parsed.salary_period,
+                    *salary_params,
                     merged_description,
                     json.dumps(locs_list),
                     merged_location,
@@ -580,17 +765,25 @@ def upsert_job(
         # always writes NULL; set_jd_full promotes it if the text passes.
 
         norm_salary_min, norm_salary_max = _normalize_salary(parsed.salary_min, parsed.salary_max)
+        # Seed the observation log with whatever the capture site asserted (D-1),
+        # deduped + capped via the same merge helper used on the UPDATE path so a
+        # caller that passes the same observation twice never doubles it.
+        insert_observations, _ = _merge_salary_observations([], list(parsed.salary_observations))
+        # First-seen provenance: NULL when the caller did not rank its write
+        # (legacy/unranked), so a later genuine writer can win the canonical slot.
+        insert_provenance = parsed.salary_provenance
         try:
             conn.execute(
                 """INSERT INTO jobs
                     (dedup_key, title, company, location, sources, source_urls,
                      source_id, salary_min, salary_max, salary_currency, salary_period,
+                     salary_provenance, salary_observations,
                      description,
                      first_seen, last_seen, score, score_breakdown, locations_raw,
                      jd_full, scoring_provider,
                      locations_structured, workplace_type, primary_country_code,
                      company_id, posted_date, posted_date_precision, unresolved_reasons)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     parsed.dedup_key,
                     parsed.title,
@@ -603,6 +796,8 @@ def upsert_job(
                     norm_salary_max,
                     parsed.salary_currency,
                     parsed.salary_period,
+                    insert_provenance,
+                    json.dumps(insert_observations),
                     parsed.description,
                     first_seen,
                     now,

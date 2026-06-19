@@ -1872,8 +1872,15 @@ class TestRunAtsScan:
         assert "classified_reject" in result
         assert "errors" in result
 
-    def test_run_ats_scan_salary_first_seen_wins(self, migrated_db_path):
-        """ATS salary sets salary_min/salary_max only on new jobs (first-seen wins)."""
+    def test_run_ats_scan_salary_trust_ranked_overwrite(self, migrated_db_path):
+        """P1.5 (D-4): the legacy "first-seen salary wins" suppression is DELETED.
+
+        An incoming ATS structured pair (provenance 'ats_structured', rank 4) now
+        overwrites a stored legacy/unranked pair (NULL provenance → rank 0) through
+        trust-ranked, pair-atomic reconciliation. This test previously asserted the
+        opposite (COALESCE/first-seen-wins); it is updated to the new semantics per
+        issue #381.
+        """
         from datetime import datetime
 
         from job_finder.web.ats_scanner import run_ats_scan
@@ -1902,7 +1909,8 @@ class TestRunAtsScan:
         conn.commit()
         conn.close()
 
-        # ATS scan returns different salary (should NOT overwrite existing)
+        # ATS scan returns a structured salary (ats_structured, rank 4) — it MUST
+        # now overwrite the stored legacy pair (NULL provenance, rank 0).
         lever_jobs = [
             {
                 "text": "Senior Data Scientist",
@@ -1932,12 +1940,15 @@ class TestRunAtsScan:
         conn = sqlite3.connect(migrated_db_path)
         conn.row_factory = sqlite3.Row
         row = conn.execute(
-            "SELECT salary_min, salary_max FROM jobs WHERE title = 'Senior Data Scientist'"
+            "SELECT salary_min, salary_max, salary_provenance "
+            "FROM jobs WHERE title = 'Senior Data Scientist'"
         ).fetchone()
         conn.close()
-        # The upsert_job UPDATE uses COALESCE(?, salary_min) so existing value preserved
-        assert row["salary_min"] == 180000
-        assert row["salary_max"] == 240000
+        # Trust-ranked, pair-atomic: the ats_structured pair wins over the legacy
+        # NULL-provenance stored pair, whole-tuple.
+        assert row["salary_min"] == 150000
+        assert row["salary_max"] == 200000
+        assert row["salary_provenance"] == "ats_structured"
 
 
 # ---------------------------------------------------------------------------

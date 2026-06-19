@@ -108,11 +108,13 @@ def merge_primary_posting_fields(
         return False
     row = dict(row)
 
-    # First-seen salary wins (mirrors _upsert_one_ats_api_job): only offer the
-    # posting's salary when the row has neither bound.
-    has_salary = row["salary_min"] is not None or row["salary_max"] is not None
-    salary_min = None if has_salary else posting.get("salary_min")
-    salary_max = None if has_salary else posting.get("salary_max")
+    # P1.5 (D-4): the mirrored "first-seen salary wins" suppression is DELETED.
+    # The primary posting is a strict-matched ATS source (provenance
+    # 'ats_structured', rank 4); trust-ranked reconciliation in upsert_job now
+    # decides whether its pair overwrites the stored one. Offer the posting's
+    # salary unconditionally and let the reconciler rank it.
+    salary_min = posting.get("salary_min")
+    salary_max = posting.get("salary_max")
 
     # posted_date: offered unconditionally as 'exact' (#363) — the upsert's
     # precision precedence decides; an ATS first-posted timestamp may correct
@@ -123,8 +125,32 @@ def merge_primary_posting_fields(
     source_label = posting.get("company_source")
 
     try:
+        from dataclasses import asdict
+
         from job_finder.db import upsert_job
         from job_finder.parsed_job import ParsedJob
+        from job_finder.salary_normalizer import SalaryObservation
+
+        # P1.5 (D-1/D-4): a strict-matched primary posting is an ATS structured
+        # source. Tag provenance + seed the lossless observation log when it
+        # carries a pay range so the reconciler can rank it (rank 4) and the
+        # evidence survives a later quarantine/overwrite.
+        salary_provenance: str | None = None
+        salary_observations: list[dict] = []
+        if salary_min is not None or salary_max is not None:
+            salary_provenance = "ats_structured"
+            salary_observations = [
+                asdict(
+                    SalaryObservation(
+                        min_value=salary_min,
+                        max_value=salary_max,
+                        period=posting.get("salary_period") or "unknown",
+                        currency=posting.get("salary_currency") or "USD",
+                        provenance="ats_structured",
+                        raw_text=posting.get("comp_json") or posting.get("salary_raw"),
+                    )
+                )
+            ]
 
         parsed = ParsedJob(
             title=row["title"],
@@ -140,6 +166,8 @@ def merge_primary_posting_fields(
             salary_max=salary_max,
             salary_currency=posting.get("salary_currency") or "USD",
             salary_period=posting.get("salary_period") or "unknown",
+            salary_provenance=salary_provenance,
+            salary_observations=salary_observations,
             description=posting.get("description") or None,
             posted_date=posted_date,
             posted_date_precision="exact" if posted_date else None,

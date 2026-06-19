@@ -228,6 +228,14 @@ class ParsedJob:
     salary_max: int | None = None
     salary_currency: str = "USD"
     salary_period: str = "unknown"
+    # Trust-ranked reconciliation metadata (P1.5, D-4). ``salary_provenance`` is
+    # the writer class (PROVENANCE_RANK key: ats_structured/jd_regex/llm_extract/
+    # email_snippet/feed_string) that produced this pair; None for legacy/unranked
+    # callers (treated as rank 0 by the reconciler so anything can overwrite).
+    # ``salary_observations`` is the lossless append-log of what each source
+    # asserted (D-1); upsert_job appends incoming observations to the stored array.
+    salary_provenance: str | None = None
+    salary_observations: list[dict] = field(default_factory=list)
 
     # ── Content ─────────────────────────────────────────────────────────────
     description: str | None = None
@@ -406,6 +414,17 @@ class ParsedJob:
             # for direct ParsedJob construction paths.
             "salary_currency": sm.get("salary_currency", job.salary_currency),
             "salary_period": sm.get("salary_period", job.salary_period),
+            # Trust-ranked reconciliation metadata (P1.5, D-4). Capture sites that
+            # know their writer class set source_meta['salary_provenance'] (e.g.
+            # ATS scanners -> 'ats_structured'); absent it stays None (unranked).
+            # 'salary_observation' (singular) is the single lossless observation a
+            # capture site built for this sighting; we seed the append-log with it.
+            "salary_provenance": sm.get("salary_provenance"),
+            "salary_observations": (
+                [sm["salary_observation"]]
+                if sm.get("salary_observation")
+                else list(sm.get("salary_observations", []))
+            ),
             "description": job.description,
             "jd_full": clean_jd_full,
             "posted_date": job.posted_date,
@@ -464,6 +483,8 @@ class UnresolvedParsedJob:
     salary_max: int | None = None
     salary_currency: str = "USD"
     salary_period: str = "unknown"
+    salary_provenance: str | None = None
+    salary_observations: list[dict] = field(default_factory=list)
 
     # ── Content ─────────────────────────────────────────────────────────────
     description: str | None = None

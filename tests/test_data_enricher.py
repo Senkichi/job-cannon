@@ -186,6 +186,11 @@ def temp_db():
             jd_full TEXT DEFAULT NULL,
             salary_min INTEGER DEFAULT NULL,
             salary_max INTEGER DEFAULT NULL,
+            -- P1.5 (m104): trust-ranked reconciliation metadata the _persist
+            -- salary path now reads (salary_provenance) and appends to
+            -- (salary_observations).
+            salary_provenance TEXT DEFAULT NULL,
+            salary_observations TEXT NOT NULL DEFAULT '[]',
             source_urls TEXT DEFAULT '[]',
             company_id INTEGER DEFAULT NULL,
             enrichment_tier TEXT DEFAULT NULL,
