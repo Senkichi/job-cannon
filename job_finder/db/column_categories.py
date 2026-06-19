@@ -48,6 +48,8 @@ COLUMN_CATEGORIES: dict[str, str] = {
     "salary_max": "parser",
     "salary_currency": "parser",  # NEW in Phase 49 m080
     "salary_period": "parser",  # NEW in Phase 49 m080
+    "salary_provenance": "parser",  # NEW in P1.5 m106 — trust-rank of the salary writer (D-4)
+    "salary_observations": "parser",  # NEW in P1.5 m106 — lossless salary observation log (D-1)
     "description": "parser",
     "jd_full": "parser",
     "description_reformatted": "parser",  # arguably system (reformatter)

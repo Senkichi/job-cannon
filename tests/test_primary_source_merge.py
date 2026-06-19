@@ -84,15 +84,23 @@ def test_merge_fills_salary_url_source_and_metadata(tmp_path):
     conn.close()
 
 
-def test_merge_first_seen_salary_wins(tmp_path):
+def test_merge_salary_trust_ranked_overwrite(tmp_path):
+    """P1.5 (D-4): the mirrored "first-seen salary wins" suppression is DELETED.
+
+    The primary posting is a strict-matched ATS source (provenance
+    'ats_structured', rank 4); it now overwrites a stored legacy/unranked pair
+    (NULL provenance → rank 0) through trust-ranked, pair-atomic reconciliation.
+    Previously asserted the opposite; updated per issue #381.
+    """
     conn = _migrated_db(tmp_path)
     key = _seed(conn, salary_min=120000, salary_max=140000)
 
     merge_primary_posting_fields(conn, {"dedup_key": key}, _posting())
 
     row = _row(conn, key)
-    assert row["salary_min"] == 120000
-    assert row["salary_max"] == 140000
+    assert row["salary_min"] == 150000
+    assert row["salary_max"] == 190000
+    assert row["salary_provenance"] == "ats_structured"
     conn.close()
 
 
