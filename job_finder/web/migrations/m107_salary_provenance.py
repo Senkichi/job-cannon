@@ -1,4 +1,4 @@
-"""Migration 106 — salary_provenance + salary_observations columns + heal (P1.5, D-4/D-12).
+"""Migration 107 — salary_provenance + salary_observations columns + heal (P1.5, D-4/D-12).
 
 Data Integrity Overhaul Phase 1 (tracking issue #393) replaces the lossy,
 last-writer-wins handling of salary with a capture -> normalize -> reconcile
@@ -49,9 +49,9 @@ NULL), so subsequent runs are no-ops. No-op when the ``jobs`` table is absent.
 
 Migration number note: the plan text allocated m097, but m097-m105 were taken by
 other cohorts that landed first; the live DB and all deployed installs are already
-at user_version=105, so a migration numbered <=105 would be silently skipped
+at user_version=106, so a migration numbered <=106 would be silently skipped
 forever (the runner applies only ``m.version > current_version``). Allocated the
-next free number, 106, per the plan's "take the next free numbers" instruction.
+next free number, 107, per the plan's "take the next free numbers" instruction.
 """
 
 from __future__ import annotations
@@ -187,7 +187,7 @@ def _heal(ctx: MigrationContext) -> None:
         conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name = 'jobs'").fetchone()
         is None
     ):
-        logger.info("m106: jobs table not present, no-op")
+        logger.info("m107: jobs table not present, no-op")
         return
 
     candidates = conn.execute(
@@ -253,7 +253,7 @@ def _heal(ctx: MigrationContext) -> None:
             quarantined += 1
 
     logger.info(
-        "m106: healed %d salary row(s) of %d corrupt candidate(s) "
+        "m107: healed %d salary row(s) of %d corrupt candidate(s) "
         "(%d salvaged in-bounds, %d quarantined to /admin/review)",
         salvaged + quarantined,
         len(candidates),
@@ -263,7 +263,7 @@ def _heal(ctx: MigrationContext) -> None:
 
 
 MIGRATION = Migration(
-    version=106,
+    version=107,
     description=(
         "salary_provenance + salary_observations columns + heal corrupt salary rows "
         "from retained evidence (P1.5 trust-ranked reconciliation, D-4/D-12)"

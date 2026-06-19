@@ -13,11 +13,11 @@ Covers the reconciliation contract added in P1.5 (issue #381):
   * legacy NULL-provenance rows are overwritable by anything
   * observations accumulate across sightings; the touch path appends no duplicate
   * implausible value → quarantine (canonical NULL + unresolved_reasons + retained
-    observation) via the m106 heal
+    observation) via the m107 heal
   * ParsedJob plumbing round-trip (source_meta → ParsedJob → DB → observation log)
 
 Uses the session-scoped migrated-DB template (conftest `migrated_db`) so every
-test runs against the real, fully-migrated schema (m106 columns present).
+test runs against the real, fully-migrated schema (m107 columns present).
 """
 
 from __future__ import annotations
@@ -568,11 +568,11 @@ class TestParsedJobPlumbing:
 
 
 # ---------------------------------------------------------------------------
-# m106 heal — salvage + quarantine on seeded corrupt rows
+# m107 heal — salvage + quarantine on seeded corrupt rows
 # ---------------------------------------------------------------------------
 
 
-class TestM106Heal:
+class TestM107Heal:
     def _seed_corrupt(
         self,
         conn: sqlite3.Connection,
@@ -595,7 +595,7 @@ class TestM106Heal:
         conn.commit()
 
     def test_greenhouse_cents_salvaged(self, migrated_db):
-        from job_finder.web.migrations.m106_salary_provenance import _heal
+        from job_finder.web.migrations.m107_salary_provenance import _heal
         from job_finder.web.migrations.types import MigrationContext
 
         db_path, conn = migrated_db
@@ -616,7 +616,7 @@ class TestM106Heal:
         assert len(json.loads(row["salary_observations"])) == 1
 
     def test_subfloor_min_quarantined(self, migrated_db):
-        from job_finder.web.migrations.m106_salary_provenance import (
+        from job_finder.web.migrations.m107_salary_provenance import (
             _SALARY_IMPLAUSIBLE_REASON,
             _heal,
         )
@@ -636,7 +636,7 @@ class TestM106Heal:
         assert len(json.loads(row["salary_observations"])) == 1
 
     def test_heal_idempotent(self, migrated_db):
-        from job_finder.web.migrations.m106_salary_provenance import _heal
+        from job_finder.web.migrations.m107_salary_provenance import _heal
         from job_finder.web.migrations.types import MigrationContext
 
         db_path, conn = migrated_db
@@ -653,7 +653,7 @@ class TestM106Heal:
         )
 
     def test_exit_criterion_no_oob_after_heal(self, migrated_db):
-        from job_finder.web.migrations.m106_salary_provenance import _heal
+        from job_finder.web.migrations.m107_salary_provenance import _heal
         from job_finder.web.migrations.types import MigrationContext
 
         db_path, conn = migrated_db
