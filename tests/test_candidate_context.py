@@ -23,8 +23,9 @@ def _profile(positions=None, skills=None, education=None):
 def test_returns_str_with_targeting_section():
     config = _config(
         {
+            "work_arrangement": "hybrid",
             "target_titles": ["Lead Product Analyst", "Staff Data Scientist"],
-            "target_locations": ["Remote", "San Francisco"],
+            "target_locations": ["San Francisco"],
             "min_salary": 150000,
             "industries": ["Healthcare", "SaaS"],
             "exclusions": {"companies": ["Intuit"], "title_keywords": []},
@@ -35,7 +36,8 @@ def test_returns_str_with_targeting_section():
     assert isinstance(out, str)
     assert "Lead Product Analyst" in out
     assert "Staff Data Scientist" in out
-    assert "Remote" in out and "San Francisco" in out
+    assert "Work arrangement: hybrid" in out
+    assert "San Francisco" in out
     assert "150,000" in out or "150000" in out
     assert "Healthcare" in out and "SaaS" in out
 
@@ -89,8 +91,9 @@ def test_token_budget_under_600():
     """Approximate guard: profile injection should stay under ~600 tokens."""
     config = _config(
         {
+            "work_arrangement": "remote",
             "target_titles": [f"Title {i}" for i in range(20)],
-            "target_locations": ["Remote", "SF", "NY"],
+            "target_locations": ["SF", "NY"],
             "min_salary": 150000,
             "industries": ["Healthcare", "SaaS", "FinTech"],
             "exclusions": {"companies": [], "title_keywords": []},

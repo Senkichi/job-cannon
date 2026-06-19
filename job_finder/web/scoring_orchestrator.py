@@ -202,8 +202,16 @@ def _apply_location_fit_override(
     primary_country_code = row[2]
 
     cfg_profile = config.get("profile") or {}
-    target_locations: list[str] = cfg_profile.get("target_locations") or []
+    target_locations: list[str] = list(cfg_profile.get("target_locations") or [])
     home_country: str | None = cfg_profile.get("home_country") or None
+    work_arrangement: str | None = cfg_profile.get("work_arrangement") or None
+    # When the candidate targets remote work, synthesize the "remote" sentinel so
+    # compute_location_fit's Row 1/2 remote-eligibility checks still fire correctly.
+    # This is a call-site adaptation: the rule table in compute_location_fit is unchanged.
+    if work_arrangement == "remote" and not any(
+        (t or "").strip().lower() == "remote" for t in target_locations
+    ):
+        target_locations = ["remote"] + target_locations
 
     verdict = compute_location_fit(
         locations_structured=locations_structured,
@@ -382,6 +390,7 @@ def build_candidate_context(config: dict, profile: dict) -> str:
     # Targeting block
     target_titles = cfg_profile.get("target_titles") or []
     target_locations = cfg_profile.get("target_locations") or []
+    work_arrangement = cfg_profile.get("work_arrangement") or "remote"
     min_salary = cfg_profile.get("min_salary")
     industries = cfg_profile.get("industries") or []
     exclusions = cfg_profile.get("exclusions") or {}
@@ -399,15 +408,15 @@ def build_candidate_context(config: dict, profile: dict) -> str:
             "Data Scientist' for 'Senior Data Scientist' — count as title matches "
             "and should score title_fit >= 4. Score 5 only for exact-or-stronger matches.)"
         )
+    parts.append(f"- Work arrangement: {work_arrangement}")
     parts.append(
         f"- Target locations: {', '.join(target_locations) if target_locations else 'Not specified'}"
     )
     if target_locations:
         parts.append(
-            "  (A JD location is a match if it appears in this list, OR if it is "
-            "fully remote when 'Remote' is in the list. On-site/hybrid in a "
-            "listed geography is a match — geography membership overrides on-site "
-            "penalty for location_fit.)"
+            "  (A JD location is a match if it appears in this list. "
+            "On-site/hybrid in a listed geography is a match — geography membership "
+            "overrides on-site penalty for location_fit.)"
         )
     parts.append(
         f"- Compensation floor: ${min_salary:,}"

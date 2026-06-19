@@ -32,7 +32,21 @@
     </div>
   </div>
   <div>
+    <label class="block text-sm text-slate-200 mb-1">Work arrangement</label>
+    <div class="flex gap-3">
+      {% for opt in [('remote', 'Remote'), ('hybrid', 'Hybrid'), ('on-site', 'On-site')] %}
+      <label class="flex items-center gap-1.5 cursor-pointer">
+        <input type="radio" name="work_arrangement" value="{{ opt[0] }}"
+               {% if (work_arrangement | default('remote')) == opt[0] %}checked{% endif %}
+               class="accent-indigo-500">
+        <span class="text-sm text-slate-200">{{ opt[1] }}</span>
+      </label>
+      {% endfor %}
+    </div>
+  </div>
+  <div>
     <label class="block text-sm text-slate-200 mb-1">Target locations (one per line)</label>
+    <p class="text-xs text-slate-400 mb-2">Cities, regions, or countries you're open to (e.g. "San Francisco, CA"). Leave blank = no location preference (open to any geography for the chosen arrangement). Do not add "Remote" here — use the toggle above.</p>
     <textarea name="target_locations" rows="3" class="w-full bg-slate-900 border border-slate-700 rounded px-3 py-2 text-slate-100">{{ target_locations | default('') }}</textarea>
   </div>
   <div>

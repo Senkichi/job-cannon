@@ -7,9 +7,15 @@ profile:
   target_titles:
     - Data Scientist
     - Senior Data Scientist
-  # Preferred work locations (use "Remote" for remote jobs)
-  target_locations:
-    - Remote
+  # Work arrangement preference: remote | hybrid | on-site
+  work_arrangement: remote
+  # Geography list (cities, regions, countries). Leave empty = no location preference
+  # (open to any geography for the chosen arrangement). Do not add "Remote" here.
+  target_locations: []
+  # Example with specific geographies:
+  # target_locations:
+  #   - San Francisco, CA
+  #   - New York, NY
   # ISO 3166-1 alpha-2 country code for your home country (e.g. "US", "GB").
   # Used by the deterministic location_fit override (P3.1) to evaluate remote
   # eligibility and on-site proximity. Optional — when absent, location_fit
