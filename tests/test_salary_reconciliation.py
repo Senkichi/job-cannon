@@ -584,6 +584,11 @@ class TestM107Heal:
     ) -> None:
         # Direct INSERT to plant a corrupt row the live path would never write
         # (mimics a legacy row). I-01/I-02 triggers tolerate these magnitudes.
+        # The m109 I-16 ceiling tripwire (auto-applied to migrated_db) would reject
+        # a > $5M seed, so drop it first to reproduce the pre-m109 dirty-DB state
+        # these m107 heal tests exercise.
+        conn.execute("DROP TRIGGER IF EXISTS tg_jobs_salary_max_ceiling_ins")
+        conn.execute("DROP TRIGGER IF EXISTS tg_jobs_salary_max_ceiling_upd")
         conn.execute(
             "INSERT INTO jobs (dedup_key, title, company, location, salary_min, "
             "salary_max, comp_data_json, scoring_provider, salary_observations, "
