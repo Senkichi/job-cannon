@@ -252,6 +252,32 @@ def probe_single_company(
                 except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
                     _handle_scan_error(conn, company_id, company_name, str(e), now)
                     return {"status": "error", "detail": str(e)}
+            elif platform == "icims":
+                # iCIMS is JS-rendered with no public API (issue #454) —
+                # delegate to the requests-light existence probe. A 'hit' here
+                # only confirms the board is live; the Playwright scanner phase
+                # (run_ats_scan) does the actual job extraction.
+                try:
+                    if _probe_icims(slug):
+                        conn.execute(
+                            "UPDATE companies SET ats_probe_status = 'hit' WHERE id = ?",
+                            (company_id,),
+                        )
+                        _reset_retry_state(conn, company_id, now)
+                        logger.info("probe_single_company: %s -> hit (icims)", company_name)
+                        return {"status": "hit", "jobs_found": 0}
+                    conn.execute(
+                        """UPDATE companies
+                           SET ats_probe_status = 'miss',
+                               miss_reason = 'platform_slug_404'
+                           WHERE id = ?""",
+                        (company_id,),
+                    )
+                    conn.commit()
+                    return {"status": "miss"}
+                except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
+                    _handle_scan_error(conn, company_id, company_name, str(e), now)
+                    return {"status": "error", "detail": str(e)}
             else:
                 # B4: platform value is set but not one we know how to probe —
                 # ATS catalog drift (probably the company's platform was
@@ -507,6 +533,38 @@ def _probe_workday(slug: str) -> bool:
     except Exception as e:
         logger.debug("_probe_workday('%s') failed: %s", slug, e)
         return False
+
+
+def _probe_icims(slug: str) -> bool:
+    """Return True if slug resolves to a live iCIMS career portal.
+
+    iCIMS boards are 100% JS-rendered with no public unauthenticated JSON API
+    (issue #454), so the probe only confirms the board *exists*: an HTTP GET
+    of the portal's ``/jobs/search`` page returning 200 with an iCIMS marker
+    in the body. The full JS render + job extraction is the Playwright
+    scanner's job (``ats_platforms/_platforms_icims.py``) — keeping the probe
+    requests-light avoids paying a browser launch just to confirm liveness.
+
+    Tries the ``careers-`` host first, then ``jobs-`` (both prefixes are in
+    active use across tenants). ``allow_redirects=True`` so tenants whose
+    portal redirects to a branded subpath still register as live.
+
+    Args:
+        slug: iCIMS tenant subdomain (e.g. 'acme' for careers-acme.icims.com).
+
+    Returns:
+        True if the slug resolves to a live iCIMS portal.
+    """
+    for prefix in ("careers", "jobs"):
+        url = f"https://{prefix}-{slug}.icims.com/jobs/search"
+        try:
+            r = requests.get(url, timeout=_PROBE_TIMEOUT, allow_redirects=True)
+        except Exception as e:
+            logger.debug("_probe_icims('%s', prefix=%s) failed: %s", slug, prefix, e)
+            continue
+        if r.status_code == 200 and "icims" in r.text.lower():
+            return True
+    return False
 
 
 def _probe_smartrecruiters(slug: str) -> bool:

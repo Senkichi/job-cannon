@@ -64,6 +64,11 @@ from job_finder.web.ats_platforms._platforms_workday import SCANNER as _WORKDAY_
 from job_finder.web.ats_platforms._registry import PlatformScanner, run_platform_scan
 from job_finder.web.ats_prober import _handle_scan_error, _is_transient_error
 from job_finder.web.ats_scanner._run_html import _run_html_fallback_scan
+from job_finder.web.ats_scanner._run_playwright import (
+    _run_playwright_scan,
+    count_playwright_eligible,
+    playwright_platform_exclusion_clause,
+)
 from job_finder.web.db_helpers import standalone_connection
 from job_finder.web.description_formatter import strip_html_to_text
 
@@ -183,6 +188,7 @@ def _count_phase_a_eligible(conn: sqlite3.Connection, threshold: int) -> int:
                (ats_probe_status = 'error' AND scan_enabled = 1
                 AND (retry_after IS NULL OR retry_after < datetime('now')))
            )
+           AND {playwright_platform_exclusion_clause()}
            AND {_high_score_history_clause()}""",
         (threshold,),
     ).fetchone()
@@ -308,15 +314,33 @@ def run_ats_scan(
             # Phase D aren't per-company iterations and don't tick the tracker.
             # The route's initial _scannable_count is a Phase-A-only estimate;
             # the first callback invocation corrects total on the session row.
-            total_companies = _count_phase_a_eligible(
-                conn, high_score_threshold
-            ) + _count_phase_c_eligible(conn, high_score_threshold)
+            total_companies = (
+                _count_phase_a_eligible(conn, high_score_threshold)
+                + count_playwright_eligible(conn, high_score_threshold)
+                + _count_phase_c_eligible(conn, high_score_threshold)
+            )
             tracker = _ProgressTracker(progress_callback, total_companies)
 
             # Phase A — ATS-API scan for confirmed-hit + retry-eligible-error companies.
             _run_ats_api_scan(
                 conn,
                 db_path,
+                target_titles,
+                title_exclusions,
+                summary,
+                all_new_job_keys,
+                high_score_threshold,
+                tracker,
+            )
+
+            # Phase A2 — Playwright-class scan (iCIMS): JS-rendered, no-API boards.
+            # Batched under a single sync_playwright() lifecycle. Runs after the
+            # requests-API phase and before homepage discovery; new jobs feed the
+            # shared Phase D scoring loop via all_new_job_keys.
+            _run_playwright_scan(
+                conn,
+                db_path,
+                config,
                 target_titles,
                 title_exclusions,
                 summary,
@@ -385,6 +409,10 @@ def _run_ats_api_scan(
     # for retry (past their retry_after backoff window). Gated by the
     # high-score-history clause so companies that have only ever produced
     # low-scoring jobs are skipped (bootstrap exception for never-scored).
+    # Exclude Playwright-class platforms (iCIMS): they have no requests-only
+    # API and are handled by the dedicated Playwright phase. Without this they
+    # would fall through to _scan_one_company_via_ats_api's "Unknown ATS
+    # platform" warning path.
     companies = conn.execute(
         f"""SELECT id, name_raw, ats_platform, ats_slug
            FROM companies
@@ -394,6 +422,7 @@ def _run_ats_api_scan(
                (ats_probe_status = 'error' AND scan_enabled = 1
                 AND (retry_after IS NULL OR retry_after < datetime('now')))
            )
+           AND {playwright_platform_exclusion_clause()}
            AND {_high_score_history_clause()}""",
         (high_score_threshold,),
     ).fetchall()
