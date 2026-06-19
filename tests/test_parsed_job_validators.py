@@ -512,3 +512,129 @@ class TestImportAndConstruction:
         with _clean_patches():
             result = ParsedJob.from_job(job)
         assert result.source_id == "job-abc-123"
+
+
+# ---------------------------------------------------------------------------
+# I-15 — salary_implausible quarantine (P1.6, D-3/D-9)
+# ---------------------------------------------------------------------------
+
+
+def _implausible_obs(min_value: float | None = 46.0, max_value: float | None = None) -> dict:
+    """A capture-site observation dict whose salvage verdict is 'implausible'."""
+    return {
+        "min_value": min_value,
+        "max_value": max_value,
+        "period": "unknown",
+        "currency": "USD",
+        "provenance": "feed_string",
+        "raw_text": "$46",
+        "resolution": "implausible",
+    }
+
+
+class TestI15SalaryImplausible:
+    """from_job routing for the salary_implausible quarantine reason."""
+
+    def test_implausible_obs_with_null_pair_tags_quarantine(self):
+        """Implausible observation + NULL canonical pair → salary_implausible."""
+        job = _make_job()  # salary_min / salary_max default None
+        with _clean_patches():
+            result = ParsedJob.from_job(
+                job, source_meta={"salary_observation": _implausible_obs()}
+            )
+        assert isinstance(result, UnresolvedParsedJob)
+        assert "salary_implausible" in result.unresolved_reasons
+
+    def test_evidence_retained_on_the_observation_log(self):
+        """The quarantined observation survives on salary_observations (D-1/D-12)."""
+        job = _make_job()
+        with _clean_patches():
+            result = ParsedJob.from_job(
+                job, source_meta={"salary_observation": _implausible_obs()}
+            )
+        assert len(result.salary_observations) == 1
+        assert result.salary_observations[0]["resolution"] == "implausible"
+        assert result.salary_min is None and result.salary_max is None
+
+    def test_plural_observations_list_is_inspected(self):
+        """An implausible entry in the plural salary_observations list also fires."""
+        job = _make_job()
+        with _clean_patches():
+            result = ParsedJob.from_job(
+                job, source_meta={"salary_observations": [_implausible_obs()]}
+            )
+        assert isinstance(result, UnresolvedParsedJob)
+        assert "salary_implausible" in result.unresolved_reasons
+
+    def test_resolved_salary_does_not_tag(self):
+        """A resolved ('ok') observation with a canonical pair is not quarantined."""
+        job = _make_job()
+        job.salary_min = 120_000
+        job.salary_max = 150_000
+        ok_obs = {**_implausible_obs(120_000, 150_000), "resolution": "ok"}
+        with _clean_patches():
+            result = ParsedJob.from_job(job, source_meta={"salary_observation": ok_obs})
+        assert isinstance(result, ParsedJob)
+        assert "salary_implausible" not in result.unresolved_reasons
+
+    def test_no_observation_does_not_tag(self):
+        """A row with no salary observation is never quarantined for salary."""
+        job = _make_job()
+        with _clean_patches():
+            result = ParsedJob.from_job(job)
+        assert isinstance(result, ParsedJob)
+        assert "salary_implausible" not in result.unresolved_reasons
+
+    def test_canonical_pair_present_suppresses_tag(self):
+        """The gate is canonical-NULL: a present pair is never quarantined even if a
+        stale observation still reads 'implausible'."""
+        job = _make_job()
+        job.salary_min = 130_000  # capture site DID resolve a value this sighting
+        job.salary_max = 160_000
+        with _clean_patches():
+            result = ParsedJob.from_job(
+                job, source_meta={"salary_observation": _implausible_obs()}
+            )
+        assert isinstance(result, ParsedJob)
+        assert "salary_implausible" not in result.unresolved_reasons
+
+    def test_accumulates_with_other_reasons(self):
+        """salary_implausible accumulates alongside an unrelated reason (jd_full_junk)."""
+        job = _make_job()
+        junk_jd = "Sign in to view this posting. " + "x" * 300
+        with _clean_patches():
+            result = ParsedJob.from_job(
+                job,
+                source_meta={
+                    "salary_observation": _implausible_obs(),
+                    "jd_full": junk_jd,
+                },
+            )
+        assert isinstance(result, UnresolvedParsedJob)
+        assert "salary_implausible" in result.unresolved_reasons
+        assert "jd_full_junk" in result.unresolved_reasons
+
+    def test_real_capture_path_via_salary_capture_fields(self):
+        """End-to-end: a feed source's implausible value, plumbed through the real
+        salary_capture_fields helper, is quarantined by from_job (capture→detect)."""
+        from job_finder.salary_normalizer import SalaryObservation, salary_capture_fields
+
+        obs = SalaryObservation(
+            min_value=46.0, max_value=None, period="unknown", provenance="feed_string"
+        )
+        fields = salary_capture_fields(obs)  # implausible → no salary_min, obs retained
+        assert "salary_min" not in fields  # capture left the canonical pair NULL
+        job = Job(
+            title="Data Scientist",
+            company="Acme Corp",
+            location="Remote",
+            source="portal_jooble",
+            source_url="https://example.com/ds",
+            source_id="",
+            **fields,
+        )
+        with _clean_patches():
+            result = ParsedJob.from_job(job)
+        assert isinstance(result, UnresolvedParsedJob)
+        assert "salary_implausible" in result.unresolved_reasons
+        assert result.salary_observations[0]["resolution"] == "implausible"
