@@ -103,6 +103,143 @@ def run_enrichment_backfill_two_stage(
     return result
 
 
+def _derive_degraded_keys(issues: list[str], degraded_sources: list[str]) -> set[str]:
+    """Map the heartbeat's free-text ``issues`` + degraded sources to stable keys.
+
+    The verdict strings are generated in ``run_health_check`` itself, so prefix
+    matching against the known signal shapes is stable. Returns a *new* set
+    (no mutation of inputs):
+
+      - ``ingestion``  <- "No ingestion in last 14h"
+      - ``staleness``  <- "Stale detection missed last night"
+      - ``oauth``      <- "OAuth token invalid: ..."
+      - ``db``         <- "Health check DB error: ..."
+      - ``source:<name>`` <- signal-3 "<action>: <n> failures in 24h" rows and
+        every ``source_health.status='degraded'`` source (C2-4).
+    """
+    keys: set[str] = set()
+    for issue in issues:
+        if issue.startswith("No ingestion"):
+            keys.add("ingestion")
+        elif issue.startswith("Stale detection missed"):
+            keys.add("staleness")
+        elif issue.startswith("OAuth token invalid"):
+            keys.add("oauth")
+        elif issue.startswith("Health check DB error"):
+            keys.add("db")
+        else:
+            # signal 3: "<action>: <cnt> failures in 24h"
+            action = issue.split(":", 1)[0].strip()
+            if action:
+                keys.add(f"source:{action}")
+    for source in degraded_sources:
+        keys.add(f"source:{source}")
+    return keys
+
+
+def _fire_escalation(escalated: list[dict], issues: list[str], config: dict) -> None:
+    """Best-effort egress for sustained-degradation escalations (C2-5, #438/#440).
+
+    Lazily imports the notification façade so this call site lands independently
+    of the egress transport; an unavailable egress logs and returns. Never
+    raises — a dead egress must not break the heartbeat's best-effort contract.
+
+    ``escalated`` is a list of ``{"signal_key", "consecutive_degraded"}`` dicts.
+    """
+    try:
+        from job_finder.web.notifications import notify
+    except Exception:
+        logger.warning("escalation egress unavailable (notifications import failed)")
+        return
+
+    keys = ", ".join(e["signal_key"] for e in escalated)
+    title = f"Job Cannon: sustained health degradation ({keys})"
+    streaks = "; ".join(
+        f"{e['signal_key']} ({e['consecutive_degraded']} consecutive checks)" for e in escalated
+    )
+    body = "Signals degraded past the escalation threshold: " + streaks
+    if issues:
+        body += "\n\nIssues:\n" + "\n".join(f"- {i}" for i in issues)
+
+    try:
+        notify(title, body, severity="critical", config=config)
+    except Exception:
+        logger.exception("escalation egress failed")
+
+
+def _escalate_degradation(
+    db_path: str,
+    issues: list[str],
+    degraded_sources: list[str],
+    config: dict,
+    now_iso: str,
+) -> None:
+    """Track per-signal consecutive-degraded streaks and fire egress at threshold.
+
+    Read-modify-write against ``health_escalation_state`` (m105): increment each
+    currently-degraded key, reset recovered keys to 0, and fire ``_fire_escalation``
+    once per streak when a key first reaches ``health.escalation_consecutive_threshold``
+    (default 3). The fire-once gate is ``last_escalated_at IS NULL`` — stamped on
+    fire, cleared on recovery so a fresh streak can escalate again.
+
+    Best-effort: callers wrap this so it never breaks the heartbeat, but it is
+    also self-contained against DB errors.
+    """
+    from job_finder.web.db_helpers import standalone_connection as _sc
+
+    threshold = int((config.get("health", {}) or {}).get("escalation_consecutive_threshold", 3))
+    degraded_keys = _derive_degraded_keys(issues, degraded_sources)
+
+    with _sc(db_path) as conn:
+        existing = {
+            row["signal_key"]: row
+            for row in conn.execute(
+                "SELECT signal_key, consecutive_degraded, last_escalated_at "
+                "FROM health_escalation_state"
+            ).fetchall()
+        }
+
+        escalated: list[dict] = []
+        for key in sorted(degraded_keys):
+            prev = existing.get(key)
+            prev_count = prev["consecutive_degraded"] if prev else 0
+            prev_escalated_at = prev["last_escalated_at"] if prev else None
+            new_count = prev_count + 1
+
+            should_fire = new_count >= threshold and prev_escalated_at is None
+            new_escalated_at = now_iso if should_fire else prev_escalated_at
+
+            conn.execute(
+                "INSERT INTO health_escalation_state "
+                "(signal_key, consecutive_degraded, last_status, last_escalated_at, updated_at) "
+                "VALUES (?, ?, 'degraded', ?, ?) "
+                "ON CONFLICT(signal_key) DO UPDATE SET "
+                "consecutive_degraded = excluded.consecutive_degraded, "
+                "last_status = excluded.last_status, "
+                "last_escalated_at = excluded.last_escalated_at, "
+                "updated_at = excluded.updated_at",
+                (key, new_count, new_escalated_at, now_iso),
+            )
+            if should_fire:
+                escalated.append({"signal_key": key, "consecutive_degraded": new_count})
+
+        # Recovered keys: reset counter and clear the fire-once gate so a future
+        # degradation streak can escalate again.
+        for key in existing:
+            if key not in degraded_keys:
+                conn.execute(
+                    "UPDATE health_escalation_state SET "
+                    "consecutive_degraded = 0, last_status = 'healthy', "
+                    "last_escalated_at = NULL, updated_at = ? "
+                    "WHERE signal_key = ?",
+                    (now_iso, key),
+                )
+        conn.commit()
+
+    if escalated:
+        _fire_escalation(escalated, issues, config)
+
+
 def run_health_check(app) -> None:
     """Daily health heartbeat -- verify key subsystems ran recently.
 
@@ -118,6 +255,7 @@ def run_health_check(app) -> None:
     no-raise, so the heartbeat's best-effort contract holds.
     """
     import time as _time
+    from datetime import UTC, datetime
 
     from job_finder.web import run_events
     from job_finder.web.activity_tracker import ACTION_SCHEDULED_HEALTH, log_activity
@@ -125,6 +263,7 @@ def run_health_check(app) -> None:
     with app.app_context():
         db_path = app.config.get("DB_PATH", "jobs.db")
         issues: list[str] = []
+        degraded_sources: list[str] = []
 
         t0 = _time.time()
         run_id = run_events.start(job="health", source="scheduler", db_path=db_path)
@@ -203,6 +342,7 @@ def run_health_check(app) -> None:
                         "SELECT source FROM source_health WHERE status = 'degraded'"
                     ).fetchall()
                 ]
+                degraded_sources = list(degraded)
                 for source in degraded:
                     try:
                         run_heal(conn, config, source)
@@ -216,6 +356,23 @@ def run_health_check(app) -> None:
             logger.warning("HEALTH_DEGRADED: %s", "; ".join(issues))
         else:
             logger.info("HEALTH_OK: ingestion, stale detection, OAuth all nominal")
+
+        # 6. Escalation: a signal degraded for N consecutive heartbeats fires the
+        #    notification egress. Runs every heartbeat (even when nominal) so
+        #    recovered keys get their streak counter reset to 0. Best-effort —
+        #    must never fail the heartbeat.
+        try:
+            from job_finder.web.db_helpers import get_config_snapshot
+
+            _escalate_degradation(
+                db_path,
+                issues,
+                degraded_sources,
+                get_config_snapshot(app),
+                datetime.now(UTC).replace(tzinfo=None).isoformat(),
+            )
+        except Exception:
+            logger.exception("health-check escalation tracking failed")
 
         log_activity(
             db_path,

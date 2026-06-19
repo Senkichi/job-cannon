@@ -173,3 +173,179 @@ def test_does_not_raise_on_bogus_db_path(tmp_path, events_file):
 def test_action_constant_value():
     """The new constant is wired to the documented string."""
     assert ACTION_SCHEDULED_HEALTH == "scheduled_health"
+
+
+# ---------------------------------------------------------------------------
+# Escalation (#440): N-consecutive-degraded fires the notification egress
+# ---------------------------------------------------------------------------
+
+
+def _make_nominal(conn) -> None:
+    """Seed recent sync + staleness rows so signals 1 + 2 pass (OAuth still mocked)."""
+    now_iso = _utc_naive(-0.5)
+    conn.executemany(
+        "INSERT INTO user_activity (action, entity_id, metadata, occurred_at) VALUES (?, ?, ?, ?)",
+        [
+            ("scheduled_sync", None, "{}", now_iso),
+            ("scheduled_staleness", None, "{}", now_iso),
+        ],
+    )
+    conn.commit()
+
+
+def _esc_state(conn) -> dict:
+    """Return {signal_key: sqlite3.Row} for health_escalation_state."""
+    return {
+        r["signal_key"]: r
+        for r in conn.execute("SELECT * FROM health_escalation_state").fetchall()
+    }
+
+
+def test_escalation_fires_at_threshold(migrated_db, events_file):
+    """N consecutive degraded runs -> exactly one egress call; counters >= N."""
+    db_path, conn = migrated_db
+    app = _make_app(db_path)
+
+    with (
+        patch(
+            "job_finder.gmail_auth.get_credentials",
+            side_effect=RuntimeError("no creds in test"),
+        ),
+        patch("job_finder.web.scheduler._runners._fire_escalation") as fire,
+    ):
+        for _ in range(3):  # default threshold
+            run_health_check(app)
+
+    assert fire.call_count == 1, f"expected exactly one egress fire, got {fire.call_count}"
+    state = _esc_state(conn)
+    assert state["ingestion"]["consecutive_degraded"] >= 3
+    assert state["staleness"]["consecutive_degraded"] >= 3
+    # The escalated payload carried both crossing keys.
+    escalated_keys = {e["signal_key"] for e in fire.call_args.args[0]}
+    assert {"ingestion", "staleness"} <= escalated_keys
+
+
+def test_no_premature_fire(migrated_db, events_file):
+    """N-1 consecutive degraded runs produce zero egress calls."""
+    db_path, conn = migrated_db
+    app = _make_app(db_path)
+
+    with (
+        patch(
+            "job_finder.gmail_auth.get_credentials",
+            side_effect=RuntimeError("no creds in test"),
+        ),
+        patch("job_finder.web.scheduler._runners._fire_escalation") as fire,
+    ):
+        for _ in range(2):  # threshold - 1
+            run_health_check(app)
+
+    assert fire.call_count == 0
+    state = _esc_state(conn)
+    assert state["ingestion"]["consecutive_degraded"] == 2
+
+
+def test_reset_on_recovery(migrated_db, events_file):
+    """A nominal run resets counters; the streak must restart before re-firing."""
+    db_path, conn = migrated_db
+    app = _make_app(db_path)
+
+    # One degraded run -> ingestion/staleness counters at 1.
+    with patch(
+        "job_finder.gmail_auth.get_credentials",
+        side_effect=RuntimeError("no creds in test"),
+    ):
+        run_health_check(app)
+    assert _esc_state(conn)["ingestion"]["consecutive_degraded"] == 1
+
+    # Nominal run -> counters reset to 0.
+    _make_nominal(conn)
+    with patch("job_finder.gmail_auth.get_credentials", return_value=object()):
+        run_health_check(app)
+    state = _esc_state(conn)
+    assert state["ingestion"]["consecutive_degraded"] == 0
+    assert state["ingestion"]["last_status"] == "healthy"
+    assert state["ingestion"]["last_escalated_at"] is None
+
+    # Wipe the nominal seed so subsequent runs degrade again.
+    conn.execute(
+        "DELETE FROM user_activity WHERE action IN ('scheduled_sync', 'scheduled_staleness')"
+    )
+    conn.commit()
+
+    # A fresh degraded streak must again reach the threshold before firing.
+    with (
+        patch(
+            "job_finder.gmail_auth.get_credentials",
+            side_effect=RuntimeError("no creds in test"),
+        ),
+        patch("job_finder.web.scheduler._runners._fire_escalation") as fire,
+    ):
+        run_health_check(app)
+        run_health_check(app)
+        assert fire.call_count == 0  # only 2 in the new streak
+        run_health_check(app)
+        assert fire.call_count == 1  # third crosses threshold
+
+
+def test_fire_once_suppression(migrated_db, events_file):
+    """After firing, further consecutive degraded runs do not re-fire."""
+    db_path, conn = migrated_db
+    app = _make_app(db_path)
+
+    with (
+        patch(
+            "job_finder.gmail_auth.get_credentials",
+            side_effect=RuntimeError("no creds in test"),
+        ),
+        patch("job_finder.web.scheduler._runners._fire_escalation") as fire,
+    ):
+        for _ in range(6):  # well past the threshold of 3
+            run_health_check(app)
+
+    assert fire.call_count == 1, "escalation must fire exactly once per streak"
+    state = _esc_state(conn)
+    assert state["ingestion"]["consecutive_degraded"] == 6
+    assert state["ingestion"]["last_escalated_at"] is not None
+
+
+def test_escalation_does_not_propagate_egress_exception(migrated_db, events_file):
+    """A forced exception inside the egress hook must not escape run_health_check."""
+    db_path, conn = migrated_db
+    app = _make_app(db_path)
+
+    with (
+        patch(
+            "job_finder.gmail_auth.get_credentials",
+            side_effect=RuntimeError("no creds in test"),
+        ),
+        patch(
+            "job_finder.web.notifications.notify",
+            side_effect=RuntimeError("egress boom"),
+        ),
+    ):
+        for _ in range(3):  # would fire on the third run
+            run_health_check(app)  # must not raise
+
+    # The health row was still written despite the egress blowing up.
+    rows = _fetch_health_rows(conn)
+    assert len(rows) == 3
+
+
+def test_threshold_is_config_driven(migrated_db, events_file):
+    """A custom escalation_consecutive_threshold changes the run count to fire."""
+    db_path, conn = migrated_db
+    app = _make_app(db_path)
+    app.config["JF_CONFIG"] = {"health": {"escalation_consecutive_threshold": 2}}
+
+    with (
+        patch(
+            "job_finder.gmail_auth.get_credentials",
+            side_effect=RuntimeError("no creds in test"),
+        ),
+        patch("job_finder.web.scheduler._runners._fire_escalation") as fire,
+    ):
+        run_health_check(app)
+        assert fire.call_count == 0  # one run, threshold is 2
+        run_health_check(app)
+        assert fire.call_count == 1  # second run crosses the custom threshold

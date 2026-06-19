@@ -192,6 +192,14 @@ notifications:
     smtp_host: smtp.gmail.com
     smtp_port: 465
 
+# --- Health heartbeat ---
+health:
+  # The daily 6:00 AM heartbeat fires a notification (see `notifications:`) when
+  # a signal (ingestion / staleness / oauth / a degraded source) stays degraded
+  # for this many CONSECUTIVE checks. It fires once per streak, then stays quiet
+  # until the signal recovers and degrades again. Default 3.
+  escalation_consecutive_threshold: 3
+
 # --- AI scoring configuration ---
 scoring:
   # How much each factor contributes to the overall score (must sum to 1.0)
