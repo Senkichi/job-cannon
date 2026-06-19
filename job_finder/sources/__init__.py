@@ -1,1 +1,1 @@
-"""Job sources - Gmail, SerpAPI, Thordata, DataForSEO, etc."""
+"""Job sources - Gmail, SerpAPI, DataForSEO, portal_search, etc."""

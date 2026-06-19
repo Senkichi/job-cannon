@@ -72,7 +72,6 @@ def _service_name() -> str:
 SECRET_ENV_VARS: dict[str, tuple[str, ...]] = {
     "sources.imap.app_password": (),
     "sources.serpapi.api_key": ("SERPAPI_API_KEY",),
-    "sources.thordata.api_key": ("THORDATA_API_KEY",),
     "sources.dataforseo.api_key": ("DATAFORSEO_API_KEY",),
     # Stage 2 free-portal credentials. USAJobs/Adzuna require both halves;
     # Jooble is single-key. The user_agent_email field for USAJobs is the

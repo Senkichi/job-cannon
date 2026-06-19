@@ -17,7 +17,7 @@ Usage:
                                                [--config PATH]
 
 ``--no-paid`` simulates the fresh-user scenario by skipping serpapi /
-thordata / dataforseo / SERP-backed portal queries even when they are
+dataforseo / SERP-backed portal queries even when they are
 enabled and credentialed in config.yaml.
 """
 
@@ -221,7 +221,7 @@ def format_markdown_report(
     lines.append(
         "After Stage 2-5 land, re-run this benchmark and check that the sum of"
         " free-source `novel` counts (gmail + imap + portal_*) is at least 80%"
-        " of the sum of paid-source `novel` counts (serpapi + thordata +"
+        " of the sum of paid-source `novel` counts (serpapi +"
         " dataforseo) in this baseline."
     )
     lines.append(
@@ -290,21 +290,6 @@ def _fetch_serpapi_for_benchmark(cfg: dict) -> list[Job]:
     if not api_key or not queries:
         return []
     source = SerpAPISource(api_key, max_pages=serpapi_cfg.get("max_pages", 5))
-    return source.fetch_jobs(queries)
-
-
-def _fetch_thordata_for_benchmark(cfg: dict) -> list[Job]:
-    thordata_cfg = cfg.get("sources", {}).get("thordata", {})
-    if not thordata_cfg.get("enabled", False):
-        return []
-    from job_finder.secrets import get_secret
-    from job_finder.sources.thordata_source import ThordataSource
-
-    api_key = get_secret("sources.thordata.api_key", config=cfg) or ""
-    queries = thordata_cfg.get("queries", [])
-    if not api_key or not queries:
-        return []
-    source = ThordataSource(api_key, max_age_days=thordata_cfg.get("max_age_days", 3))
     return source.fetch_jobs(queries)
 
 
@@ -510,12 +495,11 @@ _KEYED_SOURCES: tuple[tuple[str, Callable[[dict], list[Job]]], ...] = (
     ("gmail", _fetch_gmail_for_benchmark),
     ("imap", _fetch_imap_for_benchmark),
     ("serpapi", _fetch_serpapi_for_benchmark),
-    ("thordata", _fetch_thordata_for_benchmark),
     ("dataforseo", _fetch_dataforseo_for_benchmark),
 )
 
 # Which keyed sources are considered "paid" and skipped under --no-paid.
-_PAID_SOURCES: frozenset[str] = frozenset({"serpapi", "thordata", "dataforseo"})
+_PAID_SOURCES: frozenset[str] = frozenset({"serpapi", "dataforseo"})
 
 
 # ---------------------------------------------------------------------------
@@ -533,7 +517,7 @@ def _build_argparser():
     p.add_argument(
         "--no-paid",
         action="store_true",
-        help="Skip serpapi/thordata/dataforseo and SERP-backed portal queries.",
+        help="Skip serpapi/dataforseo and SERP-backed portal queries.",
     )
     p.add_argument(
         "--output",

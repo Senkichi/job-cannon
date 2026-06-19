@@ -45,7 +45,7 @@ def _apply_title_gate(jobs: list[Job], config: dict, source_label: str) -> list[
     ``fetch_all_portals``). When ``target_titles`` is empty this is a no-op —
     same bypass semantics as ``validate_target_titles`` and the Stage 7.6 gate.
 
-    Empirical context: gmail/serpapi/dataforseo/thordata historically passed
+    Empirical context: gmail/serpapi/dataforseo historically passed
     ``_title_matches`` at only 26-72%; the rest were off-target rows the
     upstream ``q=``/alert-config could not filter and that reached scoring
     anyway. This gate closes that downstream leak with one consistent rule.
@@ -364,12 +364,6 @@ def _build_serpapi_source(source_cfg: dict, secret: str) -> object:
     return SerpAPISource(secret, max_pages=source_cfg.get("max_pages", 5))
 
 
-def _build_thordata_source(source_cfg: dict, secret: str) -> object:
-    from job_finder.sources.thordata_source import ThordataSource
-
-    return ThordataSource(secret, max_age_days=source_cfg.get("max_age_days", 3))
-
-
 def _build_imap_source(source_cfg: dict, secret: str) -> object:
     # ImapSource is None when the optional imap_source module fails to import.
     # Raising here lets the driver's try/except convert it into the same
@@ -391,11 +385,6 @@ _SERPAPI_SPEC = SourceSpec(
     build_source=_build_serpapi_source,
 )
 
-_THORDATA_SPEC = SourceSpec(
-    name="thordata",
-    secret_path="sources.thordata.api_key",  # noqa: S106 — config path, not a secret value
-    build_source=_build_thordata_source,
-)
 
 _IMAP_SPEC = SourceSpec(
     name="imap",
@@ -412,10 +401,6 @@ _IMAP_SPEC = SourceSpec(
 
 def _fetch_serpapi(config: dict, summary: dict, db_path: str = "") -> list[Job]:
     return _run_simple_source(_SERPAPI_SPEC, config, summary, db_path=db_path)
-
-
-def _fetch_thordata(config: dict, summary: dict, db_path: str = "") -> list[Job]:
-    return _run_simple_source(_THORDATA_SPEC, config, summary, db_path=db_path)
 
 
 def _fetch_imap(config: dict, summary: dict, db_path: str = "") -> list[Job]:
@@ -455,8 +440,7 @@ def _fetch_portal_search(
           See PLAN.md load-bearing decision #8: CSE once/day, hence the
           ``include_cse`` gate (caller's job to decide which run gets it).
 
-    SerpAPI and Thordata are NOT used for portal_search — too expensive for
-    ``site:`` queries.
+    SerpAPI is NOT used for portal_search — too expensive for ``site:`` queries.
 
     Args:
         config: Full config dict.

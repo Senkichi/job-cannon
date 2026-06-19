@@ -105,7 +105,6 @@ _FORM_ONLY_ALLOWED: frozenset[str] = frozenset(
     {
         "_config_mtime",  # hidden CSRF-like mtime guard, not a config key
         "_serpapi_queries_present",  # sentinel telling parser queries were submitted
-        "_thordata_queries_present",
         "_dataforseo_queries_present",
     }
 )
@@ -286,8 +285,6 @@ def test_inv2a_form_fields_have_parser_branches():
         "gmail_sender_",  # iterated over configured sender keys
         "serpapi_query_",  # indexed query rows
         "serpapi_location_",
-        "thordata_query_",
-        "thordata_location_",
         "dataforseo_query_",
         "dataforseo_location_",
         "weight_",  # scored over all weight axis keys

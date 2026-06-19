@@ -280,10 +280,6 @@ class TestSettingsStage6AdvancedSection:
         # SerpAPI tile (pre-existing)
         assert 'name="serpapi_enabled"' in body
         assert 'name="serpapi_api_key"' in body
-        # Thordata tile (pre-existing)
-        assert 'name="thordata_enabled"' in body
-        assert 'name="thordata_api_key"' in body
-        assert 'name="thordata_max_age_days"' in body
         # DataForSEO tile (Stage 6 NEW)
         assert 'name="dataforseo_enabled"' in body
         assert 'name="dataforseo_api_key"' in body
@@ -513,61 +509,6 @@ class TestSettingsGoogleCSEPersistence:
         # parser dropped the empty leaves from form_config.
         assert saved["sources"]["google_cse"]["api_key"] == "AIza-prior"
         assert saved["sources"]["google_cse"]["cse_id"] == "cse-prior"
-
-
-class TestSettingsThordataPersistence:
-    """Stage 6 (2026-05-22): the pre-existing Thordata tile was rendered
-    but never persisted — `_parse_form_to_config` had no Thordata block.
-    These tests pin the now-working behavior down so we can't regress."""
-
-    def test_save_thordata_enabled_and_max_age_persists(self, settings_client, settings_app):
-        resp = settings_client.post(
-            "/settings/save",
-            data={
-                "target_titles": "Staff Data Scientist\nSenior Data Scientist",
-                "profile_skills": "Python\nSQL\nSpark",
-                "thordata_enabled": "on",
-                "thordata_max_age_days": "10",
-                "_thordata_queries_present": "1",
-                "thordata_query_0": "Senior ML",
-                "thordata_location_0": "Remote",
-            },
-        )
-        assert resp.status_code == 302
-        with open(settings_app._test_config_path, encoding="utf-8") as f:
-            saved = yaml.safe_load(f)
-        td = saved["sources"]["thordata"]
-        assert td["enabled"] is True
-        assert td["max_age_days"] == 10
-        assert td["queries"] == [{"query": "Senior ML", "location": "Remote"}]
-
-    def test_save_thordata_api_key_writes_to_keyring(self, settings_client, settings_app):
-        import keyring
-
-        from job_finder.secrets import _service_name
-
-        resp = settings_client.post(
-            "/settings/save",
-            data={
-                "target_titles": "Staff Data Scientist\nSenior Data Scientist",
-                "profile_skills": "Python\nSQL\nSpark",
-                "thordata_api_key": "td-test-key",
-            },
-        )
-        assert resp.status_code == 302
-        try:
-            assert (
-                keyring.get_password(_service_name(), "sources.thordata.api_key") == "td-test-key"
-            )
-            with open(settings_app._test_config_path, encoding="utf-8") as f:
-                saved = yaml.safe_load(f)
-            api_key = saved.get("sources", {}).get("thordata", {}).get("api_key", "<missing>")
-            assert api_key == ""
-        finally:
-            try:
-                keyring.delete_password("job-cannon", "sources.thordata.api_key")
-            except Exception:
-                pass
 
 
 class TestSettingsStage7FreePortalsTile:
@@ -1117,7 +1058,6 @@ class TestSettingsCheckboxBrowserShape:
         names_and_paths = [
             ("gmail_enabled", ["sources", "gmail", "enabled"]),
             ("serpapi_enabled", ["sources", "serpapi", "enabled"]),
-            ("thordata_enabled", ["sources", "thordata", "enabled"]),
             ("dataforseo_enabled", ["sources", "dataforseo", "enabled"]),
             ("google_cse_enabled", ["sources", "google_cse", "enabled"]),
             ("portal_search_enabled", ["sources", "portal_search", "enabled"]),

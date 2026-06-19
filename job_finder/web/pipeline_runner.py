@@ -45,7 +45,6 @@ from job_finder.web.ingestion_runner import (  # noqa: F401
     _fetch_imap,
     _fetch_portal_search,
     _fetch_serpapi,
-    _fetch_thordata,
     _log_to_email_parse_log,
     _prune_stale_data,
     _record_email_extractions,
@@ -129,8 +128,6 @@ def run_ingestion(
         "imap_errors": [],
         "serpapi_fetched": 0,
         "serpapi_errors": [],
-        "thordata_fetched": 0,
-        "thordata_errors": [],
         "dataforseo_fetched": 0,
         "dataforseo_errors": [],
         "portal_search_fetched": 0,
@@ -170,7 +167,6 @@ def run_ingestion(
         serpapi_jobs = _fetch_serpapi(config, summary, db_path)
 
         # --- Additional sources ---
-        thordata_jobs = _fetch_thordata(config, summary, db_path)
         portal_jobs = _fetch_portal_search(
             config, summary, include_cse=include_cse, db_path=db_path
         )
@@ -183,9 +179,7 @@ def run_ingestion(
         )
 
         # --- Combine all jobs ---
-        all_jobs = (
-            imap_jobs + gmail_jobs + serpapi_jobs + thordata_jobs + portal_jobs + dataforseo_jobs
-        )
+        all_jobs = imap_jobs + gmail_jobs + serpapi_jobs + portal_jobs + dataforseo_jobs
 
         # --- Score and persist each job (per-job error isolation) ---
         for job in all_jobs:
@@ -264,7 +258,6 @@ def run_ingestion(
     total_fetched = (
         summary["gmail_fetched"]
         + summary["serpapi_fetched"]
-        + summary.get("thordata_fetched", 0)
         + summary.get("dataforseo_fetched", 0)
         + summary.get("portal_search_fetched", 0)
     )

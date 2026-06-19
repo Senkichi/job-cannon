@@ -306,8 +306,8 @@ class TestRunSyncNow:
         assert "error" in result
         assert "Database locked" in result["error"]
         assert result["jobs_new"] == 0
-        assert result["thordata_fetched"] == 0
-        assert result["thordata_errors"] == []
+        assert result["serpapi_fetched"] == 0
+        assert result["serpapi_errors"] == []
 
 
 # ---------------------------------------------------------------------------

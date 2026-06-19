@@ -252,7 +252,7 @@ def _classify_error_kind(last_error: str | None) -> str:
 def record_source_error(conn: sqlite3.Connection, source: str, message: str) -> None:
     """Persist the latest per-source error string onto its source_health row. Never raises.
 
-    UPSERTs because keyed sources (serpapi/thordata/...) never call
+    UPSERTs because keyed sources (serpapi/dataforseo/...) never call
     record_extraction, so they may have no source_health row yet. Only the
     error columns are touched on conflict — status/consecutive_breaks (parser
     health) are left to the autoheal detection path.
