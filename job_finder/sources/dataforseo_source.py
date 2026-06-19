@@ -11,7 +11,6 @@ Docs: https://docs.dataforseo.com/v3/serp/google/jobs/overview/
 """
 
 import logging
-import re
 import time
 from datetime import UTC, datetime
 
@@ -38,10 +37,6 @@ _LOCATION_NAME_MAP: dict[str, str | None] = {
     "San Francisco Bay Area": "San Francisco,California,United States",
     "Remote": None,  # remote queries use US-wide search; no DataForSEO location code for "remote"
 }
-
-_SALARY_RE = re.compile(
-    r"\$?(\d[\d,]*)\s*([Kk])?\s*[–\-—]\s*\$?(\d[\d,]*)\s*([Kk])?",
-)
 
 # Poll timing constants — used by _collect_results when poll_interval > 0.
 # Tests set poll_interval_seconds=0 which bypasses sleeping entirely.
@@ -392,8 +387,6 @@ class DataForSEOSource:
                 )
                 return None
 
-        salary_min, salary_max = self._extract_salary(item.get("salary"))
-
         return Job(
             title=title,
             company=company,
@@ -403,8 +396,7 @@ class DataForSEOSource:
             # No source_id: DataForSEO's job_id is a search-result token, not a
             # per-job-stable platform ID (it has been observed shared across
             # distinct postings within a company) — I-11.
-            salary_min=salary_min,
-            salary_max=salary_max,
+            **self._capture_salary(item.get("salary")),
             description=None,  # enrichment pipeline fills this
             posted_date=posted_date,
             # Google Jobs SERP timestamps are machine first-posted values (#363).
@@ -426,30 +418,17 @@ class DataForSEOSource:
         except (ValueError, TypeError):
             return None
 
-    def _extract_salary(self, salary_str: str | None) -> tuple[int | None, int | None]:
-        """Parse salary string into (min, max) USD integers.
+    def _capture_salary(self, salary_str: str | None) -> dict:
+        """Capture the DataForSEO Google-Jobs salary string as an observation (D-1/D-2/D-3).
 
-        Handles formats like:
-          "$160K–$200K a year"
-          "$160K-$200K"
-          "$160,000–$200,000 a year"
-
-        Returns (None, None) if null or no match.
+        Replaces the bespoke ``_extract_salary`` regex (plan §1.2 item 2) with
+        delegation to the single normalizer. The FULL salary text is passed so
+        period cues survive ("$160K–$200K a year" → annual; "$42 - $51 an hour" →
+        hourly, annualized via the salvage ladder). Returns the salary-related
+        ``Job`` kwargs (canonical pair only when the ladder resolves it; junk
+        quarantines to a NULL pair with the observation retained). Provenance is
+        ``feed_string`` — a SERP aggregator snippet, lowest trust (D-4).
         """
-        if not salary_str:
-            return None, None
+        from job_finder.salary_normalizer import parse_salary_text, salary_capture_fields
 
-        m = _SALARY_RE.search(salary_str)
-        if not m:
-            return None, None
-
-        try:
-            low = int(m.group(1).replace(",", ""))
-            high = int(m.group(3).replace(",", ""))
-            if m.group(2) and low < 1000:  # K suffix on low group
-                low *= 1000
-            if m.group(4) and high < 1000:  # K suffix on high group
-                high *= 1000
-            return low, high
-        except (ValueError, IndexError):
-            return None, None
+        return salary_capture_fields(parse_salary_text(salary_str, provenance="feed_string"))

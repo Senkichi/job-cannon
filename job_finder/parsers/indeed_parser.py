@@ -24,7 +24,7 @@ from urllib.parse import parse_qs, urlparse
 from bs4 import BeautifulSoup
 
 from job_finder.models import Job
-from job_finder.parsers._common import is_meta_email, looks_like_salary_text, parse_salary_range
+from job_finder.parsers._common import is_meta_email, looks_like_salary_text
 
 logger = logging.getLogger(__name__)
 
@@ -49,12 +49,10 @@ INDEED_RC_CLK_URL_RE = re.compile(
 # Hourly rate: "$25/hr" or "$25.50 / hour" (Indeed-specific fallback)
 HOURLY_RE = re.compile(r"\$(\d[\d.]+)\s*(?:\/\s*(?:hr|hour))", re.IGNORECASE)
 
-# Hourly range: "$70 - $80 an hour" or "$95 per hour" (match emails)
-# Must be checked BEFORE parse_salary_range to avoid K-notation misinterpretation.
-HOURLY_RANGE_RE = re.compile(
-    r"\$(\d[\d,.]+)\s*[-\u2013]+\s*\$(\d[\d,.]+)\s*(?:an?\s+hour|per\s+hour)",
-    re.IGNORECASE,
-)
+# Hourly single rate: "$95 an hour" / "$95 per hour". Single amounts are out of
+# scope for the shared range parser (salary_normalizer.parse_salary_text handles
+# ranges only), so they are detected here and routed through the normalizer as a
+# single-value hourly observation (the \u00d72080 annualization is the normalizer's, D-2).
 HOURLY_SINGLE_RE = re.compile(
     r"\$(\d[\d,.]+)\s*(?:an?\s+hour|per\s+hour)",
     re.IGNORECASE,
@@ -586,50 +584,48 @@ def _looks_like_location(text: str) -> bool:
 
 
 def _extract_salary_from_text(text: str) -> tuple[int | None, int | None]:
-    """Parse salary range from text. Returns (salary_min, salary_max).
+    """Parse salary range from Indeed email text. Returns (salary_min, salary_max).
 
-    Checks for hourly indicators first to avoid K-notation misinterpretation
-    (e.g. "$70 - $80 an hour" would otherwise become $70K-$80K via
-    parse_salary_range). Then delegates to the shared parse_salary_range for
-    annual salary patterns, with a final fallback for $X/hr single amounts.
+    P1.4 (D-2/D-3): the bespoke ×2080 annualization (plan §1.2 item 5, indeed
+    addendum) is gone. Ranges — annual ("$120K - $150K") and hourly ("$70 - $80
+    an hour") alike — delegate to ``salary_normalizer.parse_salary_text``, which
+    detects the period cue and annualizes hourly ranges via the salvage ladder.
+    Single hourly amounts ("$95 an hour", "$25/hr") are out of the shared range
+    parser's scope, so they are detected here and routed through the normalizer
+    as a single-value hourly observation — the ×2080 stays the normalizer's job.
+    Implausible / sub-floor values quarantine to (None, None).
     """
-    # Hourly range: "$70 - $80 an hour" → annualised
-    # Must check BEFORE parse_salary_range to prevent K-notation conversion.
-    range_match = HOURLY_RANGE_RE.search(text)
-    if range_match:
+    from job_finder.salary_normalizer import (
+        RESOLVED_RESOLUTIONS,
+        SalaryObservation,
+        normalize_observation,
+        parse_salary_text,
+    )
+
+    obs = parse_salary_text(text, provenance="email_snippet")
+    if obs is None:
+        # Single hourly amount: build a single-value hourly observation so the
+        # normalizer (not this parser) does the unit math.
+        single = HOURLY_SINGLE_RE.search(text) or HOURLY_RE.search(text)
+        if not single:
+            return None, None
         try:
-            low = float(range_match.group(1).replace(",", ""))
-            high = float(range_match.group(2).replace(",", ""))
-            return int(low * 2080), int(high * 2080)
+            rate = float(single.group(1).replace(",", ""))
         except ValueError:
-            pass
+            return None, None
+        obs = SalaryObservation(
+            min_value=rate,
+            max_value=rate,
+            period="hourly",
+            currency="USD",
+            provenance="email_snippet",
+            raw_text=text,
+        )
 
-    # Hourly single: "$95 an hour" → annualised
-    single_match = HOURLY_SINGLE_RE.search(text)
-    if single_match:
-        try:
-            hourly = float(single_match.group(1).replace(",", ""))
-            annual = int(hourly * 2080)
-            return annual, annual
-        except ValueError:
-            pass
-
-    # Annual salary range: "$120K - $150K", "$140,000 - $170,000"
-    result = parse_salary_range(text)
-    if result != (None, None):
-        return result
-
-    # Legacy fallback: "$25/hr" or "$25.50 / hour"
-    match = HOURLY_RE.search(text)
-    if match:
-        try:
-            hourly = float(match.group(1))
-            annual = int(hourly * 2080)  # 40hr/wk * 52wk
-            return annual, annual
-        except ValueError:
-            pass
-
-    return None, None
+    normalized = normalize_observation(obs)
+    if normalized.resolution not in RESOLVED_RESOLUTIONS:
+        return None, None
+    return normalized.salary_min, normalized.salary_max
 
 
 def _extract_job_id(url: str) -> str:

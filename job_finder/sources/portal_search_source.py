@@ -102,8 +102,9 @@ def _fetch_remoteok(keywords: list[str]) -> list[Job]:
                 location=_clean_text(item.get("location") or "") or "Remote",
                 source="portal_remoteok",
                 source_url=item.get("apply_url") or item.get("url") or "",
-                salary_min=_safe_int(item.get("salary_min")),
-                salary_max=_safe_int(item.get("salary_max")),
+                **_feed_salary_from_values(
+                    item.get("salary_min"), item.get("salary_max"), raw_text="remoteok"
+                ),
                 description=_truncate(_clean_text(item.get("description"))),
             )
         )
@@ -140,8 +141,6 @@ def _fetch_remotive(keywords: list[str]) -> list[Job]:
         if not any(kw in text for kw in keywords_lower):
             continue
 
-        salary_min, salary_max = _parse_salary_string(item.get("salary") or "")
-
         jobs.append(
             Job(
                 title=_clean_text(title),
@@ -149,8 +148,7 @@ def _fetch_remotive(keywords: list[str]) -> list[Job]:
                 location=_clean_text(item.get("candidate_required_location") or "") or "Remote",
                 source="portal_remotive",
                 source_url=item.get("url") or "",
-                salary_min=salary_min,
-                salary_max=salary_max,
+                **_feed_salary_from_text(item.get("salary") or ""),
                 description=_truncate(_clean_text(item.get("description"))),
             )
         )
@@ -212,8 +210,9 @@ def _fetch_himalayas(keywords: list[str]) -> list[Job]:
                     location=_clean_text(item.get("location") or "") or "Remote",
                     source="portal_himalayas",
                     source_url=url,
-                    salary_min=_safe_int(item.get("minSalary")),
-                    salary_max=_safe_int(item.get("maxSalary")),
+                    **_feed_salary_from_values(
+                        item.get("minSalary"), item.get("maxSalary"), raw_text="himalayas"
+                    ),
                     description=_truncate(_strip_html(item.get("description")), max_len=8000),
                     posted_date=_unix_to_datetime(item.get("pubDate")),
                     # Feed pubDate is a machine first-published timestamp (#363).
@@ -280,8 +279,9 @@ def _fetch_jobicy(keywords: list[str]) -> list[Job]:
                 location=_clean_text(item.get("jobGeo") or "") or "Remote",
                 source="portal_jobicy",
                 source_url=item.get("url") or "",
-                salary_min=_safe_int(item.get("annualSalaryMin")),
-                salary_max=_safe_int(item.get("annualSalaryMax")),
+                **_feed_salary_from_values(
+                    item.get("annualSalaryMin"), item.get("annualSalaryMax"), raw_text="jobicy"
+                ),
                 description=_truncate(
                     _clean_text(item.get("jobDescription") or item.get("jobExcerpt") or "")
                 ),
@@ -366,8 +366,6 @@ def _fetch_yc_workatastartup(keywords: list[str]) -> list[Job]:
                 else ""
             )
 
-            salary_min, salary_max = _parse_salary_string(item.get("salary") or "")
-
             all_jobs.append(
                 Job(
                     title=title,
@@ -375,8 +373,7 @@ def _fetch_yc_workatastartup(keywords: list[str]) -> list[Job]:
                     location=_clean_text(item.get("location") or "") or "Remote",
                     source="portal_yc_workatastartup",
                     source_url=source_url,
-                    salary_min=salary_min,
-                    salary_max=salary_max,
+                    **_feed_salary_from_text(item.get("salary") or ""),
                     description=_synthesize_yc_description(item),
                 )
             )
@@ -443,11 +440,11 @@ def _fetch_usajobs(
             location_str = locations[0].get("LocationName", "") if locations else ""
 
             remuneration = descriptor.get("PositionRemuneration") or []
-            salary_min = salary_max = None
+            raw_salary_min = raw_salary_max = None
             if remuneration:
                 first = remuneration[0]
-                salary_min = _safe_int(first.get("MinimumRange"))
-                salary_max = _safe_int(first.get("MaximumRange"))
+                raw_salary_min = first.get("MinimumRange")
+                raw_salary_max = first.get("MaximumRange")
 
             user_area = descriptor.get("UserArea", {}) or {}
             details = user_area.get("Details", {}) or {}
@@ -460,8 +457,7 @@ def _fetch_usajobs(
                     location=_clean_text(location_str) or "United States",
                     source="portal_usajobs",
                     source_url=descriptor.get("PositionURI") or "",
-                    salary_min=salary_min,
-                    salary_max=salary_max,
+                    **_feed_salary_from_values(raw_salary_min, raw_salary_max, raw_text="usajobs"),
                     description=_truncate(_clean_text(description)),
                 )
             )
@@ -541,8 +537,9 @@ def _fetch_adzuna(
                     location=_clean_text(location_str),
                     source="portal_adzuna",
                     source_url=item.get("redirect_url") or "",
-                    salary_min=_safe_int(item.get("salary_min")),
-                    salary_max=_safe_int(item.get("salary_max")),
+                    **_feed_salary_from_values(
+                        item.get("salary_min"), item.get("salary_max"), raw_text="adzuna"
+                    ),
                     description=_truncate(_clean_text(item.get("description"))),
                 )
             )
@@ -592,8 +589,6 @@ def _fetch_jooble(keywords: list[str], *, api_key: str) -> list[Job]:
                 continue
             seen_keys.add(key)
 
-            salary_min, salary_max = _parse_salary_string(item.get("salary") or "")
-
             all_jobs.append(
                 Job(
                     title=_clean_text(title),
@@ -601,8 +596,7 @@ def _fetch_jooble(keywords: list[str], *, api_key: str) -> list[Job]:
                     location=_clean_text(item.get("location") or "") or "Remote",
                     source="portal_jooble",
                     source_url=item.get("link") or "",
-                    salary_min=salary_min,
-                    salary_max=salary_max,
+                    **_feed_salary_from_text(item.get("salary") or ""),
                     description=_truncate(_clean_text(item.get("snippet"))),
                 )
             )
@@ -711,6 +705,12 @@ def fetch_serp_portals(
                 # not per-job-stable platform IDs (I-11).
                 salary_min=job.salary_min,
                 salary_max=job.salary_max,
+                # Carry the salary provenance + lossless observation the backend
+                # (DataForSEO / CSE) already captured through the normalizer (D-1).
+                salary_currency=job.salary_currency,
+                salary_period=job.salary_period,
+                salary_provenance=job.salary_provenance,
+                salary_observations=list(job.salary_observations),
                 description=job.description,
                 posted_date=job.posted_date,
                 posted_date_precision=job.posted_date_precision,
@@ -878,21 +878,45 @@ def _safe_int(val) -> int | None:
         return None
 
 
-_SALARY_RE = re.compile(r"\$?(\d[\d,]*)\s*[Kk]?\s*[-–—]\s*\$?(\d[\d,]*)\s*[Kk]?")
+def _feed_salary_from_text(s: str) -> dict:
+    """Capture a free-text feed salary as a ``feed_string`` observation (D-1/D-2/D-3).
+
+    Replaces the bespoke unbounded ``_parse_salary_string`` regex (plan §1.2
+    item 1) with delegation to the single normalizer. Returns the salary-related
+    ``Job`` kwargs (canonical pair only when the salvage ladder resolves it;
+    sub-floor / period-less / cross-unit junk quarantines to a NULL pair with the
+    observation retained). Spread into the Job: ``Job(..., **_feed_salary_from_text(s))``.
+    """
+    from job_finder.salary_normalizer import parse_salary_text, salary_capture_fields
+
+    return salary_capture_fields(parse_salary_text(s, provenance="feed_string"))
 
 
-def _parse_salary_string(s: str) -> tuple[int | None, int | None]:
-    """Extract (min, max) from salary strings like '$150K - $200K'."""
-    m = _SALARY_RE.search(s)
-    if not m:
-        return None, None
-    low = int(m.group(1).replace(",", ""))
-    high = int(m.group(2).replace(",", ""))
-    if low < 1000:
-        low *= 1000
-    if high < 1000:
-        high *= 1000
-    return low, high
+def _feed_salary_from_values(min_value, max_value, *, raw_text: str | None = None) -> dict:
+    """Capture a passthrough numeric feed salary as a ``feed_string`` observation.
+
+    Direct-value feeds (RemoteOK/Himalayas/Jobicy/USAJobs/Adzuna) expose no
+    period, so the observation records period 'unknown' and the normalizer's
+    salvage ladder floors/salvages it (D-3): an in-window value is kept as annual,
+    a sub-floor passthrough (e.g. RemoteOK ``46``) quarantines to NULL with the
+    observation retained. Returns the salary-related ``Job`` kwargs (empty when
+    the source asserted no salary at all).
+    """
+    from job_finder.salary_normalizer import SalaryObservation, salary_capture_fields
+
+    lo = _safe_int(min_value)
+    hi = _safe_int(max_value)
+    if lo is None and hi is None:
+        return {}
+    obs = SalaryObservation(
+        min_value=float(lo) if lo is not None else None,
+        max_value=float(hi) if hi is not None else None,
+        period="unknown",
+        currency="USD",
+        provenance="feed_string",
+        raw_text=raw_text if raw_text is not None else f"feed_values:{min_value}-{max_value}",
+    )
+    return salary_capture_fields(obs)
 
 
 def _truncate(text: str | None, max_len: int = 2000) -> str | None:

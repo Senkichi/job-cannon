@@ -82,6 +82,20 @@ VALID_PROVENANCES: frozenset[str] = frozenset(PROVENANCE_RANK)
 # 'unknown' in the column; their true period lives in the observation log.
 _COLUMN_PERIODS: frozenset[str] = frozenset({"annual", "hourly", "monthly", "unknown"})
 
+# Resolution codes that mean the salvage ladder produced a usable canonical pair.
+# A capture site writes the canonical (min, max) ONLY for these; any other code
+# ('implausible'/'empty') yields a NULL pair with the observation retained (D-3).
+RESOLVED_RESOLUTIONS: frozenset[str] = frozenset(
+    {
+        "ok",
+        "salvaged_hourly",
+        "salvaged_daily",
+        "salvaged_weekly",
+        "salvaged_monthly",
+        "salvaged_cents",
+    }
+)
+
 # Map non-annual salvage periods to their resolution code.
 _SALVAGE_RESOLUTION: dict[str, str] = {
     "hourly": "salvaged_hourly",
@@ -441,3 +455,64 @@ def _finalize(obs: SalaryObservation, values: list[int], hypothesis: str) -> Nor
         provenance=obs.provenance,
         resolution=resolution,
     )
+
+
+# ---------------------------------------------------------------------------
+# Capture-site convenience (P1.4)
+# ---------------------------------------------------------------------------
+
+
+def observation_to_dict(obs: SalaryObservation) -> dict:
+    """Serialize an observation to the JSON-log dict shape used by the append-log.
+
+    This is the lossless record persisted in the ``salary_observations`` column
+    (D-1). The key names match what ``db._jobs._merge_salary_observations`` and
+    the m107 healing migration read.
+    """
+    return {
+        "min_value": obs.min_value,
+        "max_value": obs.max_value,
+        "period": obs.period,
+        "currency": obs.currency,
+        "provenance": obs.provenance,
+        "raw_text": obs.raw_text,
+    }
+
+
+def salary_capture_fields(obs: SalaryObservation | None) -> dict:
+    """Build the Job salary kwargs for a capture-site observation (D-1/D-2/D-3).
+
+    The single delegation point the feed/SERP capture sites use instead of their
+    old bespoke regex + unit math (design rule D-2). Given a lossless
+    :class:`SalaryObservation` (or None when the source asserted no salary), it
+    runs the observation through the single normalizer and returns a dict of the
+    salary-related ``Job`` constructor kwargs:
+
+        salary_min / salary_max  — the annualized-USD canonical pair, populated
+            ONLY when the salvage ladder resolved the value; an implausible /
+            sub-floor / period-less value leaves them unset (Job default None).
+        salary_period / salary_currency — the column-safe source period and the
+            recorded currency (set whenever a value resolved; currency is always
+            carried so display can show it).
+        salary_provenance       — the writer class (drives trust ranking, D-4).
+        salary_observations      — the lossless append-log seed: ALWAYS the
+            verbatim observation when one exists, so evidence survives even when
+            the canonical pair is NULLed (D-3, D-9, D-12).
+
+    Returns ``{}`` for a ``None`` input so ``Job(**fields)`` falls back to the
+    salary defaults (no observation, no provenance). Spread into the Job:
+    ``Job(..., **salary_capture_fields(obs))``.
+    """
+    if obs is None:
+        return {}
+    normalized = normalize_observation(obs)
+    fields: dict = {
+        "salary_currency": normalized.currency,
+        "salary_provenance": obs.provenance,
+        "salary_observations": [observation_to_dict(obs)],
+    }
+    if normalized.resolution in RESOLVED_RESOLUTIONS:
+        fields["salary_min"] = normalized.salary_min
+        fields["salary_max"] = normalized.salary_max
+        fields["salary_period"] = normalized.period
+    return fields

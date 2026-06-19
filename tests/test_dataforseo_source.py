@@ -210,32 +210,47 @@ class TestAgeFilter:
 
 
 class TestSalaryExtraction:
+    """P1.4: _capture_salary delegates to salary_normalizer and returns the Job
+    salary kwargs dict (canonical pair only when the salvage ladder resolves)."""
+
     def test_k_range_with_en_dash(self, source):
-        low, high = source._extract_salary("$160K–$200K a year")
-        assert low == 160000
-        assert high == 200000
+        fields = source._capture_salary("$160K–$200K a year")
+        assert fields["salary_min"] == 160000
+        assert fields["salary_max"] == 200000
+        assert fields["salary_provenance"] == "feed_string"
 
     def test_k_range_with_hyphen(self, source):
-        low, high = source._extract_salary("$160K-$200K")
-        assert low == 160000
-        assert high == 200000
+        fields = source._capture_salary("$160K-$200K")
+        assert fields["salary_min"] == 160000
+        assert fields["salary_max"] == 200000
 
     def test_full_numbers_with_commas(self, source):
-        low, high = source._extract_salary("$160,000–$200,000 a year")
-        assert low == 160000
-        assert high == 200000
+        fields = source._capture_salary("$160,000–$200,000 a year")
+        assert fields["salary_min"] == 160000
+        assert fields["salary_max"] == 200000
 
-    def test_none_returns_none_none(self, source):
-        assert source._extract_salary(None) == (None, None)
+    def test_none_returns_empty(self, source):
+        assert source._capture_salary(None) == {}
 
-    def test_no_match_returns_none_none(self, source):
-        assert source._extract_salary("Competitive") == (None, None)
+    def test_no_match_returns_empty(self, source):
+        assert source._capture_salary("Competitive") == {}
 
     def test_mixed_k_and_full_number(self, source):
         """$160K–$200,000: K only on low side."""
-        low, high = source._extract_salary("$160K–$200,000 a year")
-        assert low == 160000
-        assert high == 200000
+        fields = source._capture_salary("$160K–$200,000 a year")
+        assert fields["salary_min"] == 160000
+        assert fields["salary_max"] == 200000
+
+    def test_hourly_range_salvaged_and_annualized(self, source):
+        """P1.4 junk fixture: '$42 - $51 an hour' → salvaged_hourly, annualized."""
+        fields = source._capture_salary("$42 - $51 an hour")
+        assert fields["salary_min"] == 42 * 2080
+        assert fields["salary_max"] == 51 * 2080
+        assert fields["salary_period"] == "hourly"
+        assert fields["salary_provenance"] == "feed_string"
+        # The lossless observation is retained with the raw text + true period.
+        assert fields["salary_observations"][0]["period"] == "hourly"
+        assert fields["salary_observations"][0]["raw_text"] == "$42 - $51 an hour"
 
 
 # ---------------------------------------------------------------------------
