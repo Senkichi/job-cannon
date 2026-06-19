@@ -557,24 +557,18 @@ def _upsert_one_ats_api_job(
 ) -> None:
     """Upsert a single ATS-API-discovered job; promote jd_full + comp_data_json on first-seen."""
     try:
-        # First-seen salary wins: only set salary if job is new
-        # (no existing salary data). Check existing record first.
+        # P1.5 (D-4): the legacy "first-seen salary wins" suppression that NULLed
+        # the incoming ATS salary whenever the stored row already had either bound
+        # is DELETED. That suppression silently defeated reconciliation — a
+        # Greenhouse structured pair could never refresh or correct a stored
+        # feed-string guess. Trust-ranked, pair-atomic reconciliation inside
+        # upsert_job now decides: an ``ats_structured`` (rank 4) pair overwrites
+        # any lower-rank stored pair, and refreshes an equal-rank one.
         from job_finder.models import Job
+        from job_finder.salary_normalizer import SalaryObservation
 
-        candidate_dedup_key = Job.normalized_dedup_key(company_name, job_dict["title"])
-        existing_row = conn.execute(
-            "SELECT salary_min, salary_max FROM jobs WHERE dedup_key = ?",
-            (candidate_dedup_key,),
-        ).fetchone()
-        if existing_row and (
-            existing_row["salary_min"] is not None or existing_row["salary_max"] is not None
-        ):
-            # Existing job has salary — preserve it (first-seen wins)
-            salary_min = None
-            salary_max = None
-        else:
-            salary_min = job_dict.get("salary_min")
-            salary_max = job_dict.get("salary_max")
+        salary_min = job_dict.get("salary_min")
+        salary_max = job_dict.get("salary_max")
 
         job = Job(
             title=job_dict["title"],
@@ -604,9 +598,33 @@ def _upsert_one_ats_api_job(
         # locations from the ATS payload ride in via source_meta — they
         # would otherwise be lost (ParsedJob.from_job carries no Job→
         # locations_structured pathway of its own).
-        _source_meta = {
+        #
+        # P1.5 (D-1/D-4): an ATS structured pay range is the highest-trust
+        # salary source (provenance 'ats_structured', rank 4). Tag the writer
+        # class and seed the lossless observation log so the reconciler can rank
+        # it and the evidence survives even when the canonical pair is later
+        # quarantined/overwritten. The observation records the RAW structured
+        # values the scanner resolved (D-1); comp_data_json retains the verbatim
+        # API payload for healing.
+        _source_meta: dict = {
             "locations_structured": job_dict.get("locations_structured") or [],
         }
+        if salary_min is not None or salary_max is not None:
+            from dataclasses import asdict
+
+            _source_meta["salary_provenance"] = "ats_structured"
+            # Store the JSON-serializable dict form of the observation (the
+            # append-log persists as JSON, not the frozen dataclass).
+            _source_meta["salary_observation"] = asdict(
+                SalaryObservation(
+                    min_value=salary_min,
+                    max_value=salary_max,
+                    period=job_dict.get("salary_period") or "unknown",
+                    currency=job_dict.get("salary_currency") or "USD",
+                    provenance="ats_structured",
+                    raw_text=job_dict.get("comp_json"),
+                )
+            )
         try:
             parsed = ParsedJob.from_job(job, source_meta=_source_meta)
         except (DenylistedCompanyError, ListingTileError):

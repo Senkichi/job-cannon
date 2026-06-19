@@ -72,6 +72,8 @@ def tmp_db_path():
             salary_max INTEGER,
             salary_currency TEXT NOT NULL DEFAULT 'USD',
             salary_period TEXT NOT NULL DEFAULT 'unknown',
+            salary_provenance TEXT DEFAULT NULL,
+            salary_observations TEXT NOT NULL DEFAULT '[]',
             description TEXT,
             first_seen TEXT NOT NULL DEFAULT (datetime('now')),
             last_seen TEXT NOT NULL DEFAULT (datetime('now')),

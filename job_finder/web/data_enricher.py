@@ -876,6 +876,10 @@ def _apply_post_fetch_extraction(
         if regex_min is not None and regex_max is not None:
             merged["salary_min"] = regex_min
             merged["salary_max"] = regex_max
+            # P1.5 (D-4): tag the writer class so the reconciler can rank this
+            # JD-regex extraction (rank 3) against the stored pair — it must not
+            # overwrite an ats_structured (rank 4) pair.
+            merged["salary_provenance"] = "jd_regex"
 
     # Recompute is-empty after regex pass — the LLM only needs to run
     # if there's something it can still help with (location, or salary
@@ -895,12 +899,71 @@ def _apply_post_fetch_extraction(
     if not parsed:
         return merged
 
+    filled_salary_from_llm = False
     for field, value in parsed.items():
         if field not in structured_fields:
             continue  # ignore unknown keys; schema already restricts
         if _still_empty(field):  # only fill empty fields — never overwrite
             merged[field] = value
+            if field in ("salary_min", "salary_max"):
+                filled_salary_from_llm = True
+    # P1.5 (D-4): an LLM-extracted salary is provenance 'llm_extract' (rank 2).
+    # Only tag it when the LLM (not the regex fast-path above) supplied the
+    # value, so the reconciler ranks each enrichment write correctly.
+    if filled_salary_from_llm and "salary_provenance" not in merged:
+        merged["salary_provenance"] = "llm_extract"
     return merged
+
+
+def _append_enrichment_salary_observation(
+    conn: Any,
+    dedup_key: str,
+    sal_min: int | None,
+    sal_max: int | None,
+    provenance: str | None,
+) -> None:
+    """Append an enrichment salary observation to the row's lossless log (D-1).
+
+    Evidence is retained regardless of whether the value won the canonical slot,
+    so a quarantined / out-ranked extraction is still visible in
+    ``salary_observations`` and ``/admin/review``. Routed through the same
+    ``_merge_salary_observations`` helper the upsert path uses, so the array
+    stays deduped (by provenance/raw_text/min/max) and capped. Never raises —
+    a failed observation append must not abort the enrichment persist.
+    """
+    if sal_min is None and sal_max is None:
+        return
+    try:
+        import json
+
+        from job_finder.db._jobs import _merge_salary_observations
+        from job_finder.json_utils import safe_json_load
+
+        row = conn.execute(
+            "SELECT salary_observations FROM jobs WHERE dedup_key = ?", (dedup_key,)
+        ).fetchone()
+        stored = safe_json_load(row["salary_observations"], default=[]) if row else []
+        if not isinstance(stored, list):
+            stored = []
+        incoming = [
+            {
+                "min_value": sal_min,
+                "max_value": sal_max,
+                "period": "unknown",
+                "currency": "USD",
+                "provenance": provenance,
+                "raw_text": None,
+            }
+        ]
+        merged, changed = _merge_salary_observations(stored, incoming)
+        if changed:
+            conn.execute(
+                "UPDATE jobs SET salary_observations = ? WHERE dedup_key = ?",
+                (json.dumps(merged), dedup_key),
+            )
+            conn.commit()
+    except Exception as e:
+        logger.warning("_persist: salary observation append failed for '%s': %s", dedup_key, e)
 
 
 def _persist(conn: Any, job_row: dict, enriched: dict, tier_name: str) -> None:
@@ -950,6 +1013,12 @@ def _persist(conn: Any, job_row: dict, enriched: dict, tier_name: str) -> None:
         if location_obs and str(location_obs).strip():
             apply_location_observation(conn, dedup_key, str(location_obs), source="llm_extract")
 
+    # P1.5 (D-4): the writer-class tag for an extracted salary rides in the
+    # enriched dict as 'salary_provenance' ('jd_regex' rank 3 / 'llm_extract'
+    # rank 2). Pop it before the allowlist filter (it is reconciliation
+    # metadata, written only as part of the pair-atomic salary write below).
+    incoming_salary_provenance = enriched.pop("salary_provenance", None) if enriched else None
+
     if enriched:
         # Filter to allowlisted columns only — prevents AI-extracted keys from
         # injecting arbitrary column names into the dynamic SQL SET clause.
@@ -982,19 +1051,45 @@ def _persist(conn: Any, job_row: dict, enriched: dict, tier_name: str) -> None:
     sal_min = safe_enriched.pop("salary_min", None)
     sal_max = safe_enriched.pop("salary_max", None)
     if sal_min is not None or sal_max is not None:
+        # P1.5 (D-4): pass the incoming + stored provenance so a strictly-lower-
+        # rank enrichment write (llm_extract=2 / jd_regex=3) cannot overwrite a
+        # stored ats_structured (4) pair. A NULL stored provenance ranks 0
+        # (legacy/unranked) so any genuine extraction can still fill it.
         salary_cols, dropped = _reconcile_salary_for_write(
-            sal_min, sal_max, job_row.get("salary_min"), job_row.get("salary_max")
+            sal_min,
+            sal_max,
+            job_row.get("salary_min"),
+            job_row.get("salary_max"),
+            incoming_provenance=incoming_salary_provenance,
+            stored_provenance=job_row.get("salary_provenance"),
         )
         if dropped:
             logger.warning(
-                "_persist: salary dropped for '%s' (would invert the stored range; "
-                "incoming min=%s max=%s, existing min=%s max=%s)",
+                "_persist: salary dropped for '%s' (lower-rank provenance or would "
+                "invert the stored range; incoming min=%s max=%s prov=%s, existing "
+                "min=%s max=%s prov=%s)",
                 dedup_key,
                 sal_min,
                 sal_max,
+                incoming_salary_provenance,
                 job_row.get("salary_min"),
                 job_row.get("salary_max"),
+                job_row.get("salary_provenance"),
             )
+        # When the extraction won the canonical slot, stamp its provenance so the
+        # next writer can rank against it (single pair-atomic write).
+        if salary_cols and incoming_salary_provenance:
+            salary_cols = {**salary_cols, "salary_provenance": incoming_salary_provenance}
+        # Append the lossless observation regardless of who won the slot (D-1):
+        # evidence is never discarded. Routed through the upsert helper so the
+        # array stays deduped + capped.
+        _append_enrichment_salary_observation(
+            conn,
+            dedup_key,
+            sal_min,
+            sal_max,
+            incoming_salary_provenance,
+        )
         safe_enriched.update(salary_cols)
 
     # --- Step 3: remaining fields + enrichment_tier ---
