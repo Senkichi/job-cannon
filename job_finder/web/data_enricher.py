@@ -39,6 +39,7 @@ Exports:
     run_enrichment_backfill: Backfill unenriched jobs from the DB.
 """
 
+import json
 import logging
 from typing import Any
 
@@ -458,10 +459,18 @@ def run_enrichment_backfill(
         # Terminal tiers: 'serpapi' (got JD), 'agentic' (got JD via Playwright),
         # 'exhausted' (all tiers tried and failed). 'mid' is terminal for the
         # enrichment pipeline (fully enriched at balanced tier).
+        # location IS NULL / '' is added here so empty-location rows enter the
+        # regular tier cascade AND are eligible for extraction-only (D-5, #388).
+        # The extraction-only pass (run_location_extraction_backfill) handles
+        # terminal-tier rows separately; the clause here ensures non-terminal
+        # rows with a good jd_full already don't get skipped by _find_missing_fields
+        # returning a non-empty list.
         base_sql = f"""SELECT * FROM jobs
                WHERE (enrichment_tier IS NULL
                       OR {backfill_skip_sql()})
-                 AND (jd_full IS NULL OR jd_full = '' OR salary_min IS NULL)
+                 AND (jd_full IS NULL OR jd_full = ''
+                      OR salary_min IS NULL
+                      OR location IS NULL OR location = '')
                ORDER BY first_seen DESC"""
         if limit is None:
             rows = conn.execute(base_sql).fetchall()
@@ -495,6 +504,159 @@ def run_enrichment_backfill(
         return enriched_count
 
 
+# Minimum jd_full length for the extraction-only pass. Mirrors MIN_FETCH_JD_CHARS
+# — anything shorter is a stub that extraction won't improve.
+_EXTRACTION_ONLY_MIN_JD_CHARS = 200
+
+
+def run_location_extraction_backfill(
+    db_path: str,
+    config: dict | None = None,
+    limit: int = 50,
+) -> int:
+    """Drain the empty-location backlog via a cheap, no-fetch extraction pass.
+
+    Targets rows WHERE location IS NULL OR location = '' AND jd_full IS NOT NULL
+    AND length(jd_full) >= _EXTRACTION_ONLY_MIN_JD_CHARS, regardless of
+    enrichment_tier (including terminal tiers like 'exhausted', 'agentic',
+    etc.). This lets careers-crawl rows that exhausted the fetch cascade but
+    already have a good jd_full be drained without new network calls.
+
+    Per run: calls _apply_post_fetch_extraction (LLM structured extraction)
+    and routes any returned location through apply_location_observation (D-5,
+    single-writer funnel). No tier update is written — this pass does not
+    advance enrichment_tier.
+
+    On first extraction miss (LLM returned no location despite a good jd_full),
+    appends 'location_missing' to unresolved_reasons (YAGNI option: tag after
+    first miss so /admin/review surfaces it; admin can clear to retry). The tag
+    prevents the row from being re-attempted on every run indefinitely.
+
+    Design: D-5 (single writer), D-3 (salvage before discard, flag before
+    salvage-guess), D-9 (quarantine via unresolved_reasons). #388.
+
+    Args:
+        db_path: Absolute path to the SQLite database file.
+        config: Optional application config dict.
+        limit: Max rows to process per call (default 50; 3×/day ≈ 2-3 days to
+               drain the ~325-row backlog organically).
+
+    Returns:
+        Number of rows where a location was successfully extracted.
+    """
+    from job_finder.web.db_helpers import standalone_connection
+
+    if config is None:
+        config = {}
+
+    resolved_count = 0
+
+    with standalone_connection(db_path) as conn:
+        # Select empty-location rows that have a substantive jd_full, regardless
+        # of tier. Exclude rows already tagged 'location_missing' in
+        # unresolved_reasons — those are "tried and failed" (YAGNI stop-retry).
+        rows = conn.execute(
+            """SELECT * FROM jobs
+               WHERE (location IS NULL OR location = '')
+                 AND jd_full IS NOT NULL
+                 AND length(jd_full) >= ?
+                 AND (unresolved_reasons IS NULL
+                      OR json_extract(unresolved_reasons, '$') IS NULL
+                      OR NOT EXISTS (
+                          SELECT 1 FROM json_each(unresolved_reasons)
+                          WHERE value = 'location_missing'
+                      ))
+               ORDER BY first_seen DESC
+               LIMIT ?""",
+            (_EXTRACTION_ONLY_MIN_JD_CHARS, limit),
+        ).fetchall()
+
+        logger.info(
+            "Location extraction backfill: %d candidate row(s) selected (limit=%d)",
+            len(rows),
+            limit,
+        )
+
+        for row in rows:
+            job_row = dict(row)
+            dedup_key = job_row.get("dedup_key")
+            if not dedup_key:
+                continue
+
+            try:
+                # Extraction-only: run post-fetch extraction against the existing
+                # jd_full. No HTTP fetch, no tier cascade. _apply_post_fetch_extraction
+                # will skip if jd_full is too short (< MIN_FETCH_JD_CHARS), so the
+                # length guard in SQL above provides early termination only.
+                extraction_result = _apply_post_fetch_extraction(
+                    enriched={},  # nothing freshly fetched — work from row's jd_full
+                    job_row=job_row,
+                    conn=conn,
+                    config=config,
+                )
+
+                location_obs = extraction_result.get("location")
+                if location_obs and str(location_obs).strip():
+                    # Route through the D-5 single-writer funnel (never write
+                    # location column directly — that was the S4 wipe bug).
+                    changed = apply_location_observation(
+                        conn, dedup_key, str(location_obs), source="location_extract"
+                    )
+                    if changed:
+                        resolved_count += 1
+                        logger.debug(
+                            "Location extraction backfill: resolved %r -> %r [key=%s]",
+                            location_obs,
+                            str(location_obs),
+                            dedup_key,
+                        )
+                        continue
+
+                # Extraction yielded nothing (or apply was a no-op after dedup).
+                # Tag as location_missing so this row is skipped on future runs
+                # (D-9: quarantine via unresolved_reasons, YAGNI stop-retry).
+                try:
+                    existing_reasons_raw = job_row.get("unresolved_reasons") or "[]"
+                    try:
+                        reasons = json.loads(existing_reasons_raw)
+                    except (json.JSONDecodeError, TypeError):
+                        reasons = []
+                    if not isinstance(reasons, list):
+                        reasons = list(reasons) if reasons else []
+                    if "location_missing" not in reasons:
+                        reasons.append("location_missing")
+                        conn.execute(
+                            "UPDATE jobs SET unresolved_reasons = ? WHERE dedup_key = ?",
+                            (json.dumps(reasons), dedup_key),
+                        )
+                        conn.commit()
+                        logger.debug(
+                            "Location extraction backfill: tagged location_missing [key=%s]",
+                            dedup_key,
+                        )
+                except Exception as tag_exc:
+                    logger.warning(
+                        "Location extraction backfill: could not tag location_missing "
+                        "[key=%s]: %s",
+                        dedup_key,
+                        tag_exc,
+                    )
+
+            except Exception as exc:
+                logger.warning(
+                    "Location extraction backfill: error processing row [key=%s]: %s",
+                    dedup_key,
+                    exc,
+                )
+
+    logger.info(
+        "Location extraction backfill complete: %d/%d resolved",
+        resolved_count,
+        len(rows),
+    )
+    return resolved_count
+
+
 # ---------------------------------------------------------------------------
 # Private helpers: tier logic utilities
 # ---------------------------------------------------------------------------
@@ -523,6 +685,7 @@ def _find_missing_fields(job_row: dict) -> list:
     - jd_full: full job description (needed for AI scoring). Stubs (title
       restatements shorter than _MIN_JD_LENGTH chars) are treated as missing.
     - salary_min: minimum salary
+    - location: canonical location string (D-5; empty string counts as missing)
 
     Returns empty list if all fields are present (no enrichment needed).
     """
@@ -535,6 +698,9 @@ def _find_missing_fields(job_row: dict) -> list:
         missing.append("jd_full")
     if job_row.get("salary_min") is None:
         missing.append("salary_min")
+    if not job_row.get("location"):
+        # Empty string or NULL — location joins the enrichment contract (D-5, #388)
+        missing.append("location")
     return missing
 
 
