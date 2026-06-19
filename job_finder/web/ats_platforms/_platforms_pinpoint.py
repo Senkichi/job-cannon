@@ -9,10 +9,13 @@ workplace_type, and a job.department.name nested under "job".
 
 from __future__ import annotations
 
+import json
+
 from job_finder.web.ats_platforms._registry import (
     PlatformScanner,
     _http_get_json,
 )
+from job_finder.web.ats_platforms._salary import build_salary_fields, period_from_interval
 from job_finder.web.description_formatter import strip_html_to_text
 from job_finder.web.location_canonical import JobLocation, normalize_workplace_type
 
@@ -94,8 +97,26 @@ def _posting_to_job(posting: dict, _slug: str) -> dict:
 
     source_url = posting.get("url") or posting.get("apply_url") or ""
 
-    salary_min = posting.get("compensation_minimum")
-    salary_max = posting.get("compensation_maximum")
+    # ── Salary (P1.3 capture, D-1/D-2): wrap the raw Pinpoint compensation in an
+    # observation and delegate annualization/salvage to the single normalizer.
+    raw_min = posting.get("compensation_minimum")
+    raw_max = posting.get("compensation_maximum")
+    salary_fields = build_salary_fields(
+        raw_min if isinstance(raw_min, (int, float)) else None,
+        raw_max if isinstance(raw_max, (int, float)) else None,
+        period=period_from_interval(
+            posting.get("compensation_interval") or posting.get("salary_interval")
+        ),
+        currency=posting.get("compensation_currency") or posting.get("salary_currency"),
+        raw_text=json.dumps(
+            {
+                "compensation_minimum": raw_min,
+                "compensation_maximum": raw_max,
+                "compensation_interval": posting.get("compensation_interval"),
+                "compensation_currency": posting.get("compensation_currency"),
+            }
+        ),
+    )
 
     # ── source_id (Layer-1, Phase 48.04) ────────────────────────────────────
     posting_id = posting.get("id")
@@ -111,8 +132,12 @@ def _posting_to_job(posting: dict, _slug: str) -> dict:
         "locations_structured": locations_structured,
         "description": description,
         "source_url": source_url,
-        "salary_min": salary_min if isinstance(salary_min, (int, float)) else None,
-        "salary_max": salary_max if isinstance(salary_max, (int, float)) else None,
+        "salary_min": salary_fields["salary_min"],
+        "salary_max": salary_fields["salary_max"],
+        "salary_currency": salary_fields["salary_currency"],
+        "salary_period": salary_fields["salary_period"],
+        "salary_provenance": salary_fields["salary_provenance"],
+        "salary_observation": salary_fields["salary_observation"],
         "comp_json": None,
         "source_id": source_id,
     }

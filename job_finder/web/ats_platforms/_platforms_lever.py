@@ -11,6 +11,7 @@ from job_finder.web.ats_platforms._registry import (
     _http_get_json,
     label_or_str,
 )
+from job_finder.web.ats_platforms._salary import build_salary_fields, period_from_interval
 from job_finder.web.location_canonical import (
     JobLocation,
     normalize_workplace_type,
@@ -62,10 +63,18 @@ def _to_canonical(posting: dict) -> list[JobLocation]:
 
 
 def _posting_to_job(posting: dict, slug: str) -> dict:
+    # ── Salary (P1.3 capture, D-1/D-2): wrap raw Lever values in an observation
+    # and delegate annualization/salvage to the single normalizer. Lever's
+    # salaryRange exposes ``interval`` (e.g. "per-year-salary") and ``currency``.
     salary_range = posting.get("salaryRange") or {}
-    salary_min = salary_range.get("min") if salary_range else None
-    salary_max = salary_range.get("max") if salary_range else None
     comp_json = json.dumps(salary_range) if salary_range else None
+    salary_fields = build_salary_fields(
+        salary_range.get("min") if salary_range else None,
+        salary_range.get("max") if salary_range else None,
+        period=period_from_interval(salary_range.get("interval")),
+        currency=salary_range.get("currency"),
+        raw_text=comp_json,
+    )
 
     categories = posting.get("categories") or {}
     location = categories.get("location") or categories.get("team") or ""
@@ -110,8 +119,12 @@ def _posting_to_job(posting: dict, slug: str) -> dict:
         "locations_structured": _to_canonical(posting),
         "description": posting.get("descriptionPlain") or "",
         "source_url": source_url,
-        "salary_min": salary_min,
-        "salary_max": salary_max,
+        "salary_min": salary_fields["salary_min"],
+        "salary_max": salary_fields["salary_max"],
+        "salary_currency": salary_fields["salary_currency"],
+        "salary_period": salary_fields["salary_period"],
+        "salary_provenance": salary_fields["salary_provenance"],
+        "salary_observation": salary_fields["salary_observation"],
         "comp_json": comp_json,
         "source_id": source_id,
         "posted_date": posted_date,

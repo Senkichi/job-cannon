@@ -1,21 +1,23 @@
 """Greenhouse platform scanner (registry form).
 
-Salary resolution (D-07 / F-06): ``pay_input_ranges`` fields are named
+Salary capture (P1.3, D-1/D-2): ``pay_input_ranges`` fields are named
 ``min_cents``/``max_cents`` but Greenhouse sometimes returns whole-dollar
-values at those paths (e.g. hourly $64 stored as ``min_cents=64``).
+values at those paths (e.g. hourly $64 stored as ``min_cents=64``). The scanner
+performs only the **lossless source-specific decode** of the cents-vs-dollars
+question (D-1/D-2 boundary) and wraps the raw per-period values in a
+:class:`SalaryObservation`; annualization, the cents salvage ladder, and
+plausibility quarantine are the single normalizer's job
+(:func:`job_finder.salary_normalizer.normalize_observation`, via
+:func:`build_salary_fields`).
 
-Resolution rule by ``unit``/``interval`` field:
-- ``"year"`` AND value > 1_000 → value is cents; divide by 100.
-- Any other case (``"hour"``, unknown, missing) → value is already dollars;
-  store as-is.
-- Missing ``unit``/``interval`` AND value ≤ 1_000 → ambiguous but small;
-  store as-is.
-- Missing ``unit``/``interval`` AND value > 1_000 → ambiguous large value;
-  store as-is so Phase 49.02 unit-tagging can flag the suspect row.
-
-The ``_normalize_salary`` inversion check in db/_jobs.py still applies after
-this scanner; this module's job is only to resolve the cents-vs-dollars
-question before writing salary_min/salary_max.
+Greenhouse-specific lossless decode by the ``unit``/``interval`` field:
+- ``"year"`` AND value > 1_000 → value is cents; pass ``value / 100``, period
+  'annual'. (Unit *proves* it is cents — this is decode, not unit math.)
+- ``"hour"`` → value is dollars; pass as-is, period 'hourly' (normalizer ×2080).
+- Missing/other ``unit``/``interval`` → pass the raw value, period 'unknown',
+  and let the normalizer's corroborated cents rung (rung 3) salvage it. This is
+  the Northbeam fix: a unit-less ``17_000_000`` raw-cents pair now resolves to
+  $170k instead of landing as a $17M canonical salary.
 """
 
 from __future__ import annotations
@@ -28,6 +30,7 @@ from job_finder.web.ats_platforms._registry import (
     PlatformScanner,
     _http_get_json,
 )
+from job_finder.web.ats_platforms._salary import build_salary_fields
 from job_finder.web.description_formatter import html_to_plain_text
 
 logger = logging.getLogger(__name__)
@@ -45,22 +48,27 @@ def _fetch_postings(slug: str) -> list[dict]:
     return jobs if isinstance(jobs, list) else []
 
 
-def _resolve_salary(value: int | None, interval: str | None) -> int | None:
-    """Convert a ``pay_input_ranges`` value to whole dollars.
+def _decode_greenhouse_value(value: float | None, period: str) -> float | None:
+    """Lossless cents-vs-dollars decode of one ``pay_input_ranges`` value (D-1/D-2).
 
-    Greenhouse names the salary fields ``min_cents``/``max_cents`` but the
-    unit depends on the posting's ``unit``/``interval`` field:
+    Greenhouse names the field ``*_cents`` but the unit lies. Only when the
+    posting's interval is annual AND the value exceeds $1,000 is it provably
+    cents (a real annual salary < $1,000 does not exist) — divide by 100. Every
+    other case passes the raw value through to the normalizer untouched:
 
-    - ``"year"`` AND value > 1_000 → value is in cents; divide by 100.
-    - Any other interval (``"hour"``, ``"month"``, unknown, missing) →
-      value is already in dollars; return as-is.
+    - annual & value > 1_000 → cents; ``value / 100``.
+    - annual & value ≤ 1_000 → ambiguous small value; pass as-is (normalizer
+      quarantines a sub-floor annual figure).
+    - hourly/monthly/unknown  → pass the raw per-period value; the normalizer
+      annualizes (hourly/monthly) or runs the corroborated cents rung (unknown).
 
-    This is a pure function so it can be unit-tested independently of HTTP.
+    This is lossless decode (cents → dollars when the unit proves it), NOT unit
+    math; annualization belongs to the single normalizer (D-2).
     """
     if value is None:
         return None
-    if interval == "year" and value > 1_000:
-        return value // 100
+    if period == "annual" and value > 1_000:
+        return value / 100
     return value
 
 
@@ -125,27 +133,30 @@ def _to_canonical(posting: dict) -> list:
 
 
 def _posting_to_job(posting: dict, _slug: str) -> dict:
-    # ── Salary (F-06 cents/dollars resolution) ──────────────────────────────
-    salary_min = None
-    salary_max = None
+    # ── Salary (P1.3 capture: lossless decode → single normalizer) ───────────
     comp_json = None
-    salary_currency = "USD"
-    salary_period = "unknown"
+    salary_fields = build_salary_fields(None, None)
     pay_ranges = posting.get("pay_input_ranges") or []
     if pay_ranges:
         first_range = pay_ranges[0]
         # Greenhouse may use "unit" or "interval" for the pay period field.
         interval = first_range.get("unit") or first_range.get("interval") or None
-        min_val = first_range.get("min_cents")
-        max_val = first_range.get("max_cents")
-        salary_min = _resolve_salary(min_val, interval)
-        salary_max = _resolve_salary(max_val, interval)
-        comp_json = json.dumps(pay_ranges)
-        # Phase 49.02: emit currency + period where Greenhouse provides them.
-        salary_period = _interval_to_period(interval)
-        salary_currency = _normalize_currency(
+        period = _interval_to_period(interval)
+        currency = _normalize_currency(
             first_range.get("currency_type") or first_range.get("currency")
         )
+        # Lossless cents/dollars decode at capture (D-1/D-2); annualization +
+        # cents salvage + quarantine are the normalizer's job (build_salary_fields).
+        min_val = _decode_greenhouse_value(first_range.get("min_cents"), period)
+        max_val = _decode_greenhouse_value(first_range.get("max_cents"), period)
+        salary_fields = build_salary_fields(
+            min_val,
+            max_val,
+            period=period,
+            currency=currency,
+            raw_text=json.dumps(first_range),
+        )
+        comp_json = json.dumps(pay_ranges)
 
     # ── Location (flat string + structured Layer-1 emission) ─────────────────
     location_obj = posting.get("location") or {}
@@ -198,10 +209,12 @@ def _posting_to_job(posting: dict, _slug: str) -> dict:
         "locations_structured": _to_canonical(posting),
         "description": description,
         "source_url": source_url,
-        "salary_min": salary_min,
-        "salary_max": salary_max,
-        "salary_currency": salary_currency,
-        "salary_period": salary_period,
+        "salary_min": salary_fields["salary_min"],
+        "salary_max": salary_fields["salary_max"],
+        "salary_currency": salary_fields["salary_currency"],
+        "salary_period": salary_fields["salary_period"],
+        "salary_provenance": salary_fields["salary_provenance"],
+        "salary_observation": salary_fields["salary_observation"],
         "comp_json": comp_json,
         "source_id": source_id,
         "posted_date": posted_date,

@@ -138,7 +138,8 @@ def test_greenhouse_emits_hourly_period_and_currency():
     out = _posting_to_job(posting, "acme")
     assert out["salary_period"] == "hourly"
     assert out["salary_currency"] == "USD"
-    assert out["salary_min"] == 64
+    # P1.3: hourly $64 now annualizes ×2080 → 133,120 (was stored raw as 64).
+    assert out["salary_min"] == 133_120
 
 
 def test_greenhouse_emits_annual_eur():
