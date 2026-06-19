@@ -462,14 +462,23 @@ def _finalize(obs: SalaryObservation, values: list[int], hypothesis: str) -> Nor
 # ---------------------------------------------------------------------------
 
 
-def observation_to_dict(obs: SalaryObservation) -> dict:
+def observation_to_dict(obs: SalaryObservation, resolution: str | None = None) -> dict:
     """Serialize an observation to the JSON-log dict shape used by the append-log.
 
     This is the lossless record persisted in the ``salary_observations`` column
     (D-1). The key names match what ``db._jobs._merge_salary_observations`` and
     the m107 healing migration read.
+
+    ``resolution`` (P1.6, D-3/D-9) stamps the salvage-ladder verdict the single
+    normalizer reached for this observation (``ok``/``salvaged_*``/``implausible``/
+    ``empty``) onto the persisted record. Downstream quarantine detection
+    (``ParsedJob.from_job``, ``data_enricher``) reads it to route an
+    implausible-but-retained observation through ``unresolved_reasons`` without
+    re-normalizing. Omitted (key absent) when ``None`` so legacy records and
+    callers that do not normalize stay byte-identical; ``.get("resolution")``
+    then reads as "not implausible".
     """
-    return {
+    record = {
         "min_value": obs.min_value,
         "max_value": obs.max_value,
         "period": obs.period,
@@ -477,6 +486,9 @@ def observation_to_dict(obs: SalaryObservation) -> dict:
         "provenance": obs.provenance,
         "raw_text": obs.raw_text,
     }
+    if resolution is not None:
+        record["resolution"] = resolution
+    return record
 
 
 def salary_capture_fields(obs: SalaryObservation | None) -> dict:
@@ -509,7 +521,9 @@ def salary_capture_fields(obs: SalaryObservation | None) -> dict:
     fields: dict = {
         "salary_currency": normalized.currency,
         "salary_provenance": obs.provenance,
-        "salary_observations": [observation_to_dict(obs)],
+        # Stamp the salvage verdict (P1.6) so ParsedJob.from_job can quarantine an
+        # implausible-but-retained observation (canonical NULL + salary_implausible).
+        "salary_observations": [observation_to_dict(obs, normalized.resolution)],
     }
     if normalized.resolution in RESOLVED_RESOLUTIONS:
         fields["salary_min"] = normalized.salary_min

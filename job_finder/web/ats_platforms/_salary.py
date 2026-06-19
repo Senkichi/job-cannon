@@ -26,9 +26,11 @@ Design rules honored (binding — see #393):
 
 from __future__ import annotations
 
-from dataclasses import asdict
-
-from job_finder.salary_normalizer import SalaryObservation, normalize_observation
+from job_finder.salary_normalizer import (
+    SalaryObservation,
+    normalize_observation,
+    observation_to_dict,
+)
 
 # Substring → normalizer period. Handles the divergent interval vocabularies ATS
 # APIs expose (Lever's "per-year-salary", Ashby's "1 YEAR", Greenhouse's "year")
@@ -135,5 +137,7 @@ def build_salary_fields(
         "salary_period": normalized.period,
         "salary_currency": normalized.currency,
         "salary_provenance": "ats_structured",
-        "salary_observation": asdict(observation),
+        # Stamp the salvage verdict (P1.6) onto the lossless record so a NULLed
+        # implausible ATS pair still routes to quarantine via from_job (D-3/D-9).
+        "salary_observation": observation_to_dict(observation, normalized.resolution),
     }

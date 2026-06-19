@@ -211,7 +211,12 @@ class TestPinpointSalaryCapture:
 def test_unitless_cents_observation_salvages():
     """A Greenhouse-style unit-less raw-cents observation salvages to dollars."""
     out = build_salary_fields(17_000_000, 20_000_000, period="unknown")
-    obs = SalaryObservation(**out["salary_observation"])
+    # Strip the stamped resolution key (P1.6) — it is a normalizer output, not a
+    # raw SalaryObservation field — before reconstructing the observation.
+    raw_obs = {k: v for k, v in out["salary_observation"].items() if k != "resolution"}
+    obs = SalaryObservation(**raw_obs)
     norm = normalize_observation(obs)
     assert norm.salary_min == 170_000
     assert norm.resolution == "salvaged_cents"
+    # The capture site stamps the salvage verdict onto the persisted observation.
+    assert out["salary_observation"]["resolution"] == "salvaged_cents"

@@ -22,6 +22,19 @@ Invariants enforced here:
           (reason="jd_full_junk") with jd_full=None; other fields preserved
     I-14  title is not a result-count / category-landing tile (#211) → raises
           ListingTileError (hard drop; a count tile is not a posting)
+    I-15  salary not implausible (P1.6, D-3/D-9) → UnresolvedParsedJob
+          (reason="salary_implausible") when a source supplied a salary
+          observation the single normalizer could not salvage (resolution
+          'implausible') and the canonical pair is therefore NULL. The evidence
+          is retained in salary_observations; the NULL canonical re-enters
+          enrichment automatically (salary_min IS NULL selection) and the row
+          surfaces on /admin/review until a plausible pair resolves.
+
+``unresolved_reasons`` vocabulary (the quarantine surface, m078): the codes
+``ParsedJob.from_job`` can emit are ``title_metadata_blob`` (I-08), ``title_
+cross_field_bleed`` (I-09), ``jd_full_junk`` (I-13), and ``salary_implausible``
+(I-15). ``data_enricher`` additionally manages ``location_missing`` and clears
+``salary_implausible`` once a later pass resolves a plausible salary.
 
 Reference: .planning/specs/2026-05-29-ingestion-contract-enforcement.md §8
 """
@@ -281,9 +294,11 @@ class ParsedJob:
             I-10 (denylist)                 → raises DenylistedCompanyError
             I-07 (location shape)           → raises LocationShapeError
             I-13 (jd_full junk)             → UnresolvedParsedJob with jd_full=None
+            I-15 (salary_implausible)       → UnresolvedParsedJob, does NOT raise
 
-        Reasons from I-08 / I-09 / I-13 accumulate in ``unresolved_reasons``.
-        If I-10 or I-07 raise, no UnresolvedParsedJob is returned.
+        Reasons from I-08 / I-09 / I-13 / I-15 accumulate in
+        ``unresolved_reasons``. If I-10 or I-07 raise, no UnresolvedParsedJob is
+        returned.
 
         Title cleaning (``clean_title``) and metadata-blob detection
         (``is_metadata_blob``) also run here (Phase 48.01), universally
@@ -380,6 +395,31 @@ class ParsedJob:
             unresolved_reasons.append("jd_full_junk")
             clean_jd_full = None  # row still written, but jd_full cleared
 
+        # Salary observations (lossless append-log seed, D-1). Resolved here so the
+        # I-15 quarantine detector below can inspect each source's salvage verdict.
+        # 'salary_observation' (singular) is the single observation a capture site
+        # built for this sighting; else fall back to the Job's observation list.
+        salary_observations: list[dict] = (
+            [sm["salary_observation"]]
+            if sm.get("salary_observation")
+            else list(sm.get("salary_observations") or job.salary_observations)
+        )
+
+        # I-15 (P1.6, D-3/D-9): the source asserted a salary observation but the
+        # single normalizer could not salvage it (resolution 'implausible'), so the
+        # capture site left the canonical pair NULL. Quarantine the row via
+        # unresolved_reasons — the retained observation surfaces on /admin/review
+        # and the NULL canonical re-enters enrichment automatically (the selection
+        # query already keys off salary_min IS NULL). Detection is the salvage
+        # verdict the capture site stamped onto each observation (never re-derived
+        # here — D-2 single normalizer), gated on the canonical pair being NULL.
+        if (
+            job.salary_min is None
+            and job.salary_max is None
+            and any(obs.get("resolution") == "implausible" for obs in salary_observations)
+        ):
+            unresolved_reasons.append("salary_implausible")
+
         # Derive canonical dedup_key from validated company + cleaned title
         dedup_key = f"{normalize_company(job.company)}|{normalize_title(cleaned_title)}"
 
@@ -419,15 +459,11 @@ class ParsedJob:
             # (e.g. ATS scanners -> 'ats_structured'). Feed/SERP sources (P1.4)
             # instead tag the Job itself via salary_capture_fields, so when
             # source_meta carries nothing we fall back to the Job's fields. Absent
-            # both it stays None (unranked). 'salary_observation' (singular) is the
-            # single lossless observation a capture site built for this sighting;
-            # we seed the append-log with it, else with the Job's observation list.
+            # both it stays None (unranked). ``salary_observations`` was resolved
+            # above (seeded from the singular 'salary_observation' or the Job's
+            # list) so the I-15 detector and the persisted log share one source.
             "salary_provenance": sm.get("salary_provenance", job.salary_provenance),
-            "salary_observations": (
-                [sm["salary_observation"]]
-                if sm.get("salary_observation")
-                else list(sm.get("salary_observations") or job.salary_observations)
-            ),
+            "salary_observations": salary_observations,
             "description": job.description,
             "jd_full": clean_jd_full,
             "posted_date": job.posted_date,

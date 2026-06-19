@@ -24,8 +24,12 @@ from job_finder.web.location_canonical import JobLocation
 
 
 def _resolution_of(result: dict) -> str:
-    """Re-run the normalizer on the emitted observation to read its resolution code."""
-    obs = result["salary_observation"]
+    """Re-run the normalizer on the emitted observation to read its resolution code.
+
+    Strips the stamped ``resolution`` key (P1.6) before reconstructing the raw
+    SalaryObservation — resolution is a normalizer output, not a capture field.
+    """
+    obs = {k: v for k, v in result["salary_observation"].items() if k != "resolution"}
     return normalize_observation(SalaryObservation(**obs)).resolution
 
 

@@ -915,12 +915,58 @@ def _apply_post_fetch_extraction(
     return merged
 
 
+def _mutate_unresolved_reason(
+    conn: Any,
+    dedup_key: str,
+    job_row: dict,
+    reason: str,
+    *,
+    add: bool,
+) -> None:
+    """Surgically add or remove one ``unresolved_reasons`` code, preserving others.
+
+    A list-rebuild (not a wholesale overwrite) so a row carrying multiple reasons
+    keeps the unrelated ones (D-9: quarantine via the existing surface). Idempotent
+    — a no-op when the code is already present (add) or already absent (remove).
+    Never raises: a reason-sync failure must not abort the enrichment persist.
+    """
+    try:
+        raw = job_row.get("unresolved_reasons") or "[]"
+        try:
+            reasons = json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            reasons = []
+        if not isinstance(reasons, list):
+            reasons = []
+        present = reason in reasons
+        if add and not present:
+            updated = [*reasons, reason]
+        elif not add and present:
+            updated = [r for r in reasons if r != reason]  # surgical list-remove
+        else:
+            return  # already in the desired state
+        conn.execute(
+            "UPDATE jobs SET unresolved_reasons = ? WHERE dedup_key = ?",
+            (json.dumps(updated), dedup_key),
+        )
+        conn.commit()
+    except Exception as exc:
+        logger.warning(
+            "_persist: could not %s unresolved reason %r for '%s': %s",
+            "add" if add else "clear",
+            reason,
+            dedup_key,
+            exc,
+        )
+
+
 def _append_enrichment_salary_observation(
     conn: Any,
     dedup_key: str,
     sal_min: int | None,
     sal_max: int | None,
     provenance: str | None,
+    resolution: str | None = None,
 ) -> None:
     """Append an enrichment salary observation to the row's lossless log (D-1).
 
@@ -945,16 +991,17 @@ def _append_enrichment_salary_observation(
         stored = safe_json_load(row["salary_observations"], default=[]) if row else []
         if not isinstance(stored, list):
             stored = []
-        incoming = [
-            {
-                "min_value": sal_min,
-                "max_value": sal_max,
-                "period": "unknown",
-                "currency": "USD",
-                "provenance": provenance,
-                "raw_text": None,
-            }
-        ]
+        obs: dict = {
+            "min_value": sal_min,
+            "max_value": sal_max,
+            "period": "unknown",
+            "currency": "USD",
+            "provenance": provenance,
+            "raw_text": None,
+        }
+        if resolution is not None:
+            obs["resolution"] = resolution  # P1.6: stamp the salvage verdict (D-3/D-9)
+        incoming = [obs]
         merged, changed = _merge_salary_observations(stored, incoming)
         if changed:
             conn.execute(
@@ -1080,6 +1127,20 @@ def _persist(conn: Any, job_row: dict, enriched: dict, tier_name: str) -> None:
         # next writer can rank against it (single pair-atomic write).
         if salary_cols and incoming_salary_provenance:
             salary_cols = {**salary_cols, "salary_provenance": incoming_salary_provenance}
+        # P1.6 (D-2/D-3): classify the incoming pair through the single normalizer
+        # so the observation log and the quarantine reason both reflect one verdict.
+        from job_finder.salary_normalizer import SalaryObservation, normalize_observation
+
+        resolution = normalize_observation(
+            SalaryObservation(
+                min_value=sal_min,
+                max_value=sal_max,
+                period="unknown",
+                currency="USD",
+                provenance=incoming_salary_provenance or "feed_string",
+                raw_text=None,
+            )
+        ).resolution
         # Append the lossless observation regardless of who won the slot (D-1):
         # evidence is never discarded. Routed through the upsert helper so the
         # array stays deduped + capped.
@@ -1089,8 +1150,26 @@ def _persist(conn: Any, job_row: dict, enriched: dict, tier_name: str) -> None:
             sal_min,
             sal_max,
             incoming_salary_provenance,
+            resolution,
         )
         safe_enriched.update(salary_cols)
+
+        # P1.6 (D-3/D-9): keep the salary_implausible quarantine code in sync with
+        # the canonical outcome of this pass.
+        #   * A plausible pair won the slot  -> clear the code (the loop closes: the
+        #     row now has a canonical salary and leaves /admin/review).
+        #   * The pass yielded only an implausible observation and the canonical
+        #     pair is still NULL -> set the code so the row stays quarantined and
+        #     re-enters enrichment (salary_min IS NULL selection).
+        canonical_written = (
+            salary_cols.get("salary_min") is not None or salary_cols.get("salary_max") is not None
+        )
+        if canonical_written:
+            _mutate_unresolved_reason(conn, dedup_key, job_row, "salary_implausible", add=False)
+        elif resolution == "implausible" and (
+            job_row.get("salary_min") is None and job_row.get("salary_max") is None
+        ):
+            _mutate_unresolved_reason(conn, dedup_key, job_row, "salary_implausible", add=True)
 
     # --- Step 3: remaining fields + enrichment_tier ---
     # enrichment_tier is always written — even when every enriched field was
