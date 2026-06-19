@@ -351,8 +351,8 @@ def crawl_careers_batch(db_path: str, config: dict) -> dict:
     logger.info(
         "careers_crawler complete: %d crawled, %d found, %d new, "
         "%d playwright, %d interactive, %d api-cached, %d sitemap, "
-        "%d url-param, %d ai-navigated, %d ai-replayed, %d scored "
-        "(apply=%d, consider=%d, skip=%d, reject=%d)",
+        "%d url-param, %d ai-navigated, %d ai-replayed, %d ats-link-promoted, "
+        "%d scored (apply=%d, consider=%d, skip=%d, reject=%d)",
         summary["companies_crawled"],
         summary["jobs_found"],
         summary["jobs_new"],
@@ -363,6 +363,7 @@ def crawl_careers_batch(db_path: str, config: dict) -> dict:
         summary.get("url_param_hits", 0),
         summary.get("ai_navigated", 0),
         summary.get("ai_replayed", 0),
+        summary.get("ats_link_promoted", 0),
         summary["scored"],
         summary.get("classified_apply", 0),
         summary.get("classified_consider", 0),
@@ -393,6 +394,7 @@ _SUMMARY_KEYS = [
     "sitemap_hits",
     "ai_navigated",
     "ai_replayed",
+    "ats_link_promoted",
 ]
 
 
@@ -404,6 +406,68 @@ def _new_summary() -> dict:
     local_summary.
     """
     return {**dict.fromkeys(_SUMMARY_KEYS, 0), "errors": []}
+
+
+def _try_ats_link_promotion(
+    html: str,
+    page_url: str,
+    company_id: int,
+    company_name: str,
+    db_path: str,
+    config: dict,
+    local_summary: dict,
+) -> bool:
+    """Discover an outbound ATS link in a rendered custom page and promote (#453).
+
+    Classifies the highest-specificity Greenhouse/Lever/Ashby/Workday/
+    SmartRecruiters link in *html* via ``best_ats_candidate`` and, on a clean
+    (non-conflicting) hit, promotes the company to that existing scanner
+    through the audited ``promote_from_careers_link`` writer. Increments
+    ``local_summary['ats_link_promoted']`` and returns ``True`` only when the
+    company was actually flipped to ``hit`` (caller then skips remaining
+    tiers). Fail-open: any error is swallowed so discovery never breaks the
+    crawl.
+    """
+    from job_finder.web.ats_identity_reconcile import promote_from_careers_link
+    from job_finder.web.careers_crawler._ats_link_discovery import best_ats_candidate
+
+    try:
+        candidate = best_ats_candidate(html, page_url)
+        if candidate is None:
+            return False
+        platform, slug = candidate
+        with standalone_connection(db_path) as conn:
+            res = promote_from_careers_link(
+                conn,
+                company_id,
+                platform,
+                slug,
+                page_url=page_url,
+                config=config,
+            )
+        if res.get("outcome") == "promoted":
+            local_summary["ats_link_promoted"] += 1
+            logger.info(
+                "careers_crawler: ats_link_promoted %s → %s/%s via %s",
+                company_name,
+                platform,
+                slug[:48],
+                page_url,
+            )
+            return True
+        logger.debug(
+            "careers_crawler: ats_link discovery for %s outcome=%s",
+            company_name,
+            res.get("outcome"),
+        )
+        return False
+    except Exception as exc:
+        logger.debug(
+            "careers_crawler: ats_link discovery failed for %s: %s",
+            company_name,
+            exc,
+        )
+        return False
 
 
 def _crawl_companies(
@@ -456,6 +520,10 @@ def _crawl_companies(
                     cached_tier = company["careers_crawl_tier"]
                     now = utc_now_iso()
                     tier_used = "static"
+                    # Holds the Playwright-rendered DOM so the #453 ATS-link
+                    # discovery pass can reuse it without a second navigation.
+                    rendered_html: list[str] = []
+                    promoted_via_ats_link = False
 
                     logger.info(
                         "careers_crawler: crawling %s via %s",
@@ -555,6 +623,7 @@ def _crawl_companies(
                                         search_keywords,
                                         config,
                                         db_path=db_path,
+                                        html_sink=rendered_html,
                                     )
                                     jobs = pw_jobs
                                     tier_used = "playwright"
@@ -573,16 +642,47 @@ def _crawl_companies(
                                         target_titles,
                                         title_exclusions,
                                         db_path=db_path,
+                                        html_sink=rendered_html,
                                     )
                                     tier_used = "playwright"
                                     local_summary["playwright_rendered"] += 1
+
+                            # === ATS-link discovery (#453): custom-site dead end ===
+                            # Playwright rendered the page but title-filtered
+                            # extraction found 0 jobs. Many "custom" sites are
+                            # thin shells linking out to a real Greenhouse /
+                            # Lever / Ashby / Workday / SmartRecruiters board.
+                            # Harvest that outbound link from the already-
+                            # rendered DOM and promote the company to the
+                            # matching existing scanner — no second navigation,
+                            # no new extractor. On a hit, skip the remaining
+                            # tiers (the scanner cohort picks it up next scan).
+                            ats_link_enabled = config.get("careers_crawl", {}).get(
+                                "ats_link_discovery_enabled",
+                                True,
+                            )
+                            if (
+                                not jobs
+                                and ats_link_enabled
+                                and tier_used == "playwright"
+                                and rendered_html
+                            ):
+                                promoted_via_ats_link = _try_ats_link_promotion(
+                                    rendered_html[-1],
+                                    careers_url,
+                                    company_id,
+                                    company_name,
+                                    db_path,
+                                    config,
+                                    local_summary,
+                                )
 
                             # === Tier 4: AI-navigated (replay cached recipe, or discover new) ===
                             ai_nav_enabled = config.get("careers_crawl", {}).get(
                                 "ai_navigation_enabled",
                                 True,
                             )
-                            if not jobs and ai_nav_enabled:
+                            if not jobs and not promoted_via_ats_link and ai_nav_enabled:
                                 jobs, tier_used = _try_ai_navigation(
                                     browser,
                                     company,

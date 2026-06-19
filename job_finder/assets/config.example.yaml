@@ -318,6 +318,11 @@ careers_crawl:
   max_pagination_pages: 5
   # Enable Playwright interaction (load-more, pagination, search forms)
   interactive_enabled: true
+  # Outbound ATS-link discovery (#453): when a custom career page renders with
+  # 0 matched jobs, harvest any embedded Greenhouse/Lever/Ashby/Workday/
+  # SmartRecruiters board link from the rendered DOM and promote the company to
+  # that existing scanner. Reuses the already-rendered page (no extra crawl).
+  ats_link_discovery_enabled: true
 
 # --- ATS (Applicant Tracking System) scanning ---
 ats:
