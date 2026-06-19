@@ -32,6 +32,16 @@ class Job:
     # them where determinable. CHECK allowlists are enforced at the DB boundary.
     salary_currency: str = "USD"
     salary_period: str = "unknown"
+    # Trust-ranked reconciliation metadata (P1.4, D-1/D-4). Capture sites that
+    # delegate to ``salary_normalizer.salary_capture_fields`` populate these:
+    # ``salary_provenance`` is the writer class (PROVENANCE_RANK key, e.g.
+    # 'feed_string'); ``salary_observations`` is the lossless append-log seed of
+    # what the source asserted (retained even when the canonical pair is NULLed,
+    # D-3). ``ParsedJob.from_job`` carries both into the upsert append-log when no
+    # source_meta override is supplied. Default empty/None keeps legacy Job()
+    # construction (and the unranked-row contract) backward-compatible.
+    salary_provenance: str | None = None
+    salary_observations: list[dict] = field(default_factory=list)
     description: str | None = None
     posted_date: datetime | None = None
     # Provenance of posted_date (#363): 'exact' (ATS/API first-posted

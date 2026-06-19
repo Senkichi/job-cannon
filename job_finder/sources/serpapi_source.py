@@ -140,7 +140,7 @@ class SerpAPISource:
         # Normalization for lookup happens at upsert_company() at the write boundary.
 
         # Extract salary if available
-        salary_min, salary_max = self._extract_salary(result)
+        salary_fields = self._capture_salary(result)
 
         # Build description from highlights
         description_parts = []
@@ -163,29 +163,23 @@ class SerpAPISource:
             source_url=source_url,
             # No source_id: SerpAPI's job_id is a search-result token, not a
             # per-job-stable platform ID (I-11).
-            salary_min=salary_min,
-            salary_max=salary_max,
+            **salary_fields,
             description=description,
         )
 
-    def _extract_salary(self, result: dict) -> tuple[int | None, int | None]:
-        """Extract salary from SerpAPI result extensions."""
+    def _capture_salary(self, result: dict) -> dict:
+        """Capture the SerpAPI Google-Jobs salary string as an observation (D-1/D-2/D-3).
+
+        Replaces the bespoke salary regex (plan §1.2 item 3) with delegation to
+        the single normalizer. The FULL ``detected_extensions.salary`` text is
+        passed so period cues survive ("$150K–$200K a year" → annual; an hourly
+        snippet → annualized via the salvage ladder). Returns the salary-related
+        ``Job`` kwargs (canonical pair only when the ladder resolves it; junk
+        quarantines to a NULL pair with the observation retained). Provenance is
+        ``feed_string`` — a SERP snippet, lowest trust (D-4).
+        """
+        from job_finder.salary_normalizer import parse_salary_text, salary_capture_fields
+
         ext = result.get("detected_extensions", {})
         salary = ext.get("salary", "")
-        if not salary:
-            return None, None
-
-        import re
-
-        # Format: "$150K–$200K a year" or "$150,000-$200,000"
-        match = re.search(r"\$(\d[\d,]*)\s*[K–-]+\s*\$(\d[\d,]*)", salary, re.IGNORECASE)
-        if match:
-            low = int(match.group(1).replace(",", ""))
-            high = int(match.group(2).replace(",", ""))
-            if low < 1000:
-                low *= 1000
-            if high < 1000:
-                high *= 1000
-            return low, high
-
-        return None, None
+        return salary_capture_fields(parse_salary_text(salary, provenance="feed_string"))

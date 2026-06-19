@@ -7,7 +7,8 @@ from job_finder.sources._error_envelope import VendorAccountError
 from job_finder.sources.portal_search_source import (
     SERP_PORTALS,
     _detect_portal_from_url,
-    _parse_salary_string,
+    _feed_salary_from_text,
+    _feed_salary_from_values,
     _safe_int,
     fetch_all_portals,
     fetch_serp_portals,
@@ -36,11 +37,53 @@ class TestHelpers:
         assert _safe_int(None) is None
         assert _safe_int("bad") is None
 
-    def test_parse_salary_string(self):
-        assert _parse_salary_string("$150K - $200K") == (150000, 200000)
-        assert _parse_salary_string("$150,000 - $200,000") == (150000, 200000)
-        assert _parse_salary_string("") == (None, None)
-        assert _parse_salary_string("negotiable") == (None, None)
+    def test_feed_salary_from_text_annual(self):
+        # In-window annual ranges resolve to the canonical pair, tagged feed_string.
+        fields = _feed_salary_from_text("$150K - $200K")
+        assert fields["salary_min"] == 150000
+        assert fields["salary_max"] == 200000
+        assert fields["salary_provenance"] == "feed_string"
+        assert len(fields["salary_observations"]) == 1
+
+        fields = _feed_salary_from_text("$150,000 - $200,000")
+        assert fields["salary_min"] == 150000
+        assert fields["salary_max"] == 200000
+
+    def test_feed_salary_from_text_empty(self):
+        # No salary asserted at all → no observation, no salary fields.
+        assert _feed_salary_from_text("") == {}
+        assert _feed_salary_from_text("negotiable") == {}
+
+    def test_feed_salary_from_text_junk_quarantines_but_retains_observation(self):
+        # P1.4 junk fixture: jooble "$3k - $251k"-class — the 3k min is sub-floor,
+        # so the pair quarantines to NULL (D-3) but the observation is RETAINED.
+        fields = _feed_salary_from_text("$3k - $251k")
+        assert "salary_min" not in fields
+        assert "salary_max" not in fields
+        assert fields["salary_provenance"] == "feed_string"
+        assert len(fields["salary_observations"]) == 1
+        obs = fields["salary_observations"][0]
+        assert obs["raw_text"] == "$3k - $251k"
+        assert obs["min_value"] == 3000
+        assert obs["max_value"] == 251000
+
+    def test_feed_salary_from_values_passthrough_sub_floor(self):
+        # P1.4 junk fixture: RemoteOK passthrough 46 — sub-floor, no period →
+        # canonical NULL, observation retained.
+        fields = _feed_salary_from_values(46, None, raw_text="remoteok")
+        assert "salary_min" not in fields
+        assert fields["salary_provenance"] == "feed_string"
+        assert fields["salary_observations"][0]["min_value"] == 46.0
+
+    def test_feed_salary_from_values_passthrough_in_window(self):
+        # An in-window passthrough pair is kept (assumed annual).
+        fields = _feed_salary_from_values(150000, 200000, raw_text="remoteok")
+        assert fields["salary_min"] == 150000
+        assert fields["salary_max"] == 200000
+        assert fields["salary_provenance"] == "feed_string"
+
+    def test_feed_salary_from_values_empty(self):
+        assert _feed_salary_from_values(None, None) == {}
 
     def test_detect_portal_from_url(self):
         portals = [{"domain": "lever.co", "name": "lever"}]

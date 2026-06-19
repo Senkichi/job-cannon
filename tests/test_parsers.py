@@ -1283,13 +1283,16 @@ View job: https://www.linkedin.com/comm/jobs/view/3333333333/?trackingId=t3
         assert j2.location == "New York, NY"
 
     def test_audit_linkedin_salary_formats(self):
-        """LinkedIn salary regex handles $168K-$255K and mixed K/full formats.
+        """LinkedIn salary parsing delegates to salary_normalizer (P1.4, D-2/D-3).
 
-        AUDIT NOTE: The LinkedIn parser regex is \\$(\\d+)K?\\s*-\\s*\\$(\\d+)K
-        (note: trailing K has no ?, so BOTH numbers must end in K).
-        Supported: $168K-$255K (both K), $168-$255K (first K optional).
-        Unsupported: $150,000 - $200,000 (comma separators; use Indeed's SALARY_RE
-        for that format). LinkedIn emails use K-notation so this is intentional.
+        AUDIT NOTE: salary parsing is now the single normalizer's job. K-notation
+        ranges with both sides marked ($168K-$255K) and comma-formatted full
+        dollars ($150,000 - $200,000) resolve as before. A *mixed* range where one
+        side carries K and the other does not ($168-$255K) is now QUARANTINED to
+        (None, None): the normalizer never infers a partner unit (D-3 forbids
+        guessing uncorroborated units into canonical columns — this is the same
+        guard that stops the "$3k - $251k" S2 bug). The observation is retained so
+        the row re-enters enrichment.
         """
         from job_finder.parsers.linkedin_parser import _extract_salary
 
@@ -1298,10 +1301,11 @@ View job: https://www.linkedin.com/comm/jobs/view/3333333333/?trackingId=t3
         assert low == 168000, f"Expected 168000, got {low}"
         assert high == 255000, f"Expected 255000, got {high}"
 
-        # Mixed: first side has no K, second has K (K? makes first optional)
+        # Mixed: first side has no K, second has K. The single normalizer does NOT
+        # infer K on the bare side (D-3), so this quarantines rather than guessing.
         low2, high2 = _extract_salary("$168-$255K / year salary")
-        assert low2 == 168000, f"Expected 168000, got {low2}"
-        assert high2 == 255000, f"Expected 255000, got {high2}"
+        assert low2 is None, f"Expected None (quarantined), got {low2}"
+        assert high2 is None, f"Expected None (quarantined), got {high2}"
 
         # No salary
         low3, high3 = _extract_salary("No salary information available in this listing.")

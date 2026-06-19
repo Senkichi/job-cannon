@@ -43,7 +43,15 @@ SALARY_RANGE_RE = re.compile(r"\$(\d[\d,]*)\s*[Kk]?\s*[-\u2013]+\s*\$(\d[\d,]*)\
 
 
 def parse_salary_range(text: str) -> tuple[int | None, int | None]:
-    """Extract a salary range from free-form text.
+    """Extract a salary range from free-form email text.
+
+    P1.4 (D-2): delegates to ``salary_normalizer.parse_salary_text`` (single
+    parser) + ``normalize_observation`` (single normalizer) with provenance
+    ``email_snippet`` instead of the bespoke regex + K-notation math this
+    replaces (plan §1.2 item 5). The normalizer now applies the plausibility
+    floor/ceiling and the salvage ladder (D-3), so sub-floor / cross-unit junk
+    that the old unbounded parser would have stapled into the row now returns
+    ``(None, None)``; period cues ("an hour") are honored and annualized.
 
     Handles formats like:
         $168K-$255K / year salary
@@ -51,28 +59,22 @@ def parse_salary_range(text: str) -> tuple[int | None, int | None]:
         $120K - $150K (Employer est.)
 
     Returns:
-        (salary_min, salary_max) as full dollar ints, or (None, None).
+        (salary_min, salary_max) as annualized-USD ints, or (None, None) when no
+        range is found or the value is implausible.
     """
-    match = SALARY_RANGE_RE.search(text)
-    if not match:
+    from job_finder.salary_normalizer import (
+        RESOLVED_RESOLUTIONS,
+        normalize_observation,
+        parse_salary_text,
+    )
+
+    obs = parse_salary_text(text, provenance="email_snippet")
+    if obs is None:
         return None, None
-
-    low_str = match.group(1).replace(",", "")
-    high_str = match.group(2).replace(",", "")
-
-    try:
-        low = int(low_str)
-        high = int(high_str)
-    except ValueError:
+    normalized = normalize_observation(obs)
+    if normalized.resolution not in RESOLVED_RESOLUTIONS:
         return None, None
-
-    # Convert K-notation to full dollar values
-    if low < 1000:
-        low *= 1000
-    if high < 1000:
-        high *= 1000
-
-    return low, high
+    return normalized.salary_min, normalized.salary_max
 
 
 def looks_like_salary_range(text: str) -> bool:

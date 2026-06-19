@@ -414,16 +414,19 @@ class ParsedJob:
             # for direct ParsedJob construction paths.
             "salary_currency": sm.get("salary_currency", job.salary_currency),
             "salary_period": sm.get("salary_period", job.salary_period),
-            # Trust-ranked reconciliation metadata (P1.5, D-4). Capture sites that
-            # know their writer class set source_meta['salary_provenance'] (e.g.
-            # ATS scanners -> 'ats_structured'); absent it stays None (unranked).
-            # 'salary_observation' (singular) is the single lossless observation a
-            # capture site built for this sighting; we seed the append-log with it.
-            "salary_provenance": sm.get("salary_provenance"),
+            # Trust-ranked reconciliation metadata (P1.5/P1.4, D-1/D-4). Capture
+            # sites that know their writer class set source_meta['salary_provenance']
+            # (e.g. ATS scanners -> 'ats_structured'). Feed/SERP sources (P1.4)
+            # instead tag the Job itself via salary_capture_fields, so when
+            # source_meta carries nothing we fall back to the Job's fields. Absent
+            # both it stays None (unranked). 'salary_observation' (singular) is the
+            # single lossless observation a capture site built for this sighting;
+            # we seed the append-log with it, else with the Job's observation list.
+            "salary_provenance": sm.get("salary_provenance", job.salary_provenance),
             "salary_observations": (
                 [sm["salary_observation"]]
                 if sm.get("salary_observation")
-                else list(sm.get("salary_observations", []))
+                else list(sm.get("salary_observations") or job.salary_observations)
             ),
             "description": job.description,
             "jd_full": clean_jd_full,
