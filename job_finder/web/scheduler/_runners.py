@@ -27,10 +27,16 @@ logger = logging.getLogger(__name__)
 def run_enrichment_backfill_two_stage(
     db_path: str, config: dict, *, run_id: str | None = None
 ) -> dict[str, Any]:
-    """Run the post-ingestion enrichment backfill, then score new rows.
+    """Run the post-ingestion enrichment backfill, score new rows, then drain
+    the empty-location backlog via a cheap extraction-only pass.
 
     Stage 1: fill ``jd_full`` via the cost-ordered tier pipeline.
     Stage 2: score every newly-enriched row.
+    Stage 3: extraction-only location pass — drains rows that already have a
+      good jd_full but an empty location, including terminal-tier rows that
+      the regular cascade skips. Capped at 50 rows/run so the nightly job
+      does not block long on a large backlog (50/run × 3 runs/day ≈ 2–3 days
+      to drain the ~325-row careers-crawl backlog). D-5 / #388.
 
     Without stage 2 the v3.0 multi-stage pipeline leaks: ingestion-time
     scoring sees empty ``jd_full`` and skips, and nothing else picks
@@ -45,12 +51,16 @@ def run_enrichment_backfill_two_stage(
     ``run_events.jsonl`` carries the same id as this run's
     ``run_start`` / ``run_end`` envelope.
     """
-    from job_finder.web.data_enricher import run_enrichment_backfill
+    from job_finder.web.data_enricher import (
+        run_enrichment_backfill,
+        run_location_extraction_backfill,
+    )
     from job_finder.web.db_helpers import standalone_connection
     from job_finder.web.scoring_runner import run_scoring
 
     result: dict[str, Any] = {
         "enriched": 0,
+        "location_resolved": 0,
         "scored": 0,
         "classified_apply": 0,
         "classified_consider": 0,
@@ -88,17 +98,34 @@ def run_enrichment_backfill_two_stage(
         dedup_keys = [r[0] for r in rows]
         if not dedup_keys:
             logger.info("Post-enrichment scoring: nothing to score")
-            return result
-        summary = run_scoring(dedup_keys, config, db_path, run_id=run_id)
-        result["scored"] = summary.get("scored", 0)
-        result["classified_apply"] = summary.get("classified_apply", 0)
-        result["classified_consider"] = summary.get("classified_consider", 0)
-        result["classified_skip"] = summary.get("classified_skip", 0)
-        result["classified_reject"] = summary.get("classified_reject", 0)
-        logger.info("Post-enrichment scoring: %s", summary)
+        else:
+            summary = run_scoring(dedup_keys, config, db_path, run_id=run_id)
+            result["scored"] = summary.get("scored", 0)
+            result["classified_apply"] = summary.get("classified_apply", 0)
+            result["classified_consider"] = summary.get("classified_consider", 0)
+            result["classified_skip"] = summary.get("classified_skip", 0)
+            result["classified_reject"] = summary.get("classified_reject", 0)
+            logger.info("Post-enrichment scoring: %s", summary)
     except Exception as e:
         logger.error("Post-enrichment scoring failed: %s", e)
         result["errors"].append(f"post_scoring: {type(e).__name__}: {e}")
+
+    # Stage 3: extraction-only location pass (D-5, #388).
+    # Runs after scoring so a row that just got jd_full in stage 1 can be
+    # caught here on the same run rather than waiting for the next cycle.
+    # Capped at 50/run to stay lightweight; best-effort — never aborts the
+    # result dict even on total failure.
+    try:
+        location_resolved = run_location_extraction_backfill(
+            db_path,
+            config=config,
+            limit=50,
+        )
+        result["location_resolved"] = location_resolved
+        logger.info("Location extraction backfill: %d resolved", location_resolved)
+    except Exception as e:
+        logger.warning("Location extraction backfill failed: %s", e)
+        result["errors"].append(f"location_extract: {type(e).__name__}: {e}")
 
     return result
 
