@@ -603,13 +603,24 @@ def _upsert_one_ats_api_job(
         # salary source (provenance 'ats_structured', rank 4). Tag the writer
         # class and seed the lossless observation log so the reconciler can rank
         # it and the evidence survives even when the canonical pair is later
-        # quarantined/overwritten. The observation records the RAW structured
-        # values the scanner resolved (D-1); comp_data_json retains the verbatim
-        # API payload for healing.
+        # quarantined/overwritten. comp_data_json retains the verbatim API
+        # payload for healing.
         _source_meta: dict = {
             "locations_structured": job_dict.get("locations_structured") or [],
         }
-        if salary_min is not None or salary_max is not None:
+        # P1.3 (D-1): a converted capture site builds the lossless observation
+        # itself — it carries the RAW per-period values the source asserted (e.g.
+        # $64/hour), NOT the annualized canonical pair. Use it verbatim so the
+        # append-log records what the source actually said. Scanners not yet
+        # converted fall back to synthesizing an observation from the resolved
+        # job-dict values below.
+        scanner_observation = job_dict.get("salary_observation")
+        if scanner_observation is not None:
+            _source_meta["salary_provenance"] = (
+                job_dict.get("salary_provenance") or "ats_structured"
+            )
+            _source_meta["salary_observation"] = scanner_observation
+        elif salary_min is not None or salary_max is not None:
             from dataclasses import asdict
 
             _source_meta["salary_provenance"] = "ats_structured"

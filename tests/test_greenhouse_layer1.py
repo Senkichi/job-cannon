@@ -1,64 +1,41 @@
 """Tests for Greenhouse Layer-1 emission: source_id, posted_date, JobLocation, salary.
 
-Phase 48.03 — Greenhouse Layer-1: emit JobLocation + source_id + posted_date,
-resolve cents/dollars ambiguity (D-07 / F-02 / F-04 / F-06).
+Phase 48.03 — Greenhouse Layer-1: emit JobLocation + source_id + posted_date.
 
-Three documented salary fixtures from the issue:
-  1. Annual salary in cents (6_500_000 → $65,000)
-  2. Hourly $64 (the "64-64" documented case) — stored as 64, NOT 6_400
-  3. Missing interval AND value > 1_000 — stored as-is for Phase 49.02 flagging
+Salary capture (Data Integrity Overhaul P1.3, D-1/D-2): the lossy ``_resolve_salary``
+resolver is DELETED. ``_posting_to_job`` now performs only the lossless
+cents-vs-dollars decode at capture, wraps the raw per-period values in a
+``SalaryObservation``, and delegates annualization + the corroborated cents
+salvage ladder to the single normalizer. Consequences exercised below:
+  * hourly values now annualize (×2080): the documented ``64/64 unit=hour`` case
+    becomes 133,120 (was stored as 64).
+  * unit-less raw-cents pairs (Northbeam/Roblox) now salvage to dollars via the
+    normalizer's corroborated cents rung instead of landing as $17M.
 """
 
 from __future__ import annotations
 
+from job_finder.salary_normalizer import SalaryObservation, normalize_observation
 from job_finder.web.ats_platforms._platforms_greenhouse import (
     _posting_to_job,
-    _resolve_salary,
     _to_canonical,
 )
 from job_finder.web.location_canonical import JobLocation
 
-# ---------------------------------------------------------------------------
-# _resolve_salary: pure unit tests
-# ---------------------------------------------------------------------------
 
-
-class TestResolveSalary:
-    def test_annual_cents_large_value_divides(self):
-        """interval='year' AND value > 1_000 → divide by 100 (cents to dollars)."""
-        assert _resolve_salary(6_500_000, "year") == 65_000
-
-    def test_hourly_small_value_stored_as_is(self):
-        """interval='hour' → value is already dollars; no division applied."""
-        assert _resolve_salary(64, "hour") == 64
-
-    def test_annual_small_value_not_divided(self):
-        """interval='year' but value ≤ 1_000 → treat as dollars (not cents)."""
-        assert _resolve_salary(64, "year") == 64
-
-    def test_no_interval_large_value_stored_as_is(self):
-        """Missing interval AND value > 1_000 → store as-is (no blind division).
-
-        Phase 49.02 unit-tagging will flag these suspect rows.
-        """
-        assert _resolve_salary(150_000, None) == 150_000
-
-    def test_no_interval_small_value_stored_as_is(self):
-        assert _resolve_salary(500, None) == 500
-
-    def test_none_value_returns_none_regardless_of_interval(self):
-        assert _resolve_salary(None, "year") is None
-        assert _resolve_salary(None, "hour") is None
-        assert _resolve_salary(None, None) is None
+def _resolution_of(result: dict) -> str:
+    """Re-run the normalizer on the emitted observation to read its resolution code."""
+    obs = result["salary_observation"]
+    return normalize_observation(SalaryObservation(**obs)).resolution
 
 
 # ---------------------------------------------------------------------------
-# _posting_to_job: three documented salary fixtures (acceptance criteria)
+# _posting_to_job: documented salary fixtures (acceptance criteria, P1.3)
 # ---------------------------------------------------------------------------
 
 
 class TestSalaryFixtures:
-    """The three concrete salary cases documented in the Phase 48.03 issue."""
+    """Concrete salary cases — capture decode + single-normalizer salvage ladder."""
 
     def test_fixture1_annual_cents_encoded_salary(self):
         """Fixture 1: cents-encoded annual salary.
@@ -84,11 +61,14 @@ class TestSalaryFixtures:
         result = _posting_to_job(posting, "acme")
         assert result["salary_min"] == 65_000
         assert result["salary_max"] == 85_000
+        assert result["salary_period"] == "annual"
+        assert _resolution_of(result) == "ok"
 
-    def test_fixture2_hourly_dollar_salary_not_divided(self):
+    def test_fixture2_hourly_dollar_salary_annualizes(self):
         """Fixture 2: the documented 64-64 case (hourly $64).
 
-        min_cents=64 with unit="hour" → salary stored as 64, NOT 6_400.
+        min_cents=64 with unit="hour" → $64/hour, annualized ×2080 → 133,120
+        (P1.3: the old "stored as 64" behavior is replaced by annualization).
         """
         posting = {
             "id": 67890,
@@ -106,16 +86,18 @@ class TestSalaryFixtures:
             ],
         }
         result = _posting_to_job(posting, "acme")
-        assert result["salary_min"] == 64, (
-            "Hourly $64 must NOT be divided by 100 — it is already in dollars"
-        )
-        assert result["salary_max"] == 64
+        assert result["salary_min"] == 133_120, "Hourly $64 must annualize ×2080"
+        assert result["salary_max"] == 133_120
+        assert result["salary_period"] == "hourly"
+        # The observation records the RAW per-period value (D-1), not the annual pair.
+        assert result["salary_observation"]["min_value"] == 64
+        assert result["salary_observation"]["period"] == "hourly"
 
-    def test_fixture3_missing_interval_large_value_stored_as_is(self):
-        """Fixture 3: no unit/interval field AND value > 1_000.
+    def test_fixture3_missing_interval_in_window_assumed_annual(self):
+        """Fixture 3: no unit/interval, values already in the plausibility window.
 
-        Value is stored as-is (no division). Phase 49.02 surfaces the
-        ambiguity via the unresolved salary_period flagging.
+        150k/200k with no interval → normalizer assumes annual (rung 2), period
+        stays the source 'unknown'.
         """
         posting = {
             "id": 99999,
@@ -133,11 +115,83 @@ class TestSalaryFixtures:
             ],
         }
         result = _posting_to_job(posting, "acme")
-        assert result["salary_min"] == 150_000, (
-            "Without interval signal, value must NOT be divided — "
-            "store as-is for Phase 49.02 flagging"
-        )
+        assert result["salary_min"] == 150_000
         assert result["salary_max"] == 200_000
+        assert result["salary_period"] == "unknown"
+        assert _resolution_of(result) == "ok"
+
+    def test_fixture_hour_64_90_annualizes(self):
+        """unit=hour, 64/90 → 133,120 / 187,200, period 'hourly'."""
+        posting = {
+            "id": 11,
+            "title": "Eng",
+            "absolute_url": "https://boards.greenhouse.io/acme/jobs/11",
+            "location": {"name": "Remote"},
+            "pay_input_ranges": [{"min_cents": 64, "max_cents": 90, "unit": "hour"}],
+        }
+        result = _posting_to_job(posting, "acme")
+        assert result["salary_min"] == 133_120
+        assert result["salary_max"] == 187_200
+        assert result["salary_period"] == "hourly"
+
+    def test_fixture_northbeam_unitless_cents_salvaged(self):
+        """Northbeam-shaped: no unit, 17M/20M cents → 170k/200k via cents salvage.
+
+        period stays 'unknown' (the source said nothing); resolution 'salvaged_cents'.
+        """
+        posting = {
+            "id": 22,
+            "title": "Senior Data Scientist",
+            "absolute_url": "https://boards.greenhouse.io/northbeam/jobs/22",
+            "location": {"name": "Remote"},
+            "pay_input_ranges": [{"min_cents": 17_000_000, "max_cents": 20_000_000}],
+        }
+        result = _posting_to_job(posting, "acme")
+        assert result["salary_min"] == 170_000
+        assert result["salary_max"] == 200_000
+        assert result["salary_period"] == "unknown"
+        assert _resolution_of(result) == "salvaged_cents"
+        # D-1: the observation keeps the raw cents evidence.
+        assert result["salary_observation"]["min_value"] == 17_000_000
+
+    def test_fixture_roblox_unitless_cents_salvaged(self):
+        """Roblox-shaped: no unit, 18.586M/22.138M cents → 185,860 / 221,380."""
+        posting = {
+            "id": 33,
+            "title": "Staff ML Engineer",
+            "absolute_url": "https://boards.greenhouse.io/roblox/jobs/33",
+            "location": {"name": "San Mateo, CA"},
+            "pay_input_ranges": [{"min_cents": 18_586_000, "max_cents": 22_138_000}],
+        }
+        result = _posting_to_job(posting, "acme")
+        assert result["salary_min"] == 185_860
+        assert result["salary_max"] == 221_380
+        assert result["salary_period"] == "unknown"
+        assert _resolution_of(result) == "salvaged_cents"
+
+    def test_provenance_is_ats_structured_when_salary_present(self):
+        posting = {
+            "id": 44,
+            "title": "Eng",
+            "absolute_url": "https://boards.greenhouse.io/acme/jobs/44",
+            "location": {"name": "Remote"},
+            "pay_input_ranges": [{"min_cents": 150_000, "max_cents": 200_000}],
+        }
+        result = _posting_to_job(posting, "acme")
+        assert result["salary_provenance"] == "ats_structured"
+
+    def test_no_pay_ranges_emits_no_observation(self):
+        posting = {
+            "id": 55,
+            "title": "Eng",
+            "absolute_url": "https://boards.greenhouse.io/acme/jobs/55",
+            "location": {"name": "Remote"},
+        }
+        result = _posting_to_job(posting, "acme")
+        assert result["salary_min"] is None
+        assert result["salary_max"] is None
+        assert result["salary_provenance"] is None
+        assert result["salary_observation"] is None
 
 
 # ---------------------------------------------------------------------------
@@ -340,7 +394,8 @@ class TestIntervalFieldAlias:
         assert result["salary_min"] == 100_000
         assert result["salary_max"] == 150_000
 
-    def test_interval_key_hourly_not_divided(self):
+    def test_interval_key_hourly_annualizes(self):
+        """'interval'=hour values are dollars/hour and annualize ×2080 (P1.3)."""
         posting = {
             "id": 1,
             "title": "Eng",
@@ -355,5 +410,6 @@ class TestIntervalFieldAlias:
             ],
         }
         result = _posting_to_job(posting, "acme")
-        assert result["salary_min"] == 45
-        assert result["salary_max"] == 55
+        assert result["salary_min"] == 93_600  # 45 × 2080
+        assert result["salary_max"] == 114_400  # 55 × 2080
+        assert result["salary_period"] == "hourly"

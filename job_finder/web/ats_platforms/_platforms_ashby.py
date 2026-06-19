@@ -19,6 +19,7 @@ from job_finder.web.ats_platforms._registry import (
     coerce_remote_bool,
     label_or_str,
 )
+from job_finder.web.ats_platforms._salary import build_salary_fields, period_from_interval
 from job_finder.web.description_formatter import html_to_plain_text
 from job_finder.web.location_canonical import (
     JobLocation,
@@ -130,17 +131,24 @@ def _to_canonical(posting: dict) -> list[JobLocation]:
 
 
 def _posting_to_job(posting: dict, _slug: str) -> dict:
-    salary_min = None
-    salary_max = None
+    # ── Salary (P1.3 capture, D-1/D-2): wrap the raw base_salary component in an
+    # observation and delegate annualization/salvage to the single normalizer.
+    # Ashby components carry ``interval`` (e.g. "1 YEAR") and ``currencyCode``.
     comp_json = None
+    salary_fields = build_salary_fields(None, None)
     compensation = posting.get("compensation")
     if compensation:
         comp_json = json.dumps(compensation)
         summary_components = compensation.get("summaryComponents") or []
         for component in summary_components:
             if component.get("compensationType") == "base_salary":
-                salary_min = component.get("minValue")
-                salary_max = component.get("maxValue")
+                salary_fields = build_salary_fields(
+                    component.get("minValue"),
+                    component.get("maxValue"),
+                    period=period_from_interval(component.get("interval")),
+                    currency=component.get("currencyCode") or component.get("currency"),
+                    raw_text=json.dumps(component),
+                )
                 break
 
     location = posting.get("location") or ""
@@ -174,8 +182,12 @@ def _posting_to_job(posting: dict, _slug: str) -> dict:
         "locations_structured": _to_canonical(posting),
         "description": description,
         "source_url": posting.get("jobUrl") or "",
-        "salary_min": salary_min,
-        "salary_max": salary_max,
+        "salary_min": salary_fields["salary_min"],
+        "salary_max": salary_fields["salary_max"],
+        "salary_currency": salary_fields["salary_currency"],
+        "salary_period": salary_fields["salary_period"],
+        "salary_provenance": salary_fields["salary_provenance"],
+        "salary_observation": salary_fields["salary_observation"],
         "comp_json": comp_json,
         "source_id": source_id,
         "posted_date": posted_date,
