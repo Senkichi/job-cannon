@@ -13,7 +13,11 @@ import time
 
 import requests
 
-from job_finder.web.ats_platforms._registry import PlatformScanner
+from job_finder.web.ats_platforms._registry import (
+    PlatformScanner,
+    coerce_remote_bool,
+    label_or_str,
+)
 from job_finder.web.ats_prober import _PROBE_TIMEOUT
 from job_finder.web.location_canonical import JobLocation
 
@@ -185,6 +189,13 @@ def _posting_to_job(posting: dict, slug: str) -> dict:
     # Polite pacing between per-job detail fetches.
     time.sleep(_DETAIL_FETCH_SLEEP_S)
 
+    # ── Structured-field CAPTURE (#451) — raw-as-provided, no synthesis ───────
+    # SmartRecruiters emits ``location.remote`` (bool) and the
+    # ``typeOfEmployment`` / ``department`` objects ({id, label}).
+    is_remote = coerce_remote_bool(loc.get("remote") if isinstance(loc, dict) else None)
+    employment_type = label_or_str(posting.get("typeOfEmployment"))
+    department = label_or_str(posting.get("department"))
+
     return {
         "title": posting.get("name", ""),
         "company_source": "SmartRecruiters",
@@ -197,6 +208,9 @@ def _posting_to_job(posting: dict, slug: str) -> dict:
         "comp_json": None,
         "source_id": source_id,
         "posted_date": posted_date,
+        "is_remote": is_remote,
+        "employment_type": employment_type,
+        "department": department,
     }
 
 

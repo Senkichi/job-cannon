@@ -69,6 +69,12 @@ COLUMN_CATEGORIES: dict[str, str] = {
     "direct_url_confidence": "system",  # NEW m085 — strict/loose match tag
     "direct_url_checked_at": "system",  # NEW m092 — last resolver board-match attempt
     "direct_url_attempts": "system",  # NEW m092 — cumulative resolver attempts
+    # ATS structured-field CAPTURE (#451 m106) — raw-as-provided from ATS JSON,
+    # written post-insert via direct UPDATE (not the ParsedJob/upsert INSERT
+    # path), so categorized "system" like comp_data_json — NOT parser-owned.
+    "is_remote": "system",  # NEW m106 — raw isRemote/remote/workplaceType bool
+    "employment_type": "system",  # NEW m106 — raw employmentType/typeOfEmployment/commitment
+    "department": "system",  # NEW m106 — raw department/team string
     # ── scoring-owned ─────────────────────────────────────────────────────
     "score": "scoring",
     "score_breakdown": "scoring",

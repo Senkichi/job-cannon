@@ -69,6 +69,53 @@ def test_migration_45_user_version_advances(tmp_db_path):
     assert version >= 45
 
 
+def test_migration_106_adds_ats_structured_field_columns(tmp_db_path):
+    """Migration 106 adds is_remote / employment_type / department to jobs.
+
+    On a populated DB the columns are added and pre-existing rows are left NULL
+    (capture is ingest-forward only — no backfill).
+    """
+    from job_finder.web.migrations.m106_ats_structured_fields import MIGRATION
+
+    # Apply the chain up through the migration under test on a populated DB,
+    # then assert the columns exist and the pre-existing row is NULL on each.
+    run_migrations(tmp_db_path)
+    with closing(sqlite3.connect(tmp_db_path)) as conn:
+        conn.execute(
+            """INSERT INTO jobs (dedup_key, title, company, location, first_seen, last_seen)
+               VALUES ('co|t', 'T', 'Co', 'Remote',
+                       '2026-01-01T00:00:00', '2026-01-01T00:00:00')""",
+        )
+        conn.commit()
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(jobs)").fetchall()}
+        assert {"is_remote", "employment_type", "department"} <= cols
+        row = conn.execute(
+            "SELECT is_remote, employment_type, department FROM jobs WHERE dedup_key = 'co|t'"
+        ).fetchone()
+        assert row == (None, None, None)
+
+    assert MIGRATION.version == 106
+
+
+def test_migration_106_is_idempotent_on_duplicate_column(tmp_db_path):
+    """Re-applying the m106 ALTERs on an already-migrated DB does not error.
+
+    The runner swallows 'duplicate column name', so re-applying the migration's
+    SQL a second time is a no-op rather than a failure.
+    """
+    from job_finder.web.migrations._runner import _apply_migration
+    from job_finder.web.migrations.m106_ats_structured_fields import MIGRATION
+    from job_finder.web.migrations.types import MigrationContext
+
+    run_migrations(tmp_db_path)
+    with closing(sqlite3.connect(tmp_db_path)) as conn:
+        ctx = MigrationContext(conn=conn, db_path=tmp_db_path, user_data_root=".")
+        # Columns already present from the full chain; re-applying must not raise.
+        _apply_migration(ctx, MIGRATION)
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(jobs)").fetchall()}
+    assert {"is_remote", "employment_type", "department"} <= cols
+
+
 def test_migration_43_check_constraint_rejects_invalid_enum(tmp_db_path):
     """gold_classification CHECK constraint rejects values outside the 5-value enum.
 

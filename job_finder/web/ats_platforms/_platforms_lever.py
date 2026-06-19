@@ -9,6 +9,7 @@ from job_finder.web._field_alias import resolve_title, resolve_url
 from job_finder.web.ats_platforms._registry import (
     PlatformScanner,
     _http_get_json,
+    label_or_str,
 )
 from job_finder.web.location_canonical import (
     JobLocation,
@@ -86,6 +87,22 @@ def _posting_to_job(posting: dict, slug: str) -> dict:
     title = resolve_title(posting, "lever") or ""
     source_url = resolve_url(posting, "lever") or ""
 
+    # ── Structured-field CAPTURE (#451) — raw-as-provided, no synthesis ───────
+    # Lever's only remote signal is the top-level ``workplaceType`` enum
+    # (kebab-case); derive the tri-state bool from it (REMOTE → True,
+    # ONSITE/HYBRID → False, unspecified/absent → None). Employment type rides
+    # in ``categories.commitment`` (e.g. "Full-time"); department/team in
+    # ``categories.department`` / ``categories.team``.
+    norm_wt = normalize_workplace_type(posting.get("workplaceType"))
+    if norm_wt == "REMOTE":
+        is_remote: bool | None = True
+    elif norm_wt in ("ONSITE", "HYBRID"):
+        is_remote = False
+    else:
+        is_remote = None
+    employment_type = label_or_str(categories.get("commitment"))
+    department = label_or_str(categories.get("department")) or label_or_str(categories.get("team"))
+
     return {
         "title": title,
         "company_source": "Lever",
@@ -98,6 +115,9 @@ def _posting_to_job(posting: dict, slug: str) -> dict:
         "comp_json": comp_json,
         "source_id": source_id,
         "posted_date": posted_date,
+        "is_remote": is_remote,
+        "employment_type": employment_type,
+        "department": department,
     }
 
 

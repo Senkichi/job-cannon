@@ -177,6 +177,20 @@ def _posting_to_job(posting: dict, _slug: str) -> dict:
     title = resolve_title(posting, "greenhouse") or ""
     source_url = resolve_url(posting, "greenhouse") or ""
 
+    # ── Structured-field CAPTURE (#451) — raw-as-provided, no synthesis ───────
+    # The Greenhouse Job Board API exposes no remote / employment-type field;
+    # both stay None. It does carry a ``departments`` array of {id, name} —
+    # capture the first entry's name verbatim.
+    department: str | None = None
+    departments = posting.get("departments")
+    if isinstance(departments, list):
+        for dept in departments:
+            if isinstance(dept, dict):
+                name = (dept.get("name") or "").strip()
+                if name:
+                    department = name
+                    break
+
     return {
         "title": title,
         "company_source": "Greenhouse",
@@ -191,6 +205,9 @@ def _posting_to_job(posting: dict, _slug: str) -> dict:
         "comp_json": comp_json,
         "source_id": source_id,
         "posted_date": posted_date,
+        "is_remote": None,
+        "employment_type": None,
+        "department": department,
     }
 
 

@@ -666,6 +666,27 @@ def _upsert_one_ats_api_job(
                         e,
                     )
 
+            # Store captured structured fields for new jobs only (#451,
+            # first-seen wins) — mirrors the comp_data_json post-insert UPDATE
+            # rather than threading through the ParsedJob/upsert INSERT contract.
+            is_remote = job_dict.get("is_remote")
+            employment_type = job_dict.get("employment_type")
+            department = job_dict.get("department")
+            if is_remote is not None or employment_type is not None or department is not None:
+                try:
+                    conn.execute(
+                        "UPDATE jobs SET is_remote = ?, employment_type = ?, "
+                        "department = ? WHERE dedup_key = ?",
+                        (is_remote, employment_type, department, job.dedup_key),
+                    )
+                    conn.commit()
+                except Exception as e:
+                    logger.warning(
+                        "Failed to store ATS structured fields for %s: %s",
+                        job.dedup_key,
+                        e,
+                    )
+
     except Exception as job_err:
         error_msg = f"{company_name} job error: {job_err}"
         summary["errors"].append(error_msg)

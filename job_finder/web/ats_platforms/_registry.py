@@ -37,6 +37,41 @@ from job_finder.web.ats_prober import _PROBE_TIMEOUT
 logger = logging.getLogger(__name__)
 
 
+# ── Structured-field CAPTURE helpers (#451) ──────────────────────────────────
+# Shared raw-as-provided extraction for the is_remote / employment_type /
+# department capture columns. Both helpers are pure and return None when the
+# value is absent — capture never synthesizes a value the payload does not
+# carry (epic #393, CAPTURE stage).
+
+
+def coerce_remote_bool(value: Any) -> bool | None:
+    """Coerce a provider ``isRemote`` / ``remote`` value to a tri-state bool.
+
+    ``None`` (field absent) stays ``None`` — distinct from an explicit
+    ``False`` — so the NULL-is-unknown semantics of the ``is_remote`` column
+    survive. Any present value is coerced with ``bool()``.
+    """
+    if value is None:
+        return None
+    return bool(value)
+
+
+def label_or_str(value: Any) -> str | None:
+    """Extract a raw string from a provider field that may be an object.
+
+    SmartRecruiters emits ``typeOfEmployment`` / ``department`` as
+    ``{"id": ..., "label": ...}`` objects; Ashby / Lever emit plain strings.
+    Returns the ``label`` for dict inputs, the string itself for str inputs,
+    and ``None`` for anything empty or absent.
+    """
+    if isinstance(value, dict):
+        label = value.get("label")
+        return label or None
+    if isinstance(value, str):
+        return value or None
+    return None
+
+
 @dataclass(frozen=True, slots=True)
 class PlatformScanner:
     """Per-platform contract for the shared scan driver.

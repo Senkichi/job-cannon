@@ -16,6 +16,8 @@ import json
 from job_finder.web.ats_platforms._registry import (
     PlatformScanner,
     _http_get_json,
+    coerce_remote_bool,
+    label_or_str,
 )
 from job_finder.web.description_formatter import html_to_plain_text
 from job_finder.web.location_canonical import (
@@ -158,6 +160,13 @@ def _posting_to_job(posting: dict, _slug: str) -> dict:
     # ── posted_date (from publishedAt ISO-8601 string) ────────────────────────
     posted_date: str | None = posting.get("publishedAt") or None
 
+    # ── Structured-field CAPTURE (#451) — raw-as-provided, no synthesis ───────
+    # Ashby emits ``isRemote`` (bool), ``employmentType`` (e.g. "FullTime"),
+    # and ``department`` / ``team`` strings.
+    is_remote = coerce_remote_bool(posting.get("isRemote"))
+    employment_type = label_or_str(posting.get("employmentType"))
+    department = label_or_str(posting.get("department")) or label_or_str(posting.get("team"))
+
     return {
         "title": posting.get("title", ""),
         "company_source": "Ashby",
@@ -170,6 +179,9 @@ def _posting_to_job(posting: dict, _slug: str) -> dict:
         "comp_json": comp_json,
         "source_id": source_id,
         "posted_date": posted_date,
+        "is_remote": is_remote,
+        "employment_type": employment_type,
+        "department": department,
     }
 
 

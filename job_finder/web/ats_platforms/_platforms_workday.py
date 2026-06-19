@@ -33,7 +33,11 @@ from datetime import UTC, datetime, timedelta
 
 import requests
 
-from job_finder.web.ats_platforms._registry import PlatformScanner
+from job_finder.web.ats_platforms._registry import (
+    PlatformScanner,
+    coerce_remote_bool,
+    label_or_str,
+)
 from job_finder.web.ats_prober import _PROBE_TIMEOUT
 from job_finder.web.location_canonical import JobLocation, WorkplaceType, dedupe_locations
 
@@ -447,6 +451,20 @@ def _posting_to_job(posting: dict, _slug: str) -> dict:
     locations_structured = _to_canonical(posting)
     # -----------------------------------------------------------------------
 
+    # ── Structured-field CAPTURE (#451) — raw-as-provided, no synthesis ───────
+    # The Workday CXS list payload does not reliably surface remote /
+    # employment-type / department fields; read the candidate keys defensively
+    # so any tenant that does emit them is captured, and fall to None otherwise.
+    is_remote = coerce_remote_bool(
+        posting.get("isRemote") if posting.get("isRemote") is not None else posting.get("remote")
+    )
+    employment_type = (
+        label_or_str(posting.get("employmentType"))
+        or label_or_str(posting.get("typeOfEmployment"))
+        or label_or_str(posting.get("jobType"))
+    )
+    department = label_or_str(posting.get("department")) or label_or_str(posting.get("team"))
+
     return {
         "title": posting.get("title", ""),
         "company_source": "Workday",
@@ -460,6 +478,9 @@ def _posting_to_job(posting: dict, _slug: str) -> dict:
         "salary_min": None,
         "salary_max": None,
         "comp_json": None,
+        "is_remote": is_remote,
+        "employment_type": employment_type,
+        "department": department,
     }
 
 
