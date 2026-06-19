@@ -340,6 +340,10 @@ ats:
   # partial board must not mass-expire unseen postings). Default 100 ≈ 2,000
   # postings; raise for very large tenants. See issue #216.
   workday_max_pages: 100
+  # iCIMS "load more" click budget per board (Playwright-rendered, no public
+  # API — see issue #454). Each click reveals another page of postings; the
+  # scanner stops after this many clicks or when no control remains. Default 5.
+  icims_max_load_more_clicks: 5
   # ATS company identity (URL evidence → live verify → hit)
   # See `.planning/ATS-RECONCILIATION-PLAN.md`. Ingestion stores URL-derived hints as
   # ``pending``; reconciliation promotes to ``hit`` only after API verification.
