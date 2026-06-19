@@ -48,7 +48,8 @@ JOBS_ALL_COLUMNS = (
     "company_id, comp_data_json, enrichment_tier, "
     "locations_raw, locations_structured, description_reformatted, expiry_checked_at, scoring_provider, "
     "expiry_status, unresolved_reasons, computed_status, "
-    "direct_url, direct_url_confidence"
+    "direct_url, direct_url_confidence, "
+    "is_remote, employment_type, department"
 )
 
 # Columns read by upsert_job() for merge logic — only what the UPDATE branch
