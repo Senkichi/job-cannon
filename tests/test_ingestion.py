@@ -2415,9 +2415,9 @@ class TestApplyTitleGateHelper:
 
 class TestNonPortalIngestionTitleGate:
     """Stage 7.6 follow-up — gate fires inside each non-portal `_fetch_*`
-    so off-target rows from gmail/imap/serpapi/thordata/dataforseo never
-    reach persistence + scoring. Historical pass rate for these sources
-    was 26-72%; the gate closes the same downstream leak Stage 7.6 closed
+    so off-target rows from gmail/imap/serpapi/dataforseo never reach
+    persistence + scoring. Historical pass rate for these sources was
+    26-72%; the gate closes the same downstream leak Stage 7.6 closed
     for portal_search."""
 
     @pytest.fixture
@@ -2434,11 +2434,6 @@ class TestNonPortalIngestionTitleGate:
                     "folder": "INBOX",
                 },
                 "serpapi": {
-                    "enabled": True,
-                    "api_key": "x",
-                    "queries": [{"query": "ds"}],
-                },
-                "thordata": {
                     "enabled": True,
                     "api_key": "x",
                     "queries": [{"query": "ds"}],
@@ -2479,18 +2474,6 @@ class TestNonPortalIngestionTitleGate:
 
         assert [j.title for j in jobs] == ["Senior Data Scientist"]
         assert summary["serpapi_fetched"] == 1
-
-    def test_thordata_gate_drops_off_target(self, gated_config):
-        """`_fetch_thordata`: same shape as serpapi."""
-        from job_finder.web.ingestion_runner import _fetch_thordata
-
-        with patch("job_finder.sources.thordata_source.ThordataSource") as MockThor:
-            MockThor.return_value.fetch_jobs.return_value = self._mixed_jobs("thordata")
-            summary: dict = {"thordata_errors": []}
-            jobs = _fetch_thordata(gated_config, summary)
-
-        assert [j.title for j in jobs] == ["Senior Data Scientist"]
-        assert summary["thordata_fetched"] == 1
 
     def test_gmail_gate_drops_off_target(self, gated_config, migrated_db_path):
         """`_fetch_gmail`: gate fires AFTER message-level dedup writes so

@@ -84,7 +84,6 @@ def index():
         for name in (
             "sources.imap.app_password",
             "sources.serpapi.api_key",
-            "sources.thordata.api_key",
             "sources.dataforseo.api_key",
             "sources.google_cse.api_key",
             "sources.google_cse.cse_id",
@@ -209,9 +208,6 @@ def save():
         # a warning so the user knows storage degraded gracefully.
         _move_secret_to_keyring(
             form_config, ("sources", "serpapi", "api_key"), "sources.serpapi.api_key"
-        )
-        _move_secret_to_keyring(
-            form_config, ("sources", "thordata", "api_key"), "sources.thordata.api_key"
         )
         _move_secret_to_keyring(
             form_config, ("sources", "dataforseo", "api_key"), "sources.dataforseo.api_key"
@@ -397,7 +393,7 @@ def _parse_form_to_config(form) -> dict:
     # Settings-side counterpart to the onboarding imap_credentials step.
     # app_password is routed through _move_secret_to_keyring in save(); the
     # "only if non-empty" guard on the password field is the same pattern
-    # serpapi/thordata/etc. use to avoid clobbering on re-saves with the
+    # serpapi/dataforseo/etc. use to avoid clobbering on re-saves with the
     # field blank.
     imap = {}
     if _has("imap_enabled"):
@@ -436,19 +432,6 @@ def _parse_form_to_config(form) -> dict:
         serpapi["queries"] = _parse_query_rows(form, "serpapi")
     if serpapi:
         config.setdefault("sources", {})["serpapi"] = serpapi
-
-    # --- Sources: Thordata (Stage 6 — parser was missing pre-2026-05-22) ---
-    thordata = {}
-    if _has("thordata_enabled"):
-        thordata["enabled"] = _checked("thordata_enabled")
-    if _has("thordata_api_key") and form["thordata_api_key"]:
-        thordata["api_key"] = form["thordata_api_key"]
-    if _has("thordata_max_age_days"):
-        thordata["max_age_days"] = safe_int(form["thordata_max_age_days"], 3)
-    if _has("_thordata_queries_present"):
-        thordata["queries"] = _parse_query_rows(form, "thordata")
-    if thordata:
-        config.setdefault("sources", {})["thordata"] = thordata
 
     # --- Sources: DataForSEO (Stage 6 — NEW tile) ---
     dataforseo = {}

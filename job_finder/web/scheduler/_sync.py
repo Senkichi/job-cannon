@@ -44,8 +44,6 @@ def run_sync_now(app) -> dict:
             "imap_errors": [],
             "serpapi_fetched": 0,
             "serpapi_errors": [],
-            "thordata_fetched": 0,
-            "thordata_errors": [],
             "dataforseo_fetched": 0,
             "dataforseo_errors": [],
             "portal_search_fetched": 0,

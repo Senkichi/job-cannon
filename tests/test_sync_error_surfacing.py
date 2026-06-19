@@ -54,11 +54,6 @@ def minimal_config(migrated_db):
                 "api_key": "test-key",
                 "queries": [{"query": "Data Scientist", "location": "Remote"}],
             },
-            "thordata": {
-                "enabled": True,
-                "api_key": "thordata-key",
-                "queries": [{"query": "Data Scientist", "location": "Remote"}],
-            },
         },
         "profile": {
             "target_titles": ["Data Scientist"],
@@ -89,7 +84,7 @@ def minimal_config(migrated_db):
 
 
 class TestSyncErrorAggregation:
-    """_run_sync_bg must aggregate ALL *_errors keys, not just gmail/serpapi/thordata."""
+    """_run_sync_bg must aggregate ALL *_errors keys, not just gmail/serpapi."""
 
     def test_imap_error_produces_nonzero_skipped(self, migrated_db, minimal_config):
         """IMAP auth failure → skipped > 0 and error_details persisted."""
@@ -112,8 +107,6 @@ class TestSyncErrorAggregation:
             "gmail_errors": [],
             "serpapi_fetched": 0,
             "serpapi_errors": [],
-            "thordata_fetched": 0,
-            "thordata_errors": [],
             "dataforseo_fetched": 0,
             "dataforseo_errors": [],
             "portal_search_fetched": 0,
@@ -163,7 +156,6 @@ class TestSyncErrorAggregation:
             "gmail_errors": ["OAuth token expired"],
             "imap_errors": ["Auth failed"],
             "serpapi_errors": [],
-            "thordata_errors": ["API key rejected (HTTP 401)"],
             "dataforseo_errors": ["Timeout"],
             "portal_search_errors": ["Portal X down"],
             "job_errors": ["bad job"],  # job_errors should also be counted
@@ -175,8 +167,8 @@ class TestSyncErrorAggregation:
                 for msg in val:
                     all_error_messages.append(f"{source_label}: {msg}")
 
-        # 1 gmail + 1 imap + 0 serpapi + 1 thordata + 1 dataforseo + 1 portal + 1 job = 6
-        assert len(all_error_messages) == 6
+        # 1 gmail + 1 imap + 0 serpapi + 1 dataforseo + 1 portal + 1 job = 5
+        assert len(all_error_messages) == 5
         sources_in_messages = {m.split(":")[0] for m in all_error_messages}
         assert "imap" in sources_in_messages
         assert "dataforseo" in sources_in_messages
@@ -231,7 +223,6 @@ class TestSerpAPIAuthFailure:
             # Disable imap, enable gmail so we exercise the SerpAPI path.
             minimal_config["sources"]["imap"]["enabled"] = False
             minimal_config["sources"]["gmail"] = {"enabled": True, "lookback_days": 7}
-            minimal_config["sources"]["thordata"]["enabled"] = False
 
             from job_finder.web.pipeline_runner import run_ingestion
 
@@ -272,7 +263,6 @@ class TestSerpAPIAuthFailure:
             MockImap.return_value.fetch_jobs.return_value = ([], set())
             minimal_config["sources"]["imap"]["enabled"] = False
             minimal_config["sources"]["gmail"] = {"enabled": True, "lookback_days": 7}
-            minimal_config["sources"]["thordata"]["enabled"] = False
 
             from job_finder.web.pipeline_runner import run_ingestion
 
@@ -285,61 +275,6 @@ class TestSerpAPIAuthFailure:
 # ---------------------------------------------------------------------------
 # Tests: Thordata auth failure detection
 # ---------------------------------------------------------------------------
-
-
-class TestThordataAuthFailure:
-    """HTTP 401/403 from Thordata must raise a structured error."""
-
-    def _make_resp(self, status_code: int = 401, json_body: dict | None = None) -> MagicMock:
-        resp = MagicMock()
-        resp.status_code = status_code
-        resp.json.return_value = json_body or {}
-        return resp
-
-    def test_thordata_401_raises_runtime_error(self):
-        """ThordataSource._search raises RuntimeError on HTTP 401."""
-        from job_finder.sources.thordata_source import ThordataSource
-
-        src = ThordataSource(api_key="bad-key")
-        with patch("requests.post", return_value=self._make_resp(401)):
-            with pytest.raises(RuntimeError, match="key rejected"):
-                src._search("Data Scientist")
-
-    def test_thordata_expired_subscription_raises(self):
-        """Thordata 200 with 'Package has expired!' body → RuntimeError."""
-        from job_finder.sources.thordata_source import ThordataSource
-
-        src = ThordataSource(api_key="expired-key")
-        resp = self._make_resp(200, {"message": "Package has expired!", "status": "error"})
-        with patch("requests.post", return_value=resp):
-            with pytest.raises(RuntimeError, match="expired"):
-                src._search("Data Scientist")
-
-    def test_thordata_401_surfaced_in_ingestion_summary(self, migrated_db, minimal_config):
-        """Thordata 401 → error in summary['thordata_errors'], not silent empty."""
-        path, _ = migrated_db
-
-        resp_mock = MagicMock()
-        resp_mock.status_code = 401
-
-        with (
-            patch("job_finder.web.ingestion_runner.GmailSource") as MockGmail,
-            patch("job_finder.web.ingestion_runner.ImapSource") as MockImap,
-            patch("requests.post", return_value=resp_mock),
-        ):
-            MockGmail.return_value.fetch_jobs.return_value = ([], set())
-            MockImap.return_value.fetch_jobs.return_value = ([], set())
-            minimal_config["sources"]["imap"]["enabled"] = False
-            minimal_config["sources"]["gmail"] = {"enabled": True, "lookback_days": 7}
-            minimal_config["sources"]["serpapi"]["enabled"] = False
-
-            from job_finder.web.pipeline_runner import run_ingestion
-
-            summary = run_ingestion(path, minimal_config)
-
-        assert len(summary["thordata_errors"]) >= 1
-        err_text = summary["thordata_errors"][0].lower()
-        assert "key rejected" in err_text or "401" in err_text
 
 
 # ---------------------------------------------------------------------------

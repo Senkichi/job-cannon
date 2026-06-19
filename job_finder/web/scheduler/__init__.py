@@ -1,6 +1,6 @@
 """APScheduler background scheduler for automatic job ingestion.
 
-Runs Gmail, SerpAPI, and Thordata ingestion 3x/day (midnight, 8am, 4pm local).
+Runs Gmail, SerpAPI, and DataForSEO ingestion 3x/day (midnight, 8am, 4pm local).
 The scheduler is started once per process via init_scheduler(app).
 
 Guards:

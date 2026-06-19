@@ -86,16 +86,6 @@ sources:
     queries:
       - query: Data Scientist
         location: San Francisco Bay Area
-  thordata:
-    # Optional: Thordata Google Jobs SERP API (cheaper alternative to SerpAPI)
-    enabled: false
-    # Get your key at: https://www.thordata.com/
-    api_key: ""
-    # Only ingest jobs posted within this many days
-    max_age_days: 3
-    queries:
-      - query: Data Scientist
-        location: San Francisco Bay Area
   dataforseo:
     # Optional: DataForSEO Google Jobs SERP API — full index, ~$0.87/month at default settings
     # Task-queue API (async: submits tasks, polls for completion, no live endpoint).
@@ -123,7 +113,7 @@ sources:
     #   1b. Stage-2 free portals (Jobicy, YC Work at a Startup, USAJobs, Adzuna,
     #       Jooble) — keyless or free-with-registration. Configured below.
     #   2.  Site: SERP queries via DataForSEO for remaining portals — cheap, batched.
-    # SerpAPI/Thordata are NOT used for portal_search (too expensive for site: queries).
+    # SerpAPI is NOT used for portal_search (too expensive for site: queries).
     # If DataForSEO is not enabled, only Tier 1 portals are searched.
     # Default true: the onboarding wizard enables this by default so fresh installs
     # get RemoteOK/Remotive/Himalayas results on the first sync without any credentials.

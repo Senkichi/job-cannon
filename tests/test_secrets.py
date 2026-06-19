@@ -189,14 +189,11 @@ def test_list_secrets_returns_canonical_names_present_in_keyring(monkeypatch):
     from job_finder.secrets import list_secrets, set_secret
 
     monkeypatch.delenv("SERPAPI_API_KEY", raising=False)
-    monkeypatch.delenv("THORDATA_API_KEY", raising=False)
 
     set_secret("sources.serpapi.api_key", "sk-1")
-    set_secret("sources.thordata.api_key", "sk-2")
 
     found = set(list_secrets())
     assert "sources.serpapi.api_key" in found
-    assert "sources.thordata.api_key" in found
 
 
 def test_list_secrets_empty_when_keyring_unavailable(monkeypatch):
