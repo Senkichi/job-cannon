@@ -376,11 +376,15 @@ def profile_edit():
         if not target_titles_raw:
             # Server-side guard: empty target_titles would produce a config.yaml that
             # fails validate_target_titles at every subsequent boot (Issue #299 fuse 2).
+            work_arrangement_err = request.form.get("work_arrangement", "remote")
+            if work_arrangement_err not in ("remote", "hybrid", "on-site"):
+                work_arrangement_err = "remote"
             return render_template(
                 "onboarding/profile_edit.html",
                 error="At least one target job title is required.",
                 target_titles="",
                 target_locations=request.form.get("target_locations", "").strip(),
+                work_arrangement=work_arrangement_err,
                 skills=request.form.get("skills", "").strip(),
                 min_salary=request.form.get("min_salary", "").strip(),
                 **_step("profile_edit"),
@@ -390,10 +394,14 @@ def profile_edit():
             min_salary = int(min_salary_raw) if min_salary_raw else None
         except ValueError:
             min_salary = None
+        work_arrangement_raw = request.form.get("work_arrangement", "remote")
+        if work_arrangement_raw not in ("remote", "hybrid", "on-site"):
+            work_arrangement_raw = "remote"
         slice_: dict = {
             "profile_edit": {
                 "target_titles": target_titles_raw,
                 "target_locations": request.form.get("target_locations", "").strip(),
+                "work_arrangement": work_arrangement_raw,
                 "skills": request.form.get("skills", "").strip(),
                 "min_salary": min_salary,
             }
@@ -436,6 +444,7 @@ def profile_edit():
         "onboarding/profile_edit.html",
         target_titles=user_titles or suggested_titles_text,
         target_locations=existing_edit.get("target_locations", ""),
+        work_arrangement=existing_edit.get("work_arrangement", "remote"),
         skills=user_skills or parsed_skills_text,
         min_salary=existing_edit.get("min_salary") or "",
         # When the field has no user input, every initial chip originates from the
@@ -696,6 +705,7 @@ def done():
                 },
             },
             "profile": {
+                "work_arrangement": profile_edit.get("work_arrangement") or "remote",
                 "target_titles": _split_lines(profile_edit.get("target_titles", "")),
                 "target_locations": _split_lines(profile_edit.get("target_locations", "")),
                 "skills": _split_lines(profile_edit.get("skills", "")),
@@ -768,6 +778,7 @@ def done():
         experience_profile: dict = dict(resume_profile)
         if profile_edit.get("target_titles"):
             experience_profile["target_titles"] = _split_lines(profile_edit["target_titles"])
+        experience_profile["work_arrangement"] = profile_edit.get("work_arrangement") or "remote"
         if profile_edit.get("target_locations"):
             experience_profile["target_locations"] = _split_lines(profile_edit["target_locations"])
         if profile_edit.get("skills"):

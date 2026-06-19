@@ -290,6 +290,45 @@ def write_config(data: dict) -> Path:
     return config_path
 
 
+def normalize_profile_work_arrangement(cfg: dict) -> dict:
+    """Heal legacy configs where work arrangement was a 'Remote' sentinel in target_locations.
+
+    When ``profile.target_locations`` contains "Remote" (case-insensitive), derives
+    ``profile.work_arrangement = "remote"`` (unless already set) and strips the sentinel
+    from the geography list, returning a NEW config dict. Configs that already have
+    ``work_arrangement`` set, or whose ``target_locations`` contains no "Remote" sentinel,
+    are returned unchanged (as new dicts). Idempotent.
+
+    Args:
+        cfg: Full config dict (may be empty). Never mutated.
+
+    Returns:
+        New config dict; only modified when the legacy sentinel is present.
+    """
+    profile = cfg.get("profile")
+    if not profile:
+        return dict(cfg)
+
+    target_locations: list = list(profile.get("target_locations") or [])
+    remote_sentinels = [t for t in target_locations if (t or "").strip().lower() == "remote"]
+
+    if not remote_sentinels:
+        # No sentinel present — nothing to heal; return a shallow copy (immutability).
+        return {**cfg, "profile": dict(profile)}
+
+    # Strip sentinel from the geography list.
+    clean_locations = [t for t in target_locations if (t or "").strip().lower() != "remote"]
+    # Preserve an existing explicit work_arrangement; derive only when absent.
+    derived_arrangement = profile.get("work_arrangement") or "remote"
+
+    new_profile = {
+        **profile,
+        "work_arrangement": derived_arrangement,
+        "target_locations": clean_locations,
+    }
+    return {**cfg, "profile": new_profile}
+
+
 def load_config(
     config_path: str | os.PathLike[str] | None = None,
     allow_missing: bool = False,
@@ -382,4 +421,5 @@ def load_config(
     # "file missing" with "skip every schema check" let an old-shape config
     # load silently and broke the LLM cascade for ~24h.
     validate_required_sections(cfg)
-    return cfg
+    # Heal legacy work-arrangement sentinel on every load (idempotent).
+    return normalize_profile_work_arrangement(cfg)

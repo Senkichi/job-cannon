@@ -46,6 +46,12 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+# Shared vocabulary for the candidate's work-arrangement preference (config
+# profile.work_arrangement) and the corresponding jd-side workplace_type
+# values stored in the DB. Lowercase; DB column uses uppercase equivalents
+# (REMOTE, HYBRID, ONSITE). Keep in sync with #390's rule table.
+VALID_WORK_ARRANGEMENTS: frozenset[str] = frozenset({"remote", "hybrid", "on-site"})
+
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
