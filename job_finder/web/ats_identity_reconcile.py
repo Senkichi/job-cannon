@@ -116,6 +116,160 @@ def _verify_live(platform: str, slug: str) -> bool:
     return False
 
 
+def _verify_and_write_promotion(
+    conn: sqlite3.Connection,
+    company_id: int,
+    platform: str,
+    slug: str,
+    *,
+    reason: str,
+    shadow: bool,
+    base_meta: dict[str, Any],
+    unique_url_count: int | None,
+    job_count: int | None,
+) -> dict[str, Any]:
+    """Single ATS promotion writer: live-verify → collision-guard → UPDATE.
+
+    The one place that flips a company to ``ats_probe_status='hit'``. Shared by
+    ``reconcile_company_ats`` (job-URL evidence) and ``promote_from_careers_link``
+    (outbound careers-page link evidence) so both honor the identical live
+    probe, the m076 ``UNIQUE(ats_platform, ats_slug)`` SELECT-guard, and the
+    IntegrityError race recovery. Returns an outcome dict that spreads
+    ``base_meta`` so each caller keeps its own evidence-shaped fields.
+    """
+    if not _verify_live(platform, slug):
+        logger.info(
+            "ats_identity verify_failed company_id=%d platform=%s slug=%s",
+            company_id,
+            platform,
+            slug[:80],
+        )
+        return {**base_meta, "outcome": "verify_failed"}
+
+    if shadow:
+        logger.info(
+            "ats_identity shadow would_promote company_id=%d platform=%s slug_snip=%s",
+            company_id,
+            platform,
+            slug[:48],
+        )
+        return {**base_meta, "outcome": "shadow_would_promote"}
+
+    now = utc_now_iso()
+
+    # Collision guard: refuse to promote when another company already owns
+    # this (platform, slug). The pair must be 1:1 — without this check an
+    # ATS scan picks an arbitrary winner and creates jobs under the wrong
+    # company name (e.g., a Vaia URL slug "experimentation-jobs" got
+    # promoted onto a record holding the name "Experimentation Jobs", which
+    # then mis-tagged 4 Headway Greenhouse jobs under the wrong company).
+    # The right answer is to leave the pair owned by the existing company
+    # and let downstream cleanup decide whether to merge or rename the
+    # current one. Surfacing a `slug_collision` outcome makes the conflict
+    # visible in the promote summary rather than silently corrupting data.
+    existing = conn.execute(
+        """SELECT id, name_raw
+             FROM companies
+            WHERE ats_platform = ? AND ats_slug = ? AND id != ?""",
+        (platform, slug, company_id),
+    ).fetchone()
+    if existing is not None:
+        existing_id = existing["id"]
+        existing_name = existing["name_raw"]
+        logger.warning(
+            "ats_identity slug_collision company_id=%d would-promote=%s/%s "
+            "but already owned by company_id=%d (%r)",
+            company_id,
+            platform,
+            slug[:48],
+            existing_id,
+            existing_name,
+        )
+        return {
+            **base_meta,
+            "outcome": "slug_collision",
+            "existing_owner_id": existing_id,
+            "existing_owner_name": existing_name,
+        }
+
+    try:
+        conn.execute(
+            """UPDATE companies
+                   SET ats_platform = ?,
+                       ats_slug = ?,
+                       ats_probe_status = 'hit',
+                       ats_probe_attempted_at = ?,
+                       ats_evidence_trigger = ?,
+                       ats_evidence_extractor_version = ?,
+                       ats_evidence_unique_url_count = ?,
+                       ats_evidence_job_count = ?,
+                       ats_evidence_reconciled_at = ?,
+                       updated_at = ?
+                 WHERE id = ?""",
+            (
+                platform,
+                slug,
+                now,
+                reason[:240] if isinstance(reason, str) else "",
+                ATS_EXTRACTOR_VERSION,
+                unique_url_count,
+                job_count,
+                now,
+                now,
+                company_id,
+            ),
+        )
+        conn.commit()
+    except sqlite3.IntegrityError as exc:
+        # m076's UNIQUE(ats_platform, ats_slug) gate. Defense-in-depth
+        # for the race window between the SELECT-guard above and this
+        # UPDATE: another transaction could have promoted the pair in
+        # between, especially under the scheduler's batch path. The
+        # SELECT-guard would still report "no existing owner" but the
+        # UPDATE would then violate the index.
+        #
+        # Recover by re-querying the real owner and returning the same
+        # slug_collision outcome shape the SELECT-guard would have
+        # produced, with race_detected=True so the audit can tell the
+        # paths apart.
+        racer = conn.execute(
+            """SELECT id, name_raw
+                 FROM companies
+                WHERE ats_platform = ? AND ats_slug = ? AND id != ?""",
+            (platform, slug, company_id),
+        ).fetchone()
+        racer_id = racer["id"] if racer else None
+        racer_name = racer["name_raw"] if racer else None
+        logger.warning(
+            "ats_identity slug_collision (race) company_id=%d would-promote=%s/%s "
+            "but pair now owned by company_id=%s (%r). exc=%s",
+            company_id,
+            platform,
+            slug[:48],
+            racer_id,
+            racer_name,
+            exc,
+        )
+        return {
+            **base_meta,
+            "outcome": "slug_collision",
+            "existing_owner_id": racer_id,
+            "existing_owner_name": racer_name,
+            "race_detected": True,
+        }
+
+    logger.info(
+        "ats_identity promoted company_id=%d platform=%s slug_snip=%s jobs=%s urls=%s",
+        company_id,
+        platform,
+        slug[:48],
+        job_count,
+        unique_url_count,
+    )
+
+    return {**base_meta, "outcome": "promoted"}
+
+
 def _build_job_bundles(
     conn: sqlite3.Connection,
     company_id: int,
@@ -243,24 +397,6 @@ def reconcile_company_ats(
 
     platform, slug = ranked
 
-    if not _verify_live(platform, slug):
-        logger.info(
-            "ats_identity verify_failed company_id=%d platform=%s slug=%s",
-            company_id,
-            platform,
-            slug[:80],
-        )
-        return {
-            "outcome": "verify_failed",
-            "company_id": company_id,
-            "platform": platform,
-            "slug": slug,
-            "unique_urls_seen": unique_url_seen,
-            "contributing_jobs": job_bundle_count,
-        }
-
-    now = utc_now_iso()
-
     base_meta = {
         "company_id": company_id,
         "platform": platform,
@@ -269,126 +405,76 @@ def reconcile_company_ats(
         "contributing_jobs": job_bundle_count,
     }
 
-    if st["shadow"]:
-        logger.info(
-            "ats_identity shadow would_promote company_id=%d platform=%s slug_snip=%s",
-            company_id,
-            platform,
-            slug[:48],
-        )
-        return {**base_meta, "outcome": "shadow_would_promote"}
-
-    # Collision guard: refuse to promote when another company already owns
-    # this (platform, slug). The pair must be 1:1 — without this check an
-    # ATS scan picks an arbitrary winner and creates jobs under the wrong
-    # company name (e.g., a Vaia URL slug "experimentation-jobs" got
-    # promoted onto a record holding the name "Experimentation Jobs", which
-    # then mis-tagged 4 Headway Greenhouse jobs under the wrong company).
-    # The right answer is to leave the pair owned by the existing company
-    # and let downstream cleanup decide whether to merge or rename the
-    # current one. Surfacing a `slug_collision` outcome makes the conflict
-    # visible in the promote summary rather than silently corrupting data.
-    existing = conn.execute(
-        """SELECT id, name_raw
-             FROM companies
-            WHERE ats_platform = ? AND ats_slug = ? AND id != ?""",
-        (platform, slug, company_id),
-    ).fetchone()
-    if existing is not None:
-        existing_id = existing["id"]
-        existing_name = existing["name_raw"]
-        logger.warning(
-            "ats_identity slug_collision company_id=%d would-promote=%s/%s "
-            "but already owned by company_id=%d (%r)",
-            company_id,
-            platform,
-            slug[:48],
-            existing_id,
-            existing_name,
-        )
-        return {
-            **base_meta,
-            "outcome": "slug_collision",
-            "existing_owner_id": existing_id,
-            "existing_owner_name": existing_name,
-        }
-
-    try:
-        conn.execute(
-            """UPDATE companies
-                   SET ats_platform = ?,
-                       ats_slug = ?,
-                       ats_probe_status = 'hit',
-                       ats_probe_attempted_at = ?,
-                       ats_evidence_trigger = ?,
-                       ats_evidence_extractor_version = ?,
-                       ats_evidence_unique_url_count = ?,
-                       ats_evidence_job_count = ?,
-                       ats_evidence_reconciled_at = ?,
-                       updated_at = ?
-                 WHERE id = ?""",
-            (
-                platform,
-                slug,
-                now,
-                reason[:240] if isinstance(reason, str) else "",
-                ATS_EXTRACTOR_VERSION,
-                unique_url_seen,
-                job_bundle_count,
-                now,
-                now,
-                company_id,
-            ),
-        )
-        conn.commit()
-    except sqlite3.IntegrityError as exc:
-        # m076's UNIQUE(ats_platform, ats_slug) gate. Defense-in-depth
-        # for the race window between the SELECT-guard above and this
-        # UPDATE: another transaction could have promoted the pair in
-        # between, especially under the scheduler's batch path. The
-        # SELECT-guard would still report "no existing owner" but the
-        # UPDATE would then violate the index.
-        #
-        # Recover by re-querying the real owner and returning the same
-        # slug_collision outcome shape the SELECT-guard would have
-        # produced, with race_detected=True so the audit can tell the
-        # paths apart.
-        racer = conn.execute(
-            """SELECT id, name_raw
-                 FROM companies
-                WHERE ats_platform = ? AND ats_slug = ? AND id != ?""",
-            (platform, slug, company_id),
-        ).fetchone()
-        racer_id = racer["id"] if racer else None
-        racer_name = racer["name_raw"] if racer else None
-        logger.warning(
-            "ats_identity slug_collision (race) company_id=%d would-promote=%s/%s "
-            "but pair now owned by company_id=%s (%r). exc=%s",
-            company_id,
-            platform,
-            slug[:48],
-            racer_id,
-            racer_name,
-            exc,
-        )
-        return {
-            **base_meta,
-            "outcome": "slug_collision",
-            "existing_owner_id": racer_id,
-            "existing_owner_name": racer_name,
-            "race_detected": True,
-        }
-
-    logger.info(
-        "ats_identity promoted company_id=%d platform=%s slug_snip=%s jobs=%d urls=%s",
+    return _verify_and_write_promotion(
+        conn,
         company_id,
         platform,
-        slug[:48],
-        job_bundle_count,
-        unique_url_seen,
+        slug,
+        reason=reason,
+        shadow=st["shadow"],
+        base_meta=base_meta,
+        unique_url_count=unique_url_seen,
+        job_count=job_bundle_count,
     )
 
-    return {**base_meta, "outcome": "promoted"}
+
+def promote_from_careers_link(
+    conn: sqlite3.Connection,
+    company_id: int,
+    platform: str,
+    slug: str,
+    *,
+    page_url: str,
+    config: dict | None = None,
+) -> dict[str, Any]:
+    """Promote a custom-site company to an existing scanner from a careers link.
+
+    The careers crawler renders a custom career page, finds 0 title-matched
+    jobs, but discovers an outbound Greenhouse/Lever/Ashby/Workday/SmartRecruiters
+    link in the DOM (see ``careers_crawler._ats_link_discovery``). This wires
+    that discovery to the **same** promotion writer used by job-URL
+    reconciliation: live-verify the ``(platform, slug)``, honor the m076
+    collision guard, and flip ``ats_probe_status`` to ``'hit'`` with an
+    ``ats_evidence_trigger`` of ``careers_link:<page_url>``. Idempotent: skips
+    when the company is already a ``hit``.
+    """
+    st = identity_reconcile_settings(config)
+    if not st["enabled"]:
+        return {"outcome": "disabled", "company_id": company_id}
+
+    crow = conn.execute(
+        """SELECT id, ats_probe_status, scan_enabled
+           FROM companies WHERE id = ?""",
+        (company_id,),
+    ).fetchone()
+    if crow is None:
+        return {"outcome": "missing_company", "company_id": company_id}
+    company = dict(crow)
+
+    if company.get("ats_probe_status") == "hit":
+        return {"outcome": "skipped_already_hit", "company_id": company_id}
+
+    if not company.get("scan_enabled"):
+        return {"outcome": "skipped_scan_disabled", "company_id": company_id}
+
+    base_meta = {
+        "company_id": company_id,
+        "platform": platform,
+        "slug": slug,
+        "page_url": page_url,
+    }
+
+    return _verify_and_write_promotion(
+        conn,
+        company_id,
+        platform,
+        slug,
+        reason=f"careers_link:{page_url}",
+        shadow=st["shadow"],
+        base_meta=base_meta,
+        unique_url_count=None,
+        job_count=None,
+    )
 
 
 def promote_ats_scheduler_batch(db_path: str, config: dict) -> dict[str, int]:

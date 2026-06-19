@@ -51,6 +51,7 @@ def _try_playwright_extract(
     target_titles: list[str],
     exclusions: list[str],
     db_path: str | None = None,
+    html_sink: list[str] | None = None,
 ) -> list[dict]:
     """Render page with Playwright and extract jobs from rendered DOM.
 
@@ -60,6 +61,9 @@ def _try_playwright_extract(
         target_titles: Target title keywords.
         exclusions: Exclusion keywords.
         db_path: Optional path to SQLite DB for Phase-B raw-HTML capture.
+        html_sink: Optional list; when provided, the rendered HTML is appended
+            to it so the caller can reuse the already-rendered DOM (e.g. #453
+            outbound ATS-link discovery) without a second navigation.
 
     Returns:
         List of matched job dicts. Empty on timeout/error.
@@ -71,6 +75,8 @@ def _try_playwright_extract(
         page.wait_for_timeout(_JS_SETTLE_MS)
 
         html = page.content()
+        if html_sink is not None:
+            html_sink.append(html)
         soup = BeautifulSoup(html, "html.parser")
         candidates = _extract_candidates(soup, url)
         generic_jobs = _filter_candidates(candidates, target_titles, exclusions)
@@ -111,6 +117,7 @@ def _try_playwright_active(
     search_keywords: list[str],
     config: dict,
     db_path: str | None = None,
+    html_sink: list[str] | None = None,
 ) -> tuple[list[dict], str | None]:
     """Render page with Playwright, interact to discover more jobs.
 
@@ -126,6 +133,10 @@ def _try_playwright_active(
         search_keywords: Deduplicated keywords for search form submission.
         config: App config dict (for interaction limits).
         db_path: Optional path to SQLite DB for Phase-B raw-HTML capture.
+        html_sink: Optional list; when provided, the final rendered HTML is
+            appended to it so the caller can reuse the already-rendered DOM
+            (e.g. #453 outbound ATS-link discovery) without a second
+            navigation.
 
     Returns:
         Tuple of (jobs_list, discovered_api_endpoint_or_None).
@@ -277,6 +288,15 @@ def _try_playwright_active(
                 url,
                 len(all_jobs),
             )
+
+        # Surface the final rendered DOM for downstream reuse (#453 ATS-link
+        # discovery). Reads page content again rather than threading the last
+        # interaction's html through every branch — no new navigation.
+        if html_sink is not None:
+            try:
+                html_sink.append(page.content())
+            except Exception:
+                pass
 
         # --- Autoheal D3: record final rendered page once at exit (detect=True).
         # There is no single extraction call here (six interaction-driven
