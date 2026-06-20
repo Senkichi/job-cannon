@@ -29,6 +29,24 @@ _VERSION_KEY = "dedup_normalizer_version"
 _TITLE_VERSION_KEY = "title_hygiene_version"
 _JD_CONTENT_VERSION_KEY = "jd_content_version"
 
+# The LLM-scoring surface that every "retract / re-queue" path must clear
+# TOGETHER. ``scoring_model`` MUST be nulled in the SAME statement as
+# ``classification``/``sub_scores_json`` or the m078 I-04/I-05 triggers
+# (sub_scores_json / classification required when scoring_model is set) abort the
+# write — and because each re-sweep wraps its body in a non-fatal try/except, that
+# abort silently rolls back the ENTIRE sweep and never stamps the watermark.
+# Mirrors the canonical clear in ``db._assessment_writer.invalidate_job_score``;
+# ``scoring_provider``/``score`` are deliberately left intact (I-03 governs them,
+# and ``scoring_provider`` is re-stamped on the next score). Sanctioned here
+# because post-hooks live under ``migrations/`` (the assessment-writer grep gate's
+# documented exemption).
+_DECLASSIFY_COLS: tuple[str, ...] = (
+    "classification = NULL",
+    "sub_scores_json = NULL",
+    "fit_analysis = NULL",
+    "scoring_model = NULL",
+)
+
 
 def _read_meta_version(conn: sqlite3.Connection, key: str) -> int | None:
     """Return the integer watermark stored under *key* in ``schema_meta``, or None.
@@ -144,13 +162,7 @@ def _run_rekey_if_stale(conn: sqlite3.Connection) -> None:
                 ).fetchall()
                 for row in canonical_keys:
                     conn.execute(
-                        """
-                        UPDATE jobs
-                           SET classification = NULL,
-                               sub_scores_json = NULL,
-                               fit_analysis = NULL
-                         WHERE dedup_key = ?
-                    """,
+                        f"UPDATE jobs SET {', '.join(_DECLASSIFY_COLS)} WHERE dedup_key = ?",
                         (row[0],),
                     )
                 conn.commit()
@@ -302,11 +314,7 @@ def _run_title_resweep_if_stale(conn: sqlite3.Connection) -> None:
                 title
             )
             if (became_quarantined or semantic_change) and classification is not None:
-                cols += [
-                    "classification = NULL",
-                    "sub_scores_json = NULL",
-                    "fit_analysis = NULL",
-                ]
+                cols += _DECLASSIFY_COLS
                 declassified += 1
 
             params.append(dk)
@@ -459,11 +467,7 @@ def _run_jd_content_resweep_if_stale(conn: sqlite3.Connection) -> None:
             if has:
                 cols += ["jd_full = NULL", "enrichment_tier = NULL"]
                 if classification is not None:
-                    cols += [
-                        "classification = NULL",
-                        "sub_scores_json = NULL",
-                        "fit_analysis = NULL",
-                    ]
+                    cols += _DECLASSIFY_COLS
                     declassified += 1
                 cleared += 1
             elif had and not has:

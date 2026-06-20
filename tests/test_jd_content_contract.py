@@ -226,14 +226,18 @@ def _insert_job(
     reasons="[]",
     jd=None,
     tier="exhausted",
+    scoring_model=None,
 ):
+    # scoring_model set => the row is LLM-scored; the m078 I-04/I-05 triggers then
+    # require sub_scores_json + classification non-NULL (satisfied below). A heal
+    # that declassifies such a row MUST clear scoring_model in the same statement.
     conn.execute(
         "INSERT INTO jobs (dedup_key, title, company, location, sources, "
         "unresolved_reasons, classification, sub_scores_json, fit_analysis, jd_full, "
-        "enrichment_tier, first_seen, last_seen, pipeline_status) "
-        "VALUES (?, ?, 'Acme Corp', '', '[\"careers_page\"]', ?, ?, '{}', 'fit', ?, ?, "
+        "enrichment_tier, scoring_model, first_seen, last_seen, pipeline_status) "
+        "VALUES (?, ?, 'Acme Corp', '', '[\"careers_page\"]', ?, ?, '{}', 'fit', ?, ?, ?, "
         "'2026-01-01', '2026-01-01', 'discovered')",
-        (dedup_key, title, reasons, classification, jd, tier),
+        (dedup_key, title, reasons, classification, jd, tier, scoring_model),
     )
     conn.commit()
 
@@ -299,8 +303,20 @@ def test_resweep_heals_and_declassifies(migrated_db):
     _path, conn = migrated_db
     wiki = "From Wikipedia, the free encyclopedia. City in California. " * 8
     expired = "This position is no longer available. Browse other openings. " * 6
-    _insert_job(conn, "acme|wiki", title="Information Systems Manager", jd=wiki)
-    _insert_job(conn, "acme|exp", title="Senior Data Scientist", jd=expired)
+    # The junk rows are LLM-SCORED (scoring_model set) — declassifying them trips
+    # the m078 I-05 trigger unless scoring_model is cleared in the same statement.
+    # Regression guard: the old re-sweep nulled classification only, so I-05 aborted
+    # the whole sweep (watermark never advanced, nothing healed).
+    _insert_job(
+        conn,
+        "acme|wiki",
+        title="Information Systems Manager",
+        jd=wiki,
+        scoring_model="qwen2.5:14b",
+    )
+    _insert_job(
+        conn, "acme|exp", title="Senior Data Scientist", jd=expired, scoring_model="qwen2.5:14b"
+    )
     _insert_job(conn, "acme|good", title="Staff Data Scientist", jd=_REAL_JD)
 
     conn.execute("UPDATE schema_meta SET value = '0' WHERE key = 'jd_content_version'")
@@ -309,12 +325,13 @@ def test_resweep_heals_and_declassifies(migrated_db):
     _run_jd_content_resweep_if_stale(conn)
 
     wiki_row = conn.execute(
-        "SELECT jd_full, enrichment_tier, unresolved_reasons, classification "
+        "SELECT jd_full, enrichment_tier, unresolved_reasons, classification, scoring_model "
         "FROM jobs WHERE dedup_key='acme|wiki'"
     ).fetchone()
     assert wiki_row["jd_full"] is None
     assert wiki_row["enrichment_tier"] is None
     assert wiki_row["classification"] is None
+    assert wiki_row["scoring_model"] is None  # cleared with classification (I-04/I-05)
     assert JD_OFFSITE in json.loads(wiki_row["unresolved_reasons"])
 
     exp_row = conn.execute(

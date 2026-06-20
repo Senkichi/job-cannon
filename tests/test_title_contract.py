@@ -230,13 +230,18 @@ def test_from_job_clean_title_unaffected():
 # ---------------------------------------------------------------------------
 
 
-def _insert_job(conn, dedup_key, title, *, classification="apply", reasons="[]", jd=None):
+def _insert_job(
+    conn, dedup_key, title, *, classification="apply", reasons="[]", jd=None, scoring_model=None
+):
+    # scoring_model set => LLM-scored; the m078 I-04/I-05 triggers then require
+    # sub_scores_json + classification non-NULL. A heal that declassifies the row
+    # MUST clear scoring_model in the same statement or the trigger aborts.
     conn.execute(
         "INSERT INTO jobs (dedup_key, title, company, location, sources, unresolved_reasons, "
-        "classification, sub_scores_json, fit_analysis, jd_full, first_seen, last_seen, "
-        "pipeline_status) VALUES (?, ?, ?, '', '[\"careers_page\"]', ?, ?, '{}', 'fit', ?, "
-        "'2026-01-01', '2026-01-01', 'discovered')",
-        (dedup_key, title, "Acme Corp", reasons, classification, jd),
+        "classification, sub_scores_json, fit_analysis, jd_full, scoring_model, first_seen, "
+        "last_seen, pipeline_status) VALUES (?, ?, ?, '', '[\"careers_page\"]', ?, ?, '{}', 'fit', "
+        "?, ?, '2026-01-01', '2026-01-01', 'discovered')",
+        (dedup_key, title, "Acme Corp", reasons, classification, jd, scoring_model),
     )
     conn.commit()
 
@@ -246,9 +251,15 @@ def test_resweep_heals_legacy_rows(migrated_db):
 
     _path, conn = migrated_db
 
-    # Legacy junk that predates the contract: stored clean (reasons='[]'), scored apply.
-    _insert_job(conn, "acme|junk", "Mangled Engineer Jun 15, 2026 View Job →")
-    _insert_job(conn, "acme|funnel", "Talent Network: Lead Data Scientist")
+    # Legacy junk that predates the contract: stored clean (reasons='[]'), LLM-scored
+    # apply (scoring_model set). Declassifying these trips the m078 I-05 trigger unless
+    # scoring_model is cleared too — the regression that silently no-op'd the sweep.
+    _insert_job(
+        conn, "acme|junk", "Mangled Engineer Jun 15, 2026 View Job →", scoring_model="qwen2.5:14b"
+    )
+    _insert_job(
+        conn, "acme|funnel", "Talent Network: Lead Data Scientist", scoring_model="qwen2.5:14b"
+    )
     _insert_job(conn, "acme|clean", "Senior Data Scientist")  # control — must stay untouched
 
     # Reset the watermark below the live version to arm the sweep (the fixture's
@@ -263,7 +274,7 @@ def test_resweep_heals_legacy_rows(migrated_db):
     # raw keys we inserted.
     def by_title(prefix):
         return conn.execute(
-            "SELECT title, raw_title, unresolved_reasons, classification FROM jobs "
+            "SELECT title, raw_title, unresolved_reasons, classification, scoring_model FROM jobs "
             "WHERE title LIKE ?",
             (prefix + "%",),
         ).fetchone()
@@ -273,12 +284,14 @@ def test_resweep_heals_legacy_rows(migrated_db):
     assert junk["title"] == "Mangled Engineer"
     assert junk["raw_title"] == "Mangled Engineer Jun 15, 2026 View Job →"
     assert junk["classification"] is None
+    assert junk["scoring_model"] is None  # cleared with classification (I-04/I-05)
     assert json.loads(junk["unresolved_reasons"]) == []
 
     # Non-posting row: quarantined, declassified, title unchanged, raw_title untouched.
     funnel = by_title("Talent Network")
     assert TITLE_NON_POSTING in json.loads(funnel["unresolved_reasons"])
     assert funnel["classification"] is None
+    assert funnel["scoring_model"] is None  # cleared with classification (I-04/I-05)
     assert funnel["raw_title"] is None
 
     # Control clean row: completely untouched.
