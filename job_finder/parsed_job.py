@@ -29,11 +29,28 @@ Invariants enforced here:
           is retained in salary_observations; the NULL canonical re-enters
           enrichment automatically (salary_min IS NULL selection) and the row
           surfaces on /admin/review until a plausible pair resolves.
+    I-16  title positively satisfies the title contract (the fail-closed
+          inversion) → UnresolvedParsedJob(reason="title_invalid_shape") when the
+          CLEANED title still violates ``title_contract_violation`` (embedded
+          date / CTA chrome / trailing arrow / control chars) after clean_title
+          had its repair pass. Unlike the I-08/I-09 blocklist, this is a positive
+          contract: an UNRECOGNIZED shape defaults to quarantine, not clean. The
+          contract is versioned (TITLE_HYGIENE_VERSION) and re-applied to every
+          existing row by ``_run_title_resweep_if_stale`` so rule changes heal the
+          whole corpus, mirroring the dedup NORMALIZER_VERSION re-key.
+    I-17  (DEFINED, NOT WIRED) title belongs to its own body. The helper
+          ``title_jd_mismatch`` exists, but a live-corpus dry-run showed its
+          zero-overlap signal fires on a GARBAGE jd_full (block/Wikipedia/landing
+          pages stored as the JD), not a wrong title — i.e. a jd_full_junk (I-13)
+          problem. Quarantining it as a TITLE issue would mislabel it and risk
+          false-positives, so it is NOT emitted; the garbage-JD cohort is left to
+          a dedicated ``_is_jd_junk`` pass.
 
 ``unresolved_reasons`` vocabulary (the quarantine surface, m078): the codes
 ``ParsedJob.from_job`` can emit are ``title_metadata_blob`` (I-08), ``title_
-cross_field_bleed`` (I-09), ``jd_full_junk`` (I-13), and ``salary_implausible``
-(I-15). ``data_enricher`` additionally manages ``location_missing`` and clears
+cross_field_bleed`` (I-09), ``jd_full_junk`` (I-13), ``salary_implausible``
+(I-15), ``title_invalid_shape`` (I-16), and ``title_non_posting`` (I-16, funnel
+entries). ``data_enricher`` additionally manages ``location_missing`` and clears
 ``salary_implausible`` once a later pass resolves a plausible salary.
 
 Reference: .planning/specs/2026-05-29-ingestion-contract-enforcement.md §8
@@ -48,6 +65,7 @@ from typing import TYPE_CHECKING, Literal
 
 from job_finder.config import get_company_denylist, load_config
 from job_finder.normalizers import normalize_company, normalize_title
+from job_finder.web.careers_crawler._title_contract import title_contract_violation
 from job_finder.web.careers_crawler._title_filters import (
     clean_title,
     is_listing_tile,
@@ -286,17 +304,19 @@ class ParsedJob:
             source_urls: list[str]               — canonical source URLs
             source_urls_raw: list[str]           — forensic original URLs
 
-        Validator routing (I-07..I-13):
+        Validator routing (I-07..I-17):
 
             I-14 (listing tile, #211)       → raises ListingTileError
             I-08 (title_metadata_blob)      → UnresolvedParsedJob, does NOT raise
+            I-16 (title_invalid_shape /
+                  title_non_posting)        → UnresolvedParsedJob, does NOT raise
             I-09 (title_cross_field_bleed)  → UnresolvedParsedJob, does NOT raise
             I-10 (denylist)                 → raises DenylistedCompanyError
             I-07 (location shape)           → raises LocationShapeError
             I-13 (jd_full junk)             → UnresolvedParsedJob with jd_full=None
             I-15 (salary_implausible)       → UnresolvedParsedJob, does NOT raise
 
-        Reasons from I-08 / I-09 / I-13 / I-15 accumulate in
+        Reasons from I-08 / I-16 / I-09 / I-13 / I-15 accumulate in
         ``unresolved_reasons``. If I-10 or I-07 raise, no UnresolvedParsedJob is
         returned.
 
@@ -366,6 +386,20 @@ class ParsedJob:
 
         cleaned_title: str = clean_title(raw_title)
 
+        # I-16: positive title contract (fail-closed). clean_title has already
+        # had its chance to REPAIR the title (e.g. strip a trailing
+        # "<Mon D, YYYY> View Job ->" card tail); anything it could not salvage
+        # into a clean atomic title — or that is a clean-looking non-posting
+        # funnel entry — is quarantined here with the returned reason code
+        # (title_invalid_shape | title_non_posting). This inverts the old
+        # fail-open default: an unrecognized junk shape now defaults to
+        # UnresolvedParsedJob instead of being treated as clean. Skipped only if
+        # the title already tripped the metadata-blob path (same triage value).
+        if "title_metadata_blob" not in unresolved_reasons:
+            _title_reason = title_contract_violation(cleaned_title)
+            if _title_reason is not None:
+                unresolved_reasons.append(_title_reason)
+
         # I-09: title cross-field bleed (location token after paren-close)
         if _has_title_cross_field_bleed(cleaned_title, locations_raw):
             if "title_cross_field_bleed" not in unresolved_reasons:
@@ -394,6 +428,17 @@ class ParsedJob:
         if clean_jd_full is not None and _is_jd_junk(clean_jd_full):
             unresolved_reasons.append("jd_full_junk")
             clean_jd_full = None  # row still written, but jd_full cleared
+
+        # I-17 (title_jd_mismatch) is DEFINED but intentionally NOT wired into the
+        # quarantine path. A live-corpus dry-run showed the zero-overlap signal
+        # almost always fires on a GARBAGE jd_full (block pages, Wikipedia,
+        # careers-landing chrome, listing pages stored as the JD) rather than a
+        # wrong title — i.e. it is really a jd_full_junk problem (I-13's domain),
+        # and quarantining it as a TITLE issue would be mislabeled and risk
+        # false-positives on real JDs that don't echo the title early. The helper
+        # (title_jd_mismatch) and dry-run reporting are kept so the garbage-JD
+        # cohort can be addressed in a dedicated _is_jd_junk pass. See the
+        # title-hygiene PR description for the deferral rationale.
 
         # Salary observations (lossless append-log seed, D-1). Resolved here so the
         # I-15 quarantine detector below can inspect each source's salvage verdict.

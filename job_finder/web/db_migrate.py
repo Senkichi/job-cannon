@@ -39,7 +39,10 @@ from pathlib import Path
 from job_finder.web.db_helpers import standalone_connection
 from job_finder.web.migrations import MIGRATIONS, Migration, MigrationContext
 from job_finder.web.migrations._gate import MigrationBlockedError, _check_backup_recent
-from job_finder.web.migrations._post_hooks import _run_rekey_if_stale
+from job_finder.web.migrations._post_hooks import (
+    _run_rekey_if_stale,
+    _run_title_resweep_if_stale,
+)
 from job_finder.web.migrations._runner import _apply_migration
 
 __all__ = [
@@ -206,6 +209,15 @@ def run_migrations(db_path: str, user_data_root: str | None = None) -> None:
         final_version = conn.execute("PRAGMA user_version").fetchone()[0]
         if final_version >= 100:
             _run_rekey_if_stale(conn)
+
+        # Standing title-hygiene re-sweep (I-16/I-17): re-clean + re-validate every
+        # title whenever the stored title_hygiene_version (seeded by m110) differs
+        # from the live TITLE_HYGIENE_VERSION. Runs AFTER the dedup re-key so it
+        # operates on already-merged canonical rows; it then re-keys+merges any new
+        # collisions its title rewrites create. Idempotent and cheap on the common
+        # path (one SELECT when versions match); defers if m110 hasn't run yet.
+        if final_version >= 110:
+            _run_title_resweep_if_stale(conn)
 
         # Fixup: ensure comp_data_json column exists (missed in original Migration 7).
         # Required for databases that ran Migration 7 before this column was added —

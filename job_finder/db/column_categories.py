@@ -57,6 +57,7 @@ COLUMN_CATEGORIES: dict[str, str] = {
     "posted_date_precision": "parser",  # NEW in #363 m095 — provenance of posted_date
     # ── system-owned (managed by DB / scheduler / detector) ───────────────
     "dedup_key": "system",  # derived from (company, title)
+    "raw_title": "system",  # NEW m110 — forensic pre-rewrite title, set only by the title re-sweep
     "first_seen": "system",
     "last_seen": "system",
     "is_stale": "system",  # stale_detector

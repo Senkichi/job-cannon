@@ -9,6 +9,12 @@ from __future__ import annotations
 
 import re
 
+from job_finder.web.careers_crawler._title_contract import (
+    _CTA_RE,
+    _DATE_TOKEN_RE,
+    _TRAILING_ARROW_RE,
+)
+
 # Links with these path prefixes are navigation, not job listings
 _NAV_PATH_PREFIXES = (
     "/about",
@@ -130,6 +136,38 @@ _LEADING_LOGO_LETTERS_RE = re.compile(r"^([A-Z]{1,2})(?=[A-Z][a-z])")
 def _strip_leading_logo_letters(s: str) -> str:
     """Strip 1-2 leading ALLCAPS letters that are a logo placeholder."""
     return _LEADING_LOGO_LETTERS_RE.sub("", s, count=1)
+
+
+# Trailing card-chrome tail: from the first embedded date/CTA token to end of
+# string, plus a bare trailing arrow glyph. This is the deterministic REPAIR
+# counterpart to the contract's quarantine detection — it recovers the real
+# title from a scraped job card ("Data Scientist / IA Engineer Jun 15, 2026
+# View Job ->" -> "Data Scientist / IA Engineer"). The date/CTA alternations are
+# composed from the SAME canonical patterns the contract validates against
+# (_title_contract._DATE_TOKEN_RE / _CTA_RE), so the strip anchor can never
+# drift from what title_contract_violation flags.
+_CARD_JUNK_ANCHOR_RE = re.compile(
+    rf"\s*(?:(?:{_DATE_TOKEN_RE.pattern})|(?:{_CTA_RE.pattern})).*$",
+    re.IGNORECASE,
+)
+_MIN_REPAIR_HEAD = 3
+
+
+def _strip_trailing_card_junk(s: str) -> str:
+    """Strip a trailing date/CTA card-chrome tail, recovering the real title.
+
+    Conservative: only strips when a non-trivial head (>= _MIN_REPAIR_HEAD chars)
+    remains, so a title is never reduced to nothing. A bare trailing arrow glyph
+    is always removed. Deterministic and idempotent — re-running on an already
+    repaired title is a no-op (which the retroactive re-sweep relies on).
+    """
+    cleaned = _TRAILING_ARROW_RE.sub("", s).rstrip()
+    match = _CARD_JUNK_ANCHOR_RE.search(cleaned)
+    if match:
+        head = cleaned[: match.start()].strip()
+        if len(head) >= _MIN_REPAIR_HEAD:
+            cleaned = head
+    return cleaned
 
 
 # Heuristic guards for detecting that a "title" is actually a glued metadata
@@ -275,12 +313,14 @@ def _clean_title(tag, raw_text: str) -> str:
         if first_text and len(first_text) >= 5:
             return _strip_leading_logo_letters(first_text)
 
-    # Strategy 3: regex strip on the raw text. Order matters — strip
-    # separator-based location patterns first, then the Workday-style
-    # req-id glob (which also absorbs trailing location text that came
-    # glued on with the req-id), then the no-separator trailing-
+    # Strategy 3: regex strip on the raw text. Order matters — strip the
+    # trailing date/CTA card-chrome tail FIRST (so the real title is exposed
+    # for the location/req-id strippers below), then separator-based location
+    # patterns, then the Workday-style req-id glob (which also absorbs trailing
+    # location text glued on with the req-id), then the no-separator trailing-
     # uppercase run, then leading logo letters last.
-    cleaned = _LOCATION_SUFFIX_RE.sub("", raw_text)
+    cleaned = _strip_trailing_card_junk(raw_text)
+    cleaned = _LOCATION_SUFFIX_RE.sub("", cleaned)
     cleaned = _strip_city_suffix_guarded(cleaned)
     cleaned = _REQID_PREFIX_RE.sub("", cleaned)
     cleaned = _NOSEP_TRAIL_LOC_RE.sub("", cleaned)
@@ -300,7 +340,8 @@ def clean_title(title: str) -> str:
     available), use ``_clean_title()`` which has higher precision via
     heading/first-child strategies.
     """
-    cleaned = _LOCATION_SUFFIX_RE.sub("", title)
+    cleaned = _strip_trailing_card_junk(title)
+    cleaned = _LOCATION_SUFFIX_RE.sub("", cleaned)
     cleaned = _strip_city_suffix_guarded(cleaned)
     cleaned = _REQID_PREFIX_RE.sub("", cleaned)
     cleaned = _NOSEP_TRAIL_LOC_RE.sub("", cleaned)

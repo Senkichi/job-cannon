@@ -215,6 +215,12 @@ def _run_batch_bg(db_path: str, session_id: int, config: dict) -> None:
             rows = conn.execute(
                 f"SELECT {JOBS_ALL_COLUMNS} FROM jobs WHERE classification IS NULL "
                 "AND pipeline_status NOT IN ('dismissed', 'archived') "
+                # Quarantine gate (I-16/I-17): never score a row whose title (or
+                # other field) failed a contract — otherwise NULLing a quarantined
+                # row's classification just feeds it straight back here and it
+                # returns as 'apply'. COALESCE keeps legacy NULL-reasons rows
+                # scorable (clean); only genuinely-flagged rows are withheld.
+                "AND COALESCE(unresolved_reasons, '[]') = '[]' "
                 "ORDER BY score DESC"
             ).fetchall()
 

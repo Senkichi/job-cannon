@@ -25,6 +25,7 @@ import requests
 from bs4 import BeautifulSoup
 
 from job_finder.config import JD_STORAGE_MAX_CHARS
+from job_finder.web.careers_crawler._title_filters import clean_title
 from job_finder.web.claude_client import call_claude
 from job_finder.web.html_extract import html_to_clean_text
 from job_finder.web.model_provider import ProviderCascadeExhaustedError, call_model
@@ -37,6 +38,32 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 _CAREERS_PATTERNS = ["/careers", "/jobs", "/join", "/join-us", "/work-with-us", "/openings"]
+
+# Aggregator / blog-repost registrable domains that masquerade as employer
+# careers pages. Jobs scraped from these carry the BLOG's brand as the company
+# ("Jobflarely" <- jobflarely.liveblog365.com) and recycle reposts whose cards
+# glue title + date + "View Job ->" CTA together. We never scrape them — a code
+# blocklist is the durable backstop (config-yaml denylists rot + drift, per the
+# dual-copy CI test). Suffix-matched against the URL host, so any subdomain is
+# covered. Extend this list, not config, when a new repost host surfaces.
+_BLOCKLISTED_SCRAPE_HOSTS: frozenset[str] = frozenset(
+    {
+        "liveblog365.com",
+        "nerdleveltech.com",
+    }
+)
+
+
+def _is_blocklisted_scrape_host(url: str) -> bool:
+    """True if *url*'s host is (a subdomain of) a blocklisted aggregator domain."""
+    if not url:
+        return False
+    try:
+        host = (urlparse(url).hostname or "").lower()
+    except ValueError:
+        return False
+    return any(host == d or host.endswith("." + d) for d in _BLOCKLISTED_SCRAPE_HOSTS)
+
 
 _LOW_TIER_HTML_CHARS = 3000  # Truncate HTML sent to low tier (~1000 tokens)
 
@@ -572,10 +599,23 @@ def scrape_careers_page(
         List of dicts with keys 'title', 'url', and 'description'. Empty list on
         error or if no matching jobs found (including JS-rendered pages).
     """
+    # Aggregator/blog repost hosts produce brand-as-company junk — never scrape
+    # them. Checked on the requested URL up front (cheap, no fetch).
+    if _is_blocklisted_scrape_host(careers_url):
+        logger.debug("scrape_careers_page: skipping blocklisted aggregator host %s", careers_url)
+        return []
+
     try:
         resp = requests.get(careers_url, timeout=_TIMEOUT, headers=_HEADERS)
     except Exception as e:
         logger.debug("scrape_careers_page('%s') request failed: %s", careers_url, e)
+        return []
+
+    # Re-check after redirects: a benign-looking URL may 30x to a repost host.
+    if _is_blocklisted_scrape_host(resp.url):
+        logger.debug(
+            "scrape_careers_page: host %s redirected to blocklisted aggregator", careers_url
+        )
         return []
 
     try:
@@ -601,17 +641,32 @@ def scrape_careers_page(
     for tag in soup.find_all("a", href=True):
         href = tag["href"].strip()
 
-        # Whitespace-normalize the title: join each text fragment with a space
-        # to prevent adjacent-text-node concatenation (e.g. Blue State shape
-        # "Principal Analyst (Evergreen)NY, DC, Oakland" → properly spaced).
-        title = " ".join(tag.stripped_strings)
+        # Whitespace-normalize the card text (join adjacent text nodes with a
+        # space so the Blue State shape "Principal Analyst (Evergreen)NY, DC" is
+        # split, and the sibling <span class="location"> stays extractable below),
+        # THEN run the string-level title repair. clean_title strips the trailing
+        # date/CTA card chrome ("Data Scientist / IA Engineer Jun 15, 2026 View
+        # Job ->" -> "Data Scientist / IA Engineer") so both the relevance match
+        # and the persisted value are the clean title. We deliberately use the
+        # string variant, NOT the tag-aware _clean_title: its heading/first-child
+        # strategies would grab the location <span> as the title on this markup.
+        # ParsedJob.from_job re-runs the same contract at the universal chokepoint.
+        raw_title = " ".join(tag.stripped_strings)
 
         # Skip empty links, navigation-only links without text
-        if not href or not title:
+        if not href or not raw_title:
             continue
 
-        # Apply keyword filter
-        if not _title_matches(title, target_titles, exclusions):
+        # Apply the keyword/exclusion filter on the RAW card text: an exclusion
+        # keyword (e.g. "Intern") must match the original title even if cleaning
+        # would later strip it as a trailing qualifier. (Running the filter on the
+        # cleaned title let excluded jobs leak through once "- Intern" was removed.)
+        if not _title_matches(raw_title, target_titles, exclusions):
+            continue
+
+        # Persist the CLEANED title — strips the trailing date/CTA card chrome.
+        title = clean_title(raw_title)
+        if not title:
             continue
 
         # Resolve relative URL
