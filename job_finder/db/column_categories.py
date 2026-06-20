@@ -66,6 +66,7 @@ COLUMN_CATEGORIES: dict[str, str] = {
     "computed_status": "system",  # NEW in Phase 49 m081 — VIRTUAL generated column
     "company_id": "system",  # FK; assigned at upsert by company_resolver
     "enrichment_tier": "system",
+    "jd_adjudicated_version": "system",  # NEW m112 — per-row LLM jd-content adjudication watermark
     "comp_data_json": "system",  # company-research output
     "unresolved_reasons": "system",  # NEW in Phase 47 m078 — JSON reason codes
     "direct_url": "system",  # NEW m085 — company-posting link captured by enrichment

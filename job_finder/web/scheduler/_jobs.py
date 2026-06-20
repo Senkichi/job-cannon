@@ -631,6 +631,51 @@ def register_enrichment_backfill(scheduler, app) -> None:
 
 
 # ---------------------------------------------------------------------------
+# JD-content LLM adjudication — daily backfill of the AMBIGUOUS middle (PR2 of
+# the jd-content contract). The deterministic re-sweep handles the high-precision
+# REJECTs; this drains the ~21% AMBIGUOUS bodies through the local-LLM tie-breaker
+# in bounded batches. Noon slot avoids the heavy nightly writers (staleness +
+# agentic) that the comment below warns about DB-contending.
+# ---------------------------------------------------------------------------
+
+
+def register_jd_adjudication(scheduler, app) -> None:
+    """Register the daily jd-content LLM adjudication backfill."""
+
+    def _import_jd_adjudication():
+        from job_finder.web.scheduler._runners import run_jd_adjudication
+
+        return run_jd_adjudication
+
+    def _import_jd_adjudication_action():
+        from job_finder.web.activity_tracker import ACTION_SCHEDULED_JD_ADJUDICATION
+
+        return ACTION_SCHEDULED_JD_ADJUDICATION
+
+    scheduler.add_job(
+        _make_tracked_job(
+            app,
+            "JD adjudication",
+            import_func=_import_jd_adjudication,
+            import_action=_import_jd_adjudication_action,
+            extract_metadata=lambda r: {
+                "scanned": r.get("scanned", 0),
+                "llm_calls": r.get("llm_calls", 0),
+                "kept": r.get("kept", 0),
+                "rejected": r.get("rejected", 0),
+            },
+            publish_events=(JOBS_CHANGED, COSTS_CHANGED),
+        ),
+        trigger=CronTrigger(hour=12, minute=0),
+        id="jd_adjudication",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=HEAVY_MISFIRE_GRACE_S,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Agentic backfill — chained off staleness_check completion (no cron). Was a
 # fixed 4:15 slot chosen to clear the tail of staleness (starts 2:00, runs
 # ~2 hours). But staleness runtime is unbounded, so a fixed slot still raced it
@@ -778,5 +823,6 @@ def register_all_jobs(scheduler, app) -> None:
     register_homepage_discovery(scheduler, app)
     register_registry_hygiene(scheduler, app)
     register_enrichment_backfill(scheduler, app)
+    register_jd_adjudication(scheduler, app)
     register_health_heartbeat(scheduler, app)
     register_heartbeat(scheduler, app)
