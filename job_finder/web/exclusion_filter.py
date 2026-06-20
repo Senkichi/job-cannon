@@ -135,6 +135,10 @@ def count_scorable(conn, config: dict) -> int:
             "jd_full IS NOT NULL",
             "TRIM(jd_full) != ''",
             "pipeline_status NOT IN ('dismissed', 'archived')",
+            # Quarantine gate (I-16/I-17): mirror the batch scorer's candidate
+            # SELECT so the dashboard "N unscored" tile matches what the worker
+            # actually attempts (a quarantined row is withheld from scoring).
+            "COALESCE(unresolved_reasons, '[]') = '[]'",
         ]
         params: list = []
 
