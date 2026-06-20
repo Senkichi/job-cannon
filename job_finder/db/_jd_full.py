@@ -202,3 +202,31 @@ def set_jd_full(
 
         invalidate_job_score(conn, dedup_key)
     return True
+
+
+def clear_jd_full(conn: sqlite3.Connection, dedup_key: str) -> bool:
+    """Clear ``jobs.jd_full`` to NULL — the sanctioned re-queue counterpart to set_jd_full.
+
+    The jd-content adjudicator / re-sweep call this to retract a stored body that
+    is provably not a job description (offsite / expired / listing chrome). Like
+    ``set_jd_full``, this is a sanctioned ``jd_full`` write that lives in this
+    module so the ``test_jd_full_writers_routed`` grep gate stays strict — callers
+    must never hand-roll a raw ``UPDATE jobs SET jd_full = NULL``.
+
+    Clearing the body makes any prior score stale (it was derived from content
+    that no longer exists), so — mirroring ``set_jd_full``'s content-change
+    invalidation — ``invalidate_job_score`` is called to re-queue the row AND to
+    keep the m078 I-04/I-05 invariants satisfied (a set ``scoring_model`` may not
+    outlive its ``classification``). The invalidation is idempotent and
+    trigger-safe on an already-unscored row (its scoring columns are already NULL).
+
+    The caller owns the other re-queue side effects (``enrichment_tier`` reset,
+    ``unresolved_reasons`` quarantine). Returns True if a row was matched.
+    """
+    cur = conn.execute("UPDATE jobs SET jd_full = NULL WHERE dedup_key = ?", (dedup_key,))
+    conn.commit()
+    if cur.rowcount > 0:
+        from ._assessment_writer import invalidate_job_score
+
+        invalidate_job_score(conn, dedup_key)
+    return cur.rowcount > 0

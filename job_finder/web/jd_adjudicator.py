@@ -28,6 +28,7 @@ from job_finder.db._jd_content_contract import (
     JdVerdict,
     classify_jd_content,
 )
+from job_finder.db._jd_full import clear_jd_full
 from job_finder.web.model_provider import call_model
 
 logger = logging.getLogger(__name__)
@@ -109,10 +110,18 @@ def _stamp_adjudicated(conn: sqlite3.Connection, dedup_key: str) -> None:
     )
 
 
-def _heal_offsite(
-    conn: sqlite3.Connection, dedup_key: str, reason: str, classification: str | None
-) -> None:
-    """Clear + re-queue + quarantine a rejected row (mirrors the re-sweep heal)."""
+def _heal_offsite(conn: sqlite3.Connection, dedup_key: str, reason: str) -> None:
+    """Clear + re-queue + quarantine a rejected row (mirrors the re-sweep heal).
+
+    ``clear_jd_full`` does the sanctioned ``jd_full``→NULL write AND invalidates any
+    stale score — a body that is not a JD must not keep the classification derived
+    from it, and that single trigger-safe clear (which also nulls ``scoring_model``)
+    is what keeps the m078 I-04/I-05 invariants satisfied. A partial declassify
+    that left ``scoring_model`` set would ``RAISE(ABORT)``; with no try/except
+    around the backfill loop that aborts the ENTIRE drain on the first scored
+    reject (same bug class as the ``_post_hooks`` re-sweeps, PR #501). The
+    ``enrichment_tier`` reset + reason quarantine touch no gated column.
+    """
     row = conn.execute(
         "SELECT unresolved_reasons FROM jobs WHERE dedup_key = ?", (dedup_key,)
     ).fetchone()
@@ -124,12 +133,12 @@ def _heal_offsite(
         reasons = []
     if reason not in reasons:
         reasons.append(reason)
-    cols = ["jd_full = NULL", "enrichment_tier = NULL", "unresolved_reasons = ?"]
-    params: list = [json.dumps(reasons)]
-    if classification is not None:
-        cols += ["classification = NULL", "sub_scores_json = NULL", "fit_analysis = NULL"]
-    params.append(dedup_key)
-    conn.execute(f"UPDATE jobs SET {', '.join(cols)} WHERE dedup_key = ?", params)
+    clear_jd_full(conn, dedup_key)
+    conn.execute(
+        "UPDATE jobs SET enrichment_tier = NULL, unresolved_reasons = ? WHERE dedup_key = ?",
+        (json.dumps(reasons), dedup_key),
+    )
+    conn.commit()
 
 
 def run_jd_adjudication_backfill(
@@ -146,8 +155,11 @@ def run_jd_adjudication_backfill(
 
     Returns a summary dict (scanned / llm_calls / kept / rejected / undetermined).
     """
+    # classification is referenced only by the ORDER BY (scored rows first, so a
+    # stale score on garbage is retracted soonest); the heal no longer needs it as
+    # a value, so it stays out of the SELECT list.
     rows = conn.execute(
-        "SELECT dedup_key, title, company, jd_full, classification FROM jobs "
+        "SELECT dedup_key, title, company, jd_full FROM jobs "
         "WHERE jd_full IS NOT NULL AND TRIM(jd_full) != '' "
         "AND COALESCE(unresolved_reasons, '[]') = '[]' "
         "AND (jd_adjudicated_version IS NULL OR jd_adjudicated_version < ?) "
@@ -157,11 +169,11 @@ def run_jd_adjudication_backfill(
     ).fetchall()
 
     scanned = llm_calls = kept = rejected = undetermined = 0
-    for dk, title, company, jd_full, classification in rows:
+    for dk, title, company, jd_full in rows:
         scanned += 1
         verdict = classify_jd_content(jd_full, title, company)
         if verdict.verdict is JdVerdict.REJECT:
-            _heal_offsite(conn, dk, verdict.reason or JD_OFFSITE, classification)
+            _heal_offsite(conn, dk, verdict.reason or JD_OFFSITE)
             rejected += 1
             continue
         if verdict.verdict is JdVerdict.CLEAN:
@@ -178,7 +190,7 @@ def run_jd_adjudication_backfill(
             _stamp_adjudicated(conn, dk)
             kept += 1
         else:
-            _heal_offsite(conn, dk, JD_OFFSITE, classification)
+            _heal_offsite(conn, dk, JD_OFFSITE)
             rejected += 1
 
     conn.commit()

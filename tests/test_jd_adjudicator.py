@@ -26,14 +26,31 @@ _AMBIGUOUS_JD = (
 )
 
 
-def _insert(conn, dedup_key, *, title, jd, classification="apply", tier="exhausted"):
+def _insert(
+    conn,
+    dedup_key,
+    *,
+    title,
+    jd,
+    classification="apply",
+    tier="exhausted",
+    scoring_model="qwen2.5:14b",
+):
+    # m078 I-04/I-05: scoring_model may be set only on an LLM-scored row
+    # (classification + sub_scores_json present). An unscored row carries no
+    # model. Scored rows MUST carry scoring_model here — without it a reject
+    # heal nulls classification while scoring_model is already NULL, so I-05's
+    # `WHEN NEW.scoring_model IS NOT NULL` never fires and the partial-declassify
+    # bug stays invisible (the gap that let it ship past CI).
+    if classification is None:
+        scoring_model = None
     conn.execute(
         "INSERT INTO jobs (dedup_key, title, company, location, sources, "
-        "unresolved_reasons, classification, sub_scores_json, fit_analysis, jd_full, "
-        "enrichment_tier, first_seen, last_seen, pipeline_status) "
-        "VALUES (?, ?, 'Acme Corp', '', '[\"careers_page\"]', '[]', ?, '{}', 'fit', ?, ?, "
+        "unresolved_reasons, classification, sub_scores_json, fit_analysis, "
+        "scoring_model, jd_full, enrichment_tier, first_seen, last_seen, pipeline_status) "
+        "VALUES (?, ?, 'Acme Corp', '', '[\"careers_page\"]', '[]', ?, '{}', 'fit', ?, ?, ?, "
         "'2026-01-01', '2026-01-01', 'discovered')",
-        (dedup_key, title, classification, jd, tier),
+        (dedup_key, title, classification, scoring_model, jd, tier),
     )
     conn.commit()
 
@@ -127,7 +144,8 @@ def test_backfill_state_machine(monkeypatch, migrated_db):
 
     def row(dk):
         return conn.execute(
-            "SELECT jd_full, jd_adjudicated_version, unresolved_reasons, classification "
+            "SELECT jd_full, jd_adjudicated_version, unresolved_reasons, classification, "
+            "scoring_model "
             "FROM jobs WHERE dedup_key = ?",
             (dk,),
         ).fetchone()
@@ -143,11 +161,16 @@ def test_backfill_state_machine(monkeypatch, migrated_db):
     assert yes["jd_adjudicated_version"] == JD_CONTENT_VERSION
     assert yes["jd_full"] is not None
 
-    # AMBIGUOUS-NO: healed — body cleared, quarantined, declassified.
+    # AMBIGUOUS-NO: healed — body cleared, quarantined, fully declassified.
+    # scoring_model MUST be nulled too: a scored row (scoring_model set) whose
+    # classification is cleared while scoring_model survives trips m078 I-05,
+    # which aborts the whole backfill. This row was inserted scored, so the heal
+    # exercises that path.
     no = row("acme|no")
     assert no["jd_full"] is None
     assert JD_OFFSITE in json.loads(no["unresolved_reasons"])
     assert no["classification"] is None
+    assert no["scoring_model"] is None
 
     # AMBIGUOUS-undetermined: left unstamped for retry, body intact.
     maybe = row("acme|maybe")
