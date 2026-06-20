@@ -42,6 +42,8 @@ from __future__ import annotations
 
 import re
 
+from job_finder.normalizers import body_mentions_any_stem, significant_tokens
+
 # ---------------------------------------------------------------------------
 # Hygiene version watermark (D-8: derived/validated values are versioned).
 #
@@ -166,62 +168,10 @@ def title_contract_violation(title: str | None) -> str | None:
 
 _JD_MIN_CHARS = 300
 
-#: Generic title words that carry no matching signal (seniority/level/format).
-_TITLE_STOPWORDS = frozenset(
-    {
-        "senior",
-        "sr",
-        "junior",
-        "jr",
-        "staff",
-        "principal",
-        "lead",
-        "head",
-        "associate",
-        "assistant",
-        "manager",
-        "director",
-        "vp",
-        "vice",
-        "president",
-        "chief",
-        "intern",
-        "internship",
-        "co",
-        "op",
-        "coop",
-        "the",
-        "and",
-        "or",
-        "of",
-        "for",
-        "in",
-        "at",
-        "to",
-        "a",
-        "an",
-        "remote",
-        "hybrid",
-        "onsite",
-        "fulltime",
-        "part",
-        "time",
-        "contract",
-        "i",
-        "ii",
-        "iii",
-        "iv",
-        "v",
-    }
-)
-
-_TOKEN_RE = re.compile(r"[a-z0-9]{3,}")
-
-
-def _significant_tokens(title: str) -> list[str]:
-    """Lowercased alphanumeric title tokens (len>=3) minus generic stopwords."""
-    return [t for t in _TOKEN_RE.findall(title.lower()) if t not in _TITLE_STOPWORDS]
-
+# Significant-token tooling now lives in job_finder.normalizers (shared with the
+# jd-content contract) — see the import at the top of this module. The stopword
+# set + tokenizer used to be duplicated here; they were extracted so both
+# cross-field contracts share one definition.
 
 #: Minimum significant title tokens required before a JD cross-check can fire.
 #: A single-content-word title ("Staff UX Researcher" -> just "researcher") is too
@@ -248,8 +198,7 @@ def title_jd_mismatch(title: str | None, jd_full: str | None) -> bool:
     """
     if not title or not jd_full or len(jd_full) < _JD_MIN_CHARS:
         return False
-    tokens = _significant_tokens(title)
+    tokens = significant_tokens(title)
     if len(tokens) < _JD_MIN_TOKENS:
         return False
-    body = jd_full.lower()
-    return not any(tok[:_JD_STEM_LEN] in body for tok in tokens)
+    return not body_mentions_any_stem(tokens, jd_full.lower(), _JD_STEM_LEN)

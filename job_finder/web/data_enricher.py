@@ -45,6 +45,7 @@ from typing import Any
 
 from job_finder.config import JD_STORAGE_MAX_CHARS
 from job_finder.db._direct_link import set_direct_url
+from job_finder.db._jd_content_contract import JD_CONTENT_REASON_CODES
 from job_finder.db._jd_full import set_jd_full as _set_jd_full
 from job_finder.db._jobs import _reconcile_salary_for_write
 from job_finder.db._locations import apply_location_observation
@@ -1085,9 +1086,33 @@ def _persist(conn: Any, job_row: dict, enriched: dict, tier_name: str) -> None:
     jd_full_value = safe_enriched.pop("jd_full", None)
     if jd_full_value is not None:
         try:
-            _set_jd_full(conn, dedup_key, jd_full_value, source="data_enricher._persist")
+            wrote_jd = _set_jd_full(
+                conn, dedup_key, jd_full_value, source="data_enricher._persist"
+            )
         except Exception as e:
             logger.warning("_persist: jd_full write failed for '%s': %s", dedup_key, e)
+        else:
+            # I-18 heal completion: a successful write cleared the jd-content gate
+            # (a real posting body, not a wrong-page capture), so retract any
+            # jd-content quarantine code — the heal loop closes and the row leaves
+            # /admin/review. Single atomic filtered removal (NOT two
+            # _mutate_unresolved_reason calls: that helper reads the stale job_row
+            # snapshot, so a second call would re-add the first code).
+            if wrote_jd:
+                try:
+                    reasons = json.loads(job_row.get("unresolved_reasons") or "[]")
+                    if isinstance(reasons, list) and any(
+                        r in JD_CONTENT_REASON_CODES for r in reasons
+                    ):
+                        kept = [r for r in reasons if r not in JD_CONTENT_REASON_CODES]
+                        conn.execute(
+                            "UPDATE jobs SET unresolved_reasons = ? WHERE dedup_key = ?",
+                            (json.dumps(kept), dedup_key),
+                        )
+                        conn.commit()
+                        job_row["unresolved_reasons"] = json.dumps(kept)
+                except (TypeError, ValueError) as e:
+                    logger.warning("_persist: jd reason clear failed for '%s': %s", dedup_key, e)
 
     # --- Step 2: salary — reconcile before writing (I-02 inversion fix) ---
     # _reconcile_salary_for_write() validates the EFFECTIVE pair the I-02 trigger

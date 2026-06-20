@@ -38,20 +38,30 @@ Invariants enforced here:
           contract is versioned (TITLE_HYGIENE_VERSION) and re-applied to every
           existing row by ``_run_title_resweep_if_stale`` so rule changes heal the
           whole corpus, mirroring the dedup NORMALIZER_VERSION re-key.
-    I-17  (DEFINED, NOT WIRED) title belongs to its own body. The helper
-          ``title_jd_mismatch`` exists, but a live-corpus dry-run showed its
-          zero-overlap signal fires on a GARBAGE jd_full (block/Wikipedia/landing
-          pages stored as the JD), not a wrong title — i.e. a jd_full_junk (I-13)
-          problem. Quarantining it as a TITLE issue would mislabel it and risk
-          false-positives, so it is NOT emitted; the garbage-JD cohort is left to
-          a dedicated ``_is_jd_junk`` pass.
+    I-17  (FOLDED INTO I-18) the title<->body zero-overlap signal
+          (``title_jd_mismatch``) was originally scoped as a TITLE check but a
+          live-corpus dry-run proved it fires on a GARBAGE jd_full (block /
+          Wikipedia / landing pages stored as the JD), not a wrong title. It is
+          now wired as a jd-content signal inside I-18 (emitting
+          ``jd_full_offsite``), exactly as that deferral note anticipated.
+    I-18  jd_full positively is THIS job's posting (the fail-closed jd-content
+          contract) → UnresolvedParsedJob with jd_full=None and reason
+          ``jd_full_offsite`` (wrong page: Wikipedia / bot wall / listing index /
+          404, OR zero title-stem overlap) or ``jd_full_expired`` (dead posting:
+          filled / closed / expired). Runs AFTER I-13 on the surviving body via
+          ``jd_content_reject``; the AMBIGUOUS middle is left to the background LLM
+          adjudicator. Versioned (JD_CONTENT_VERSION) and re-applied to every row
+          by ``_run_jd_content_resweep_if_stale`` so rule changes heal the whole
+          corpus, mirroring I-16's title re-sweep.
 
 ``unresolved_reasons`` vocabulary (the quarantine surface, m078): the codes
 ``ParsedJob.from_job`` can emit are ``title_metadata_blob`` (I-08), ``title_
 cross_field_bleed`` (I-09), ``jd_full_junk`` (I-13), ``salary_implausible``
-(I-15), ``title_invalid_shape`` (I-16), and ``title_non_posting`` (I-16, funnel
-entries). ``data_enricher`` additionally manages ``location_missing`` and clears
-``salary_implausible`` once a later pass resolves a plausible salary.
+(I-15), ``title_invalid_shape`` (I-16), ``title_non_posting`` (I-16, funnel
+entries), and ``jd_full_offsite`` / ``jd_full_expired`` (I-18). ``data_enricher``
+additionally manages ``location_missing``, clears ``salary_implausible`` once a
+later pass resolves a plausible salary, and clears the I-18 jd-content codes once
+a clean body is re-fetched.
 
 Reference: .planning/specs/2026-05-29-ingestion-contract-enforcement.md §8
 """
@@ -64,6 +74,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Literal
 
 from job_finder.config import get_company_denylist, load_config
+from job_finder.db._jd_content_contract import jd_content_reject
 from job_finder.normalizers import normalize_company, normalize_title
 from job_finder.web.careers_crawler._title_contract import title_contract_violation
 from job_finder.web.careers_crawler._title_filters import (
@@ -423,22 +434,27 @@ class ParsedJob:
                 f"locations_structured is empty (I-07 violation)"
             )
 
-        # I-13: jd_full content density gate
+        # I-13: jd_full content density gate (length / shell-prefix).
         clean_jd_full: str | None = jd_full
         if clean_jd_full is not None and _is_jd_junk(clean_jd_full):
             unresolved_reasons.append("jd_full_junk")
             clean_jd_full = None  # row still written, but jd_full cleared
 
-        # I-17 (title_jd_mismatch) is DEFINED but intentionally NOT wired into the
-        # quarantine path. A live-corpus dry-run showed the zero-overlap signal
-        # almost always fires on a GARBAGE jd_full (block pages, Wikipedia,
-        # careers-landing chrome, listing pages stored as the JD) rather than a
-        # wrong title — i.e. it is really a jd_full_junk problem (I-13's domain),
-        # and quarantining it as a TITLE issue would be mislabeled and risk
-        # false-positives on real JDs that don't echo the title early. The helper
-        # (title_jd_mismatch) and dry-run reporting are kept so the garbage-JD
-        # cohort can be addressed in a dedicated _is_jd_junk pass. See the
-        # title-hygiene PR description for the deferral rationale.
+        # I-18: jd_full content contract (fail-closed). The body that survived the
+        # density gate must positively be THIS job's posting. jd_content_reject is
+        # the deterministic, high-precision floor — it quarantines a body that is a
+        # wrong page (Wikipedia / bot wall / listing index / 404), a dead posting
+        # (expired / filled), or — using cleaned_title — shares ZERO of the title's
+        # content stems (the formerly-deferred I-17 title<->JD signal, now wired
+        # here as a jd-content signal exactly as its deferral note anticipated).
+        # The AMBIGUOUS middle is left for the background LLM adjudicator, not the
+        # synchronous ingest path. The row is still written; jd_full is cleared so
+        # enrichment re-fetches a clean body and the score never sees the garbage.
+        if clean_jd_full is not None:
+            _jd_rej = jd_content_reject(clean_jd_full, cleaned_title)
+            if _jd_rej is not None:
+                unresolved_reasons.append(_jd_rej[0])
+                clean_jd_full = None
 
         # Salary observations (lossless append-log seed, D-1). Resolved here so the
         # I-15 quarantine detector below can inspect each source's salvage verdict.

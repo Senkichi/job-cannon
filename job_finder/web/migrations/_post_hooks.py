@@ -27,20 +27,19 @@ logger = logging.getLogger(__name__)
 
 _VERSION_KEY = "dedup_normalizer_version"
 _TITLE_VERSION_KEY = "title_hygiene_version"
+_JD_CONTENT_VERSION_KEY = "jd_content_version"
 
 
-def _read_stored_version(conn: sqlite3.Connection) -> int | None:
-    """Return the stored dedup_normalizer_version, or None if unavailable.
+def _read_meta_version(conn: sqlite3.Connection, key: str) -> int | None:
+    """Return the integer watermark stored under *key* in ``schema_meta``, or None.
 
-    None means the watermark cannot be read yet — either ``schema_meta`` does
-    not exist (DB is mid-migration, below m100) or the key was never seeded. The
-    caller treats None as "defer; not safe to decide" so we never re-key against
-    an unknown baseline.
+    None means the watermark cannot be read yet — ``schema_meta`` does not exist
+    (DB is mid-migration, below m100) or *key* was never seeded. Callers treat
+    None as "defer; not safe to decide". The single read primitive shared by the
+    dedup / title-hygiene / jd-content re-sweeps (was duplicated per field).
     """
     try:
-        row = conn.execute(
-            "SELECT value FROM schema_meta WHERE key = ?", (_VERSION_KEY,)
-        ).fetchone()
+        row = conn.execute("SELECT value FROM schema_meta WHERE key = ?", (key,)).fetchone()
     except sqlite3.OperationalError:
         return None
     if row is None:
@@ -51,14 +50,24 @@ def _read_stored_version(conn: sqlite3.Connection) -> int | None:
         return None
 
 
-def _stamp_version(conn: sqlite3.Connection, version: int) -> None:
-    """Write the dedup_normalizer_version watermark (upsert)."""
+def _stamp_meta_version(conn: sqlite3.Connection, key: str, version: int) -> None:
+    """Upsert the integer watermark *version* under *key* in ``schema_meta``."""
     conn.execute(
         "INSERT INTO schema_meta (key, value) VALUES (?, ?) "
         "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-        (_VERSION_KEY, str(version)),
+        (key, str(version)),
     )
     conn.commit()
+
+
+def _read_stored_version(conn: sqlite3.Connection) -> int | None:
+    """Stored ``dedup_normalizer_version`` watermark (or None — see _read_meta_version)."""
+    return _read_meta_version(conn, _VERSION_KEY)
+
+
+def _stamp_version(conn: sqlite3.Connection, version: int) -> None:
+    """Write the dedup_normalizer_version watermark (upsert)."""
+    _stamp_meta_version(conn, _VERSION_KEY, version)
 
 
 def _run_rekey_if_stale(conn: sqlite3.Connection) -> None:
@@ -158,33 +167,13 @@ def _run_rekey_if_stale(conn: sqlite3.Connection) -> None:
 
 
 def _read_title_version(conn: sqlite3.Connection) -> int | None:
-    """Return the stored title_hygiene_version, or None if unavailable.
-
-    None means defer (schema_meta absent / key unseeded — DB below m110). Mirrors
-    ``_read_stored_version`` for the dedup watermark.
-    """
-    try:
-        row = conn.execute(
-            "SELECT value FROM schema_meta WHERE key = ?", (_TITLE_VERSION_KEY,)
-        ).fetchone()
-    except sqlite3.OperationalError:
-        return None
-    if row is None:
-        return None
-    try:
-        return int(row[0])
-    except (TypeError, ValueError):
-        return None
+    """Stored ``title_hygiene_version`` watermark (or None — see _read_meta_version)."""
+    return _read_meta_version(conn, _TITLE_VERSION_KEY)
 
 
 def _stamp_title_version(conn: sqlite3.Connection, version: int) -> None:
     """Write the title_hygiene_version watermark (upsert)."""
-    conn.execute(
-        "INSERT INTO schema_meta (key, value) VALUES (?, ?) "
-        "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-        (_TITLE_VERSION_KEY, str(version)),
-    )
-    conn.commit()
+    _stamp_meta_version(conn, _TITLE_VERSION_KEY, version)
 
 
 def _has_title_reason(reasons: list[str]) -> bool:
@@ -380,3 +369,135 @@ def _run_title_resweep_if_stale(conn: sqlite3.Connection) -> None:
 
     except Exception as e:
         logger.warning("Title re-sweep failed (non-fatal): %s", e)
+
+
+# ---------------------------------------------------------------------------
+# jd-content re-sweep (the retroactive half of the fail-closed jd-content contract)
+# ---------------------------------------------------------------------------
+
+
+def _run_jd_content_resweep_if_stale(conn: sqlite3.Connection) -> None:
+    """Re-validate every stored jd_full when JD_CONTENT_VERSION drifts (I-18).
+
+    The retroactive counterpart to the ingest-time contract in
+    ``ParsedJob.from_job`` / the storage gate in ``set_jd_full``, and the
+    jd-side analogue of ``_run_title_resweep_if_stale``. It is what makes the
+    jd-content contract NON-forward-only: legacy garbage bodies (Wikipedia / bot
+    walls / listing indexes / 404 / expired pages captured as the JD, all sitting
+    in the DB with empty ``unresolved_reasons``) are re-examined, and every future
+    rule change heals the whole corpus by a single ``JD_CONTENT_VERSION`` bump.
+
+    HEAL = CLEAR + RE-QUEUE (not rewrite — a wrong page cannot be edited into a
+    JD). Per row with a deterministic-REJECT body, under the current contract:
+      * CLEAR the wrong-page ``jd_full`` (set NULL) so the scorer can never see it
+        and the enrichment selector (``jd_full IS NULL``) re-fetches a real body.
+      * RESET ``enrichment_tier`` to NULL so a row that had reached a terminal tier
+        re-enters the fetch cascade. The content gate in ``set_jd_full`` now
+        rejects a re-fetch that lands on the same junk, so the cascade falls
+        through to a better tier instead of re-storing the garbage.
+      * QUARANTINE: append the ``jd_full_offsite`` / ``jd_full_expired`` reason so
+        the row surfaces on /admin/review with the reason it was dropped (the
+        forensic record — the body itself is intentionally not retained).
+      * RETRACT: NULL the scoring surface of an already-classified row so the
+        (now jd-less, quarantine-gated) scorer stops surfacing it until a clean
+        body is re-fetched.
+
+    AMBIGUOUS bodies are deliberately NOT touched here — they are the background
+    LLM adjudicator's job, which runs off the startup path. Only the deterministic
+    high-precision REJECTs are healed synchronously, so the sweep stays fast.
+
+    The watermark is stamped LAST: ``jd_content_reject`` is deterministic, so the
+    pass is idempotent and a crash simply re-runs it. Versions equal → one cheap
+    SELECT and return. Watermark unreadable (DB below m111) → defer. Never raises.
+    """
+    try:
+        from job_finder.db._jd_content_contract import (
+            JD_CONTENT_REASON_CODES,
+            JD_CONTENT_VERSION,
+            jd_content_reject,
+        )
+
+        stored = _read_meta_version(conn, _JD_CONTENT_VERSION_KEY)
+        if stored is None:
+            return  # m111 hasn't run yet — defer.
+        if stored == JD_CONTENT_VERSION:
+            return  # jd_full already validated at the current version.
+
+        rows = conn.execute(
+            "SELECT dedup_key, title, jd_full, unresolved_reasons, classification "
+            "FROM jobs WHERE jd_full IS NOT NULL AND TRIM(jd_full) != ''"
+        ).fetchall()
+
+        cleared = recleared = declassified = 0
+
+        for dk, title, jd_full, ur_json, classification in rows:
+            try:
+                old_reasons = json.loads(ur_json) if ur_json else []
+                if not isinstance(old_reasons, list):
+                    old_reasons = []
+            except (TypeError, ValueError):
+                old_reasons = []
+
+            rej = jd_content_reject(jd_full, title)
+            # Recompute ONLY jd-content reasons; preserve every other reason.
+            new_reasons = [r for r in old_reasons if r not in JD_CONTENT_REASON_CODES]
+            if rej is not None:
+                new_reasons.append(rej[0])
+
+            had = any(r in JD_CONTENT_REASON_CODES for r in old_reasons)
+            has = rej is not None
+            reasons_changed = sorted(new_reasons) != sorted(old_reasons)
+            if not has and not reasons_changed:
+                continue  # clean and stays clean — nothing to do.
+
+            cols: list[str] = []
+            params: list = []
+            if reasons_changed:
+                cols.append("unresolved_reasons = ?")
+                params.append(json.dumps(new_reasons))
+
+            if has:
+                cols += ["jd_full = NULL", "enrichment_tier = NULL"]
+                if classification is not None:
+                    cols += [
+                        "classification = NULL",
+                        "sub_scores_json = NULL",
+                        "fit_analysis = NULL",
+                    ]
+                    declassified += 1
+                cleared += 1
+            elif had and not has:
+                recleared += 1
+
+            params.append(dk)
+            conn.execute(f"UPDATE jobs SET {', '.join(cols)} WHERE dedup_key = ?", params)
+
+        conn.commit()
+
+        # Stamp LAST (idempotent pass): a crash re-runs the whole sweep cleanly.
+        _stamp_meta_version(conn, _JD_CONTENT_VERSION_KEY, JD_CONTENT_VERSION)
+
+        logger.info(
+            "jd-content re-sweep v%d: cleared %d, recleared %d, declassified %d (was version %s).",
+            JD_CONTENT_VERSION,
+            cleared,
+            recleared,
+            declassified,
+            stored,
+        )
+
+        if cleared:
+            try:
+                from job_finder.json_utils import utc_now_iso
+
+                conn.execute(
+                    "INSERT INTO runs (timestamp, source, jobs_fetched, jobs_new, jobs_scored) "
+                    "VALUES (?, 'jd_content_resweep', ?, 0, 0)",
+                    (utc_now_iso(), cleared),
+                )
+                conn.commit()
+            except Exception as e:
+                logger.warning("Failed to log jd-content re-sweep run: %s", e)
+
+    except Exception as e:
+        logger.warning("jd-content re-sweep failed (non-fatal): %s", e)

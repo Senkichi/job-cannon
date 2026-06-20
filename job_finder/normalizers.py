@@ -297,3 +297,93 @@ def derive_dedup_key(company: str, title: str) -> str:
         normalizer version.
     """
     return f"{normalize_company(company)}|{normalize_title(title)}"
+
+
+# ---------------------------------------------------------------------------
+# Shared cross-field token helpers
+#
+# Used by BOTH the title contract (does the JD mention its own title? —
+# title_jd_mismatch) and the jd-content contract (is this body the posting for
+# THIS job?). Extracted to the foundation layer so the two contracts share ONE
+# stopword set + tokenizer instead of each carrying a private copy (the exact
+# copy-paste the field-contract work is trying to eliminate). Pure functions,
+# no web/db dependency — safe to import from either layer.
+# ---------------------------------------------------------------------------
+
+#: Generic title words that carry no matching signal (seniority / level / format).
+#: Kept identical to the historical _title_contract set; do not prune without
+#: re-checking title_jd_mismatch behaviour.
+TITLE_STOPWORDS: frozenset[str] = frozenset(
+    {
+        "senior",
+        "sr",
+        "junior",
+        "jr",
+        "staff",
+        "principal",
+        "lead",
+        "head",
+        "associate",
+        "assistant",
+        "manager",
+        "director",
+        "vp",
+        "vice",
+        "president",
+        "chief",
+        "intern",
+        "internship",
+        "co",
+        "op",
+        "coop",
+        "the",
+        "and",
+        "or",
+        "of",
+        "for",
+        "in",
+        "at",
+        "to",
+        "a",
+        "an",
+        "remote",
+        "hybrid",
+        "onsite",
+        "fulltime",
+        "part",
+        "time",
+        "contract",
+        "i",
+        "ii",
+        "iii",
+        "iv",
+        "v",
+    }
+)
+
+_SIGNIFICANT_TOKEN_RE = re.compile(r"[a-z0-9]{3,}")
+
+#: Stem-prefix length for fuzzy token<->body matching: compare the first N chars
+#: so "researcher" matches a body that says "research", "analytics" matches
+#: "analytic", etc. Tolerating morphological variants is what keeps the
+#: cross-field false-positive rate near zero.
+TITLE_STEM_LEN: int = 5
+
+
+def significant_tokens(text: str) -> list[str]:
+    """Lowercased alphanumeric tokens (len>=3) minus generic stopwords."""
+    return [t for t in _SIGNIFICANT_TOKEN_RE.findall(text.lower()) if t not in TITLE_STOPWORDS]
+
+
+def body_mentions_any_stem(
+    tokens: list[str], body_lower: str, stem_len: int = TITLE_STEM_LEN
+) -> bool:
+    """True if any token's stem prefix appears in *body_lower*.
+
+    ``body_lower`` MUST already be lowercased by the caller — both callers
+    (``title_jd_mismatch`` and the jd-content contract) hold a lowercased body
+    on the hot path, so this avoids re-scanning a multi-KB string per row.
+    """
+    if not tokens or not body_lower:
+        return False
+    return any(tok[:stem_len] in body_lower for tok in tokens)

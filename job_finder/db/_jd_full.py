@@ -36,6 +36,8 @@ import logging
 import re
 import sqlite3
 
+from job_finder.db._jd_content_contract import jd_content_reject
+
 logger = logging.getLogger(__name__)
 
 _MIN_JD_LENGTH: int = 200  # characters, post-strip
@@ -161,6 +163,23 @@ def set_jd_full(
         logger.warning(
             "set_jd_full: junk-gated [source=%s] prefix=%r",
             source,
+            text.strip()[:60],
+        )
+        return False
+    # jd-content contract (fail-closed): refuse to store a body that is provably
+    # not a job posting (Wikipedia / bot wall / listing index / 404 / expired).
+    # Content-only signals are applied here (the storage chokepoint has no title);
+    # the title cross-field signal is added at the ParsedJob.from_job ingest gate
+    # and the versioned re-sweep, which both hold the title. Rejecting here means a
+    # bad enrichment capture is never persisted, so the fetcher falls through to
+    # the next tier instead of poisoning the score.
+    _content_rej = jd_content_reject(text)
+    if _content_rej is not None:
+        logger.warning(
+            "set_jd_full: content-gated [source=%s] reason=%s signal=%s prefix=%r",
+            source,
+            _content_rej[0],
+            _content_rej[1],
             text.strip()[:60],
         )
         return False
