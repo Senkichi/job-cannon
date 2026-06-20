@@ -415,3 +415,18 @@ def run_health_check(app) -> None:
             duration_s=round(_time.time() - t0, 2),
             result={"issues": issues},
         )
+
+
+def run_jd_adjudication(db_path: str, config: dict) -> dict:
+    """Scheduled entry point: LLM-adjudicate a bounded batch of AMBIGUOUS jd_full rows.
+
+    Opens its own connection (scheduler thread, not Flask g.db) and drains up to a
+    bounded batch of the jd-content AMBIGUOUS middle through the local-LLM
+    tie-breaker (PR2 of the jd-content contract). Returns the backfill summary dict
+    for run logging / dashboard metadata.
+    """
+    from job_finder.web.db_helpers import standalone_connection
+    from job_finder.web.jd_adjudicator import run_jd_adjudication_backfill
+
+    with standalone_connection(db_path) as conn:
+        return run_jd_adjudication_backfill(conn, config, limit=1000)

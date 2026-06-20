@@ -39,6 +39,7 @@ ACTION_EDIT_NOTES = "edit_notes"
 ACTION_SCHEDULED_PIPELINE_DETECTION = "scheduled_pipeline_detection"
 ACTION_SCHEDULED_AGENTIC_BACKFILL = "scheduled_agentic_backfill"
 ACTION_SCHEDULED_ENRICHMENT_BACKFILL = "scheduled_enrichment_backfill"
+ACTION_SCHEDULED_JD_ADJUDICATION = "scheduled_jd_adjudication"
 ACTION_SCHEDULED_CAREERS_CRAWL = "scheduled_careers_crawl"
 # Unified staleness orchestrator — replaces the legacy SCHEDULED_EXPIRY_CHECK
 # and 'scheduled_stale_detection' actions (both removed). Historical
