@@ -79,7 +79,13 @@ class TestClears:
 
     def test_recent_scan_clears_label(self, migrated_db):
         path, conn = migrated_db
-        _insert(conn, name="c", probe_status="miss", last_scanned_at="2026-05-20T00:00:00")
+        # Use a date relative to NOW (5 days ago) — a hardcoded calendar date
+        # silently falls outside the migration's datetime('now','-30 days')
+        # window as real time advances, turning this into a time-bomb failure.
+        from datetime import UTC, datetime, timedelta
+
+        recent = (datetime.now(tz=UTC) - timedelta(days=5)).strftime("%Y-%m-%dT%H:%M:%S")
+        _insert(conn, name="c", probe_status="miss", last_scanned_at=recent)
         _run(path, conn)
         assert _err(conn, "c") is None
 
