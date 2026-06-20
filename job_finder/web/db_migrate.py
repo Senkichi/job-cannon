@@ -40,6 +40,7 @@ from job_finder.web.db_helpers import standalone_connection
 from job_finder.web.migrations import MIGRATIONS, Migration, MigrationContext
 from job_finder.web.migrations._gate import MigrationBlockedError, _check_backup_recent
 from job_finder.web.migrations._post_hooks import (
+    _run_jd_content_resweep_if_stale,
     _run_rekey_if_stale,
     _run_title_resweep_if_stale,
 )
@@ -218,6 +219,16 @@ def run_migrations(db_path: str, user_data_root: str | None = None) -> None:
         # path (one SELECT when versions match); defers if m110 hasn't run yet.
         if final_version >= 110:
             _run_title_resweep_if_stale(conn)
+
+        # Standing jd-content re-sweep (I-18): re-validate every stored jd_full
+        # whenever the stored jd_content_version (seeded by m111) differs from the
+        # live JD_CONTENT_VERSION. Deterministic-REJECT bodies (wrong page / dead
+        # posting / zero title-overlap) are cleared + quarantined + re-queued for
+        # enrichment so the scorer never sees the garbage. AMBIGUOUS bodies are left
+        # for the background LLM adjudicator. Idempotent and cheap on the common
+        # path (one SELECT when versions match); defers if m111 hasn't run yet.
+        if final_version >= 111:
+            _run_jd_content_resweep_if_stale(conn)
 
         # Fixup: ensure comp_data_json column exists (missed in original Migration 7).
         # Required for databases that ran Migration 7 before this column was added —
