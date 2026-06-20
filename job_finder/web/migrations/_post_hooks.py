@@ -338,9 +338,12 @@ def _run_title_resweep_if_stale(conn: sqlite3.Connection) -> None:
                         "SELECT DISTINCT canonical_key FROM merge_log WHERE merge_source = ?",
                         (merge_source,),
                     ).fetchall():
+                        # Full LLM-scoring surface (incl. scoring_model) — a partial
+                        # clear leaves scoring_model set and trips m078 I-04/I-05,
+                        # which this try/except would silently swallow, skipping the
+                        # re-score of every merged canonical that was already scored.
                         conn.execute(
-                            "UPDATE jobs SET classification = NULL, "
-                            "sub_scores_json = NULL, fit_analysis = NULL WHERE dedup_key = ?",
+                            f"UPDATE jobs SET {', '.join(_DECLASSIFY_COLS)} WHERE dedup_key = ?",
                             (ckey,),
                         )
                     conn.commit()

@@ -22,6 +22,7 @@ import json
 import logging
 import sqlite3
 
+from job_finder.db import invalidate_job_score
 from job_finder.db._jd_content_contract import (
     JD_CONTENT_VERSION,
     JD_OFFSITE,
@@ -112,7 +113,19 @@ def _stamp_adjudicated(conn: sqlite3.Connection, dedup_key: str) -> None:
 def _heal_offsite(
     conn: sqlite3.Connection, dedup_key: str, reason: str, classification: str | None
 ) -> None:
-    """Clear + re-queue + quarantine a rejected row (mirrors the re-sweep heal)."""
+    """Clear + re-queue + quarantine a rejected row (mirrors the re-sweep heal).
+
+    The jd_full / enrichment_tier / unresolved_reasons write touches no
+    scoring-owned column, so it stays clear of the assessment-writer singleton.
+    A previously-scored row is declassified through ``invalidate_job_score`` — the
+    SOLE sanctioned scoring-tuple unsetter — which nulls the FULL LLM-scoring
+    surface (classification, sub_scores_json, fit_analysis, scoring_model) in one
+    trigger-safe statement. Clearing only the first three (as this did
+    originally) leaves ``scoring_model`` set, tripping the m078 I-04/I-05 triggers
+    (``RAISE(ABORT)``); with no try/except around the backfill loop that aborts
+    the ENTIRE drain on the first scored reject. Same bug class + fix as the
+    ``_post_hooks`` re-sweeps (PR #501).
+    """
     row = conn.execute(
         "SELECT unresolved_reasons FROM jobs WHERE dedup_key = ?", (dedup_key,)
     ).fetchone()
@@ -124,12 +137,13 @@ def _heal_offsite(
         reasons = []
     if reason not in reasons:
         reasons.append(reason)
-    cols = ["jd_full = NULL", "enrichment_tier = NULL", "unresolved_reasons = ?"]
-    params: list = [json.dumps(reasons)]
+    conn.execute(
+        "UPDATE jobs SET jd_full = NULL, enrichment_tier = NULL, unresolved_reasons = ? "
+        "WHERE dedup_key = ?",
+        (json.dumps(reasons), dedup_key),
+    )
     if classification is not None:
-        cols += ["classification = NULL", "sub_scores_json = NULL", "fit_analysis = NULL"]
-    params.append(dedup_key)
-    conn.execute(f"UPDATE jobs SET {', '.join(cols)} WHERE dedup_key = ?", params)
+        invalidate_job_score(conn, dedup_key)
 
 
 def run_jd_adjudication_backfill(
