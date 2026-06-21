@@ -827,7 +827,22 @@ def done():
                     from job_finder.web.pipeline_runner import run_ingestion
 
                     cfg = get_config_snapshot(app_obj)
-                    db_path = app_obj.config.get("DB_PATH", "jobs.db")
+                    # create_app() ALWAYS sets DB_PATH to an ABSOLUTE path (the explicit
+                    # path or user_data_dirs.db_path()). A missing or RELATIVE value means
+                    # a misconfigured app — never run the ingest against it. A bare
+                    # "jobs.db" resolves against the CWD, and when this date+5s job fires
+                    # under pytest it silently writes the developer's real repo jobs.db (a
+                    # one-shot job survives on the shared scheduler and fires inside an
+                    # unrelated later test — a test-isolation leak). Skip loudly; the
+                    # regular 0/8/16 scheduled ingest covers the row later.
+                    db_path = app_obj.config.get("DB_PATH")
+                    if not db_path or not os.path.isabs(db_path):
+                        logger.error(
+                            "wizard_first_ingest: DB_PATH missing or not absolute (%r); "
+                            "skipping first ingest",
+                            db_path,
+                        )
+                        return
                     try:
                         run_ingestion(db_path, cfg)
                     except Exception as e:
