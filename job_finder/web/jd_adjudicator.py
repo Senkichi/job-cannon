@@ -36,6 +36,18 @@ logger = logging.getLogger(__name__)
 #: Chars of the body shown to the judge — enough to decide, bounded for cost/latency.
 _PROMPT_JD_CHARS = 3500
 
+#: Per-call request timeout for the adjudication LLM call. This is a 128-token
+#: yes/no, so it must not inherit a provider's generous default (Ollama's is 300s):
+#: a single stuck primary call would otherwise freeze the whole backfill — and the
+#: scheduled noon job — for minutes. On timeout the provider raises and
+#: ``call_model`` advances the cascade to the next quick-tier provider (both
+#: Gemini and the Claude CLI are $0), so a stalled primary recovers in ~this many
+#: seconds instead of 300; the row only becomes ``undetermined`` if the ENTIRE
+#: cascade is exhausted. Set well above the observed ~4-15s/call Ollama latency
+#: (with cold-load + busy-machine headroom) so a merely-slow call is NOT abandoned
+#: onto rate-limited fallbacks — only a genuine stall trips it.
+_ADJUDICATION_TIMEOUT_S = 90.0
+
 _ADJUDICATION_SCHEMA = {
     "type": "object",
     "properties": {
@@ -92,6 +104,7 @@ def adjudicate_jd(
             output_schema=_ADJUDICATION_SCHEMA,
             purpose="jd_content_adjudication",
             max_tokens=128,
+            timeout=_ADJUDICATION_TIMEOUT_S,
         )
         data = result.data
     except Exception as exc:

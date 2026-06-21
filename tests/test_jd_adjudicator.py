@@ -110,6 +110,28 @@ def test_adjudicate_empty_jd_returns_none(migrated_db):
     assert adjudicate_jd("Data Scientist", "Acme", None, conn, {}) is None
 
 
+def test_adjudicate_pins_short_timeout(monkeypatch, migrated_db):
+    """The 128-token yes/no must fail fast: adjudicate_jd pins an explicit short
+    request timeout instead of inheriting a provider's generous default (Ollama's
+    300s). A stuck call would otherwise freeze the whole backfill — and the noon
+    job — for minutes before recovering."""
+    from job_finder.web import jd_adjudicator
+    from job_finder.web.jd_adjudicator import _ADJUDICATION_TIMEOUT_S, adjudicate_jd
+
+    _path, conn = migrated_db
+    captured: dict = {}
+
+    def fake(*args, **kwargs):
+        captured.update(kwargs)
+        return types.SimpleNamespace(data={"is_job_description": True})
+
+    monkeypatch.setattr(jd_adjudicator, "call_model", fake)
+    adjudicate_jd("Data Scientist", "Acme", _CLEAN_JD, conn, {})
+    assert captured.get("timeout") == _ADJUDICATION_TIMEOUT_S
+    # Must be well under the 300s provider default that motivated this fix.
+    assert 0 < _ADJUDICATION_TIMEOUT_S <= 120
+
+
 # ---------------------------------------------------------------------------
 # run_jd_adjudication_backfill — the state machine
 # ---------------------------------------------------------------------------
