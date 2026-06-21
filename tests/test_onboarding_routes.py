@@ -696,6 +696,7 @@ def test_done_post_redirects_to_jobs(client):
     """Done POST handler (plan 42-06) returns 302 redirect to /jobs with flash banner."""
     # Seed minimal wizard_data so done handler doesn't fail
     import sqlite3
+    from unittest.mock import MagicMock, patch
 
     conn = sqlite3.connect(client.application.config["DB_PATH"])
     try:
@@ -706,7 +707,13 @@ def test_done_post_redirects_to_jobs(client):
     finally:
         conn.close()
 
-    resp = client.post("/onboarding/done")
+    # POST /done schedules a real date+5s wizard_first_ingest job (D-17). The app
+    # fixture runs a real BackgroundScheduler, so WITHOUT this mock the job lands on
+    # the shared scheduler and fires inside an unrelated later test, writing the
+    # developer's repo jobs.db (test-isolation leak). Every other /done test mocks
+    # get_scheduler the same way; this one was the lone omission.
+    with patch("job_finder.web.onboarding.blueprint.get_scheduler", return_value=MagicMock()):
+        resp = client.post("/onboarding/done")
     # Plan 42-06 replaced the 501 stub with full atomic-finish implementation
     assert resp.status_code == 302
     assert "/jobs" in resp.headers["Location"]

@@ -225,6 +225,49 @@ def test_done_scheduled_closure_invokes_run_ingestion(configured_app, monkeypatc
     assert isinstance(config_arg, dict)
 
 
+def test_first_ingest_skips_non_absolute_db_path(configured_app):
+    """Regression (test-isolation leak): the wizard_first_ingest closure must skip
+    when DB_PATH is missing OR a relative path. A bare ``"jobs.db"`` resolves
+    against the CWD, and when this date+5s job fires under pytest it silently writes
+    the developer's real repo jobs.db. Only an absolute, create_app-configured path
+    is allowed to run the ingest.
+    """
+    wizard_payload = {
+        "provider": {"name": "ollama"},
+        "imap": {"email": "x@y.com", "app_password": "xxxx"},
+        "profile_edit": {"target_titles": "Eng", "target_locations": "Remote", "skills": "python"},
+        "resume_profile": {},
+        "schedule": {"cadence_preset": "standard"},
+    }
+    _seed_wizard_data(configured_app.config["DB_PATH"], wizard_payload)
+    conn = sqlite3.connect(configured_app.config["DB_PATH"])
+    try:
+        conn.execute(
+            "UPDATE onboarding_state SET onboarding_complete=0, wizard_data=? WHERE id=1",
+            (json.dumps(wizard_payload),),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    mock_scheduler = MagicMock()
+    mock_run_ingestion = MagicMock()
+    with (
+        patch("job_finder.web.onboarding.blueprint.get_scheduler", return_value=mock_scheduler),
+        patch("job_finder.web.pipeline_runner.run_ingestion", mock_run_ingestion),
+    ):
+        resp = configured_app.test_client().post("/onboarding/done")
+    assert resp.status_code == 302
+    scheduled_callable = mock_scheduler.add_job.call_args.args[0]
+
+    # Simulate the misconfigured app the leak captured: a RELATIVE DB_PATH.
+    # "jobs.db" resolves against the CWD -> the real repo DB under pytest.
+    configured_app.config["DB_PATH"] = "jobs.db"
+    with patch("job_finder.web.pipeline_runner.run_ingestion", mock_run_ingestion):
+        scheduled_callable()  # fires the closure as APScheduler would (no args)
+    mock_run_ingestion.assert_not_called()
+
+
 def test_done_no_temp_files_left_behind(configured_app, monkeypatch):
     """Atomic-write contract: no `.yaml.tmp` or `.json.tmp` files in the user_data dir after success."""
     wizard_payload = {
