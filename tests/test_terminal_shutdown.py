@@ -78,6 +78,13 @@ def test_main_sets_timer_daemon(monkeypatch):
         patch("job_finder.web._runtime.runtime_shutdown"),
         patch("job_finder.__main__._install_terminal_shutdown"),
         patch("job_finder.__main__.threading.Timer", side_effect=_capturing_timer),
+        # Neutralize the Timer's payload: this test asserts the Timer's daemon
+        # flag, NOT that a browser opens. The captured Timer is real and armed
+        # (NO_BROWSER is deleted above), so without this it would fire ~1.5s
+        # later — after the test passes and this `with` block exits — and open
+        # a real tab against the running dev app. Mocking the callback keeps a
+        # stray fire harmless; we also cancel() below.
+        patch("job_finder.__main__._open_browser"),
         patch("job_finder.__main__.sys.argv", ["job-cannon", "--terminal"]),
         # Hermetic: don't let a live instance on :5000 short-circuit main()
         # before the Timer is created (the assertion target).
@@ -92,6 +99,9 @@ def test_main_sets_timer_daemon(monkeypatch):
 
     assert captured_timer, "Timer was not created"
     assert captured_timer[0].daemon is True, "Timer.daemon must be True"
+
+    # Disarm the real, started Timer so it does not linger as a daemon thread.
+    captured_timer[0].cancel()
 
 
 # ---------------------------------------------------------------------------
