@@ -1076,13 +1076,6 @@ def test_openrouter_excluded_from_provider_defaults_invariant():
 
     See also: the NOTE comment above _PROVIDER_DEFAULTS in model_provider.py
     and providers/openrouter_provider.py module docstring.
-
-    Note on subset direction: the full invariant set(_PROVIDER_DEFAULTS) <=
-    _SUPPORTED_PROVIDERS cannot be asserted here because groq/cerebras are
-    pre-registered in _PROVIDER_DEFAULTS as model-name placeholders ahead of
-    their adapter implementations, so they are not yet in _SUPPORTED_PROVIDERS.
-    Once those adapters ship and groq/cerebras are added to _SUPPORTED_PROVIDERS,
-    this test can be upgraded to the full subset assert.
     """
     assert "openrouter" in _SUPPORTED_PROVIDERS, (
         "openrouter was removed from _SUPPORTED_PROVIDERS — update this guard "

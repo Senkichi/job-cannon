@@ -123,8 +123,7 @@ def app_with_jobs(tmp_db_path):
     # Classifications are deliberately left NULL on these seed rows —
     # downstream tests (e.g. test_save_jd_no_scoring_triggered) assert that
     # save-jd does NOT populate classification. Tests that need classification
-    # set (e.g. test_jobs_table_filter_by_min_score after issue #214 retired
-    # the score-column disjunct in min_score/max_score) do so inline.
+    # set do so inline.
     conn = sqlite3.connect(tmp_db_path)
     conn.row_factory = sqlite3.Row
     conn.executemany(
@@ -215,38 +214,6 @@ class TestJobBoardRoutes:
         assert "Beta Inc" in data
         # The discovered job should not appear
         assert "Acme Corp" not in data
-
-    def test_jobs_table_filter_by_min_score(self, jobs_client, tmp_db_path):
-        """GET /jobs/table?min_score=80 maps to the 'apply' classification bucket.
-
-        Legacy URL contract — min_score/max_score now translate purely to
-        classification IN-lists (see job_finder/db/_queries.py). min_score=80
-        maps to ["apply"] only, so a row classified 'apply' is in and a row
-        classified 'consider' is out. The vestigial jobs.score column is no
-        longer consulted for this filter (issue #214).
-
-        We set classifications inline (the shared `app_with_jobs` fixture
-        keeps them NULL because other tests assert NULL persistence).
-        """
-        import sqlite3
-
-        conn = sqlite3.connect(tmp_db_path)
-        conn.execute(
-            "UPDATE jobs SET classification = 'consider' WHERE dedup_key = ?",
-            ("acme|data-scientist|remote",),
-        )
-        conn.execute(
-            "UPDATE jobs SET classification = 'apply' WHERE dedup_key = ?",
-            ("beta|staff-ds|san-francisco",),
-        )
-        conn.commit()
-        conn.close()
-
-        response = jobs_client.get("/jobs/table?min_score=80", headers={"HX-Request": "true"})
-        assert response.status_code == 200
-        data = response.data.decode()
-        assert "Beta Inc" in data  # classification='apply' (in ["apply"])
-        assert "Acme Corp" not in data  # classification='consider' (not in ["apply"])
 
     def test_jobs_expand_returns_accordion(self, jobs_client):
         """GET /jobs/<key>/expand returns accordion row HTML."""

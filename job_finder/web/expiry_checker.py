@@ -8,7 +8,6 @@ Provides:
     quick_liveness_check  -- Lightweight HTTP GET check for a single URL
     check_job_liveness    -- Scoring preflight wrapper around quick_liveness_check
     run_staleness_check   -- Nightly unified orchestrator (B → A → C)
-    run_expiry_check      -- Deprecated alias retained for one release
 
 Architecture:
 - Thread-safe: creates own sqlite3 connection (same pattern as stale_detector).
@@ -29,7 +28,6 @@ import json
 import logging
 import re
 import threading
-import warnings
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import UTC, datetime, timedelta
 
@@ -615,26 +613,3 @@ def run_staleness_check(db_path: str, config: dict) -> dict:
 
     logger.info("run_staleness_check complete: %s", summary)
     return summary
-
-
-# ---------------------------------------------------------------------------
-# Deprecated alias — retained for one release to avoid breaking callers
-# ---------------------------------------------------------------------------
-
-
-def run_expiry_check(db_path: str, config: dict) -> dict:
-    """DEPRECATED: use run_staleness_check instead.
-
-    Kept as a thin wrapper so external callers (catch-up scripts, ad-hoc
-    backfills) continue to function while they migrate. The return shape
-    differs from the legacy shape — callers parsing top-level keys like
-    'archived'/'live'/'inconclusive' should switch to run_staleness_check
-    and read from summary['phase_c'].
-    """
-    warnings.warn(
-        "run_expiry_check is deprecated; use run_staleness_check instead. "
-        "The return value shape has changed: it now nests Phase A/B/C summaries.",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    return run_staleness_check(db_path, config)
