@@ -336,7 +336,7 @@ if (-not $NoLaunch) {
     Write-Host ""
     Write-Host "About to run: uv run job-cannon" -ForegroundColor White
     Write-Host ""
-    Write-Host "This prints a URL banner and opens your default browser ~1.5 s later."
+    Write-Host "This prints a URL banner and opens your default browser as soon as the server is ready."
     Write-Host "Press Ctrl+C in this terminal to stop the server."
     Write-Host ""
     if (-not (Confirm-Step "Launch now?")) {

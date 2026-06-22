@@ -6,10 +6,12 @@ but resolves ``config.yaml`` via :func:`job_finder.config.resolve_config_path`
 so the binary can be launched from any working directory once installed.
 
 UAT 2026-05-21 F2 / Issue #290: prints a "Job Cannon is starting on <url>"
-banner and opens the user's default browser ~1.5 s after launch in **both**
-terminal mode and tray mode, so a neophyte running ``job-cannon`` is not
-stranded regardless of the launch path.  Disable with
-``JOB_CANNON_NO_BROWSER=1`` for headless / CI use.
+banner and opens the user's default browser in **both** terminal mode and tray
+mode, so a neophyte running ``job-cannon`` is not stranded regardless of the
+launch path.  The open is gated on the server actually answering
+``/__jc_health`` (not a fixed delay), so the first page load can't race a cold
+start and land on "unable to connect".  Disable with ``JOB_CANNON_NO_BROWSER=1``
+for headless / CI use.
 
 In tray mode the banner also says "look for the tray icon" so the user
 understands why no terminal keeps running.  On first run (no config.yaml
@@ -40,11 +42,13 @@ from job_finder.web._pidfile import (
 
 logger = logging.getLogger(__name__)
 
-# Delay before opening the browser. Flask's dev server binds in well under
-# this on every machine we have tested. If Flask is not up yet the browser
-# sees a connection error, the user reloads, and they are still ahead of
-# where they started (no URL to copy from a Werkzeug log).
-_BROWSER_OPEN_DELAY_SEC = 1.5
+# Browser-open readiness gate. Rather than opening after a fixed delay (which
+# raced a cold start — migrations + scheduler init, and in tray mode create_app
+# running AFTER the banner, can push the first port-bind past any constant), we
+# poll /__jc_health and open only once the server answers. Bounded by a timeout
+# so a never-binds / headless case still degrades to opening the URL once.
+_BROWSER_READY_TIMEOUT_SEC = 30.0
+_BROWSER_POLL_INTERVAL_SEC = 0.15
 
 # Retry parameters for _retry_lock_or_fail().
 _LOCK_RETRY_COUNT = 3
@@ -245,22 +249,57 @@ def _open_browser(url: str) -> None:
         logger.warning("Could not open browser at %s: %s", url, exc)
 
 
-def _print_startup_banner(url: str, *, tray_mode: bool = False) -> threading.Timer | None:
-    """Print the user-facing startup banner and (unless opted out) schedule a
-    delayed browser open.
+def _wait_for_server_then_open(url: str) -> None:
+    """Poll until the local server answers ``/__jc_health``, then open the browser.
+
+    Replaces the old fixed-delay open, which raced a cold start: migrations +
+    scheduler init — and, in tray mode, ``create_app()`` running *after* the
+    banner — can push the first port-bind past any constant, so the first
+    browser hit landed on a not-yet-listening socket ("unable to connect") and
+    only a manual reload succeeded.  Gating the open on a real health response
+    makes that invalid state — browser opened before the server can serve —
+    unrepresentable.
+
+    Runs in a daemon thread.  Reuses :func:`probe_existing_jc` (a 200 + identity
+    check) as the readiness signal; a not-yet-bound port returns near-instantly
+    (connection refused), so the loop costs almost nothing.  If the server never
+    confirms ready within ``_BROWSER_READY_TIMEOUT_SEC`` (failed to start, or an
+    unusually slow machine), open anyway as a last resort so the user still gets
+    a tab + URL — matching the pre-fix "always opens" contract.
+    """
+    deadline = time.monotonic() + _BROWSER_READY_TIMEOUT_SEC
+    while time.monotonic() < deadline:
+        if probe_existing_jc(url, timeout=0.5) is not None:
+            _open_browser(url)
+            return
+        time.sleep(_BROWSER_POLL_INTERVAL_SEC)
+    logger.warning(
+        "Server did not confirm ready within %.0fs; opening browser anyway.",
+        _BROWSER_READY_TIMEOUT_SEC,
+    )
+    _open_browser(url)
+
+
+def _print_startup_banner(url: str, *, tray_mode: bool = False) -> threading.Thread | None:
+    """Print the user-facing startup banner and (unless opted out) start a
+    readiness-gated browser open.
 
     Called from **both** terminal mode and tray mode so neither path strands
     the user.  In tray mode the banner includes a hint about the system-tray
-    icon.  ``JOB_CANNON_NO_BROWSER=1`` suppresses the Timer and the
+    icon.  ``JOB_CANNON_NO_BROWSER=1`` suppresses the opener thread and the
     "Opening your browser…" line; the URL banner always prints so the user
     has something to copy even in headless sessions.
+
+    The browser is opened by :func:`_wait_for_server_then_open` running in a
+    daemon thread: it waits for the server to actually answer before opening,
+    so a cold start can never produce a first-load "unable to connect".
 
     Args:
         url:       Client-accessible base URL (e.g. ``http://127.0.0.1:5000``).
         tray_mode: If True, append the tray-icon hint to the first line.
 
     Returns:
-        The scheduled :class:`threading.Timer` if one was started, or None.
+        The started :class:`threading.Thread` opener if one was started, or None.
     """
     if tray_mode:
         print(f"Job Cannon is starting on {url} — look for the tray icon")
@@ -270,10 +309,14 @@ def _print_startup_banner(url: str, *, tray_mode: bool = False) -> threading.Tim
     no_browser = bool(os.environ.get("JOB_CANNON_NO_BROWSER"))
     if not no_browser:
         print("Opening your browser…  (Ctrl+C to stop)")
-        timer = threading.Timer(_BROWSER_OPEN_DELAY_SEC, _open_browser, args=(url,))
-        timer.daemon = True
-        timer.start()
-        return timer
+        opener = threading.Thread(
+            target=_wait_for_server_then_open,
+            args=(url,),
+            daemon=True,
+            name="jc-browser-opener",
+        )
+        opener.start()
+        return opener
     return None
 
 
@@ -610,14 +653,15 @@ def _run_terminal_mode(cfg: dict, bind_host: str, port: int, debug: bool, url: s
         sys.exit(1)
 
     # F2 / Issue #290: surface the URL before any Werkzeug noise and
-    # (unless opted out) kick off a delayed browser open.  The shared helper
-    # _print_startup_banner handles both the print and the Timer so terminal
-    # and tray paths behave identically. The print() lands in stdout before
-    # logging is fully attached — this is the one user-facing print in the
-    # whole project, justified because the alternative is a stranded user.
-    # webbrowser.open is documented as thread-safe; firing from a Timer
-    # avoids racing app.run() and keeps the open non-blocking. We use
-    # use_reloader=False below, so this Timer fires exactly once.
+    # (unless opted out) kick off a readiness-gated browser open.  The shared
+    # helper _print_startup_banner handles both the print and the background
+    # opener thread so terminal and tray paths behave identically. The print()
+    # lands in stdout before logging is fully attached — this is the one
+    # user-facing print in the whole project, justified because the alternative
+    # is a stranded user.  The opener polls /__jc_health and opens only once the
+    # server answers; webbrowser.open is documented as thread-safe and firing
+    # from a background thread keeps the open non-blocking. use_reloader=False
+    # below means there is exactly one server, so the open fires exactly once.
     _print_startup_banner(url, tray_mode=False)
 
     _install_terminal_shutdown(app)

@@ -410,14 +410,14 @@ def test_dispatch_tray_import_failure_falls_back_to_terminal(monkeypatch, _dispa
 # ---------------------------------------------------------------------------
 
 
-def test_tray_launch_prints_banner_and_schedules_browser(monkeypatch, capsys):
-    """Tray mode must print the URL banner (with tray-icon hint) and schedule
-    the browser-open Timer — same as terminal mode, so the first-time user is
-    not stranded."""
+def test_tray_launch_prints_banner_and_starts_browser_opener(monkeypatch, capsys):
+    """Tray mode must print the URL banner (with tray-icon hint) and start the
+    readiness-gated browser opener — same as terminal mode, so the first-time
+    user is not stranded."""
     monkeypatch.delenv("JOB_CANNON_NO_BROWSER", raising=False)
     monkeypatch.delenv("JOB_CANNON_NO_TRAY", raising=False)
 
-    fake_timer = MagicMock()
+    fake_thread = MagicMock()
     mock_tray_instance = MagicMock()
 
     with (
@@ -426,7 +426,7 @@ def test_tray_launch_prints_banner_and_schedules_browser(monkeypatch, capsys):
         patch("job_finder.__main__._port_is_listening", return_value=False),
         patch("job_finder.__main__.acquire_pidfile", return_value=MagicMock(acquired=True)),
         patch("job_finder.web._process_lifecycle.install_kill_on_exit"),
-        patch("job_finder.__main__.threading.Timer", return_value=fake_timer) as mock_timer_cls,
+        patch("job_finder.__main__.threading.Thread", return_value=fake_thread) as mock_thread_cls,
         patch("job_finder.tray.TrayApp", return_value=mock_tray_instance),
         patch("job_finder.__main__.sys.argv", ["job-cannon"]),
     ):
@@ -439,20 +439,20 @@ def test_tray_launch_prints_banner_and_schedules_browser(monkeypatch, capsys):
     assert "tray icon" in captured.out
     # Browser open line must be present
     assert "Opening your browser" in captured.out
-    # Timer was constructed with the correct arguments
-    mock_timer_cls.assert_called_once()
-    call = mock_timer_cls.call_args
-    assert call.args[0] == main_mod._BROWSER_OPEN_DELAY_SEC
-    assert call.args[1] is main_mod._open_browser
+    # Opener thread targets the readiness poller with the URL, runs as a daemon.
+    mock_thread_cls.assert_called_once()
+    call = mock_thread_cls.call_args
+    assert call.kwargs["target"] is main_mod._wait_for_server_then_open
     assert call.kwargs["args"] == ("http://127.0.0.1:5000",)
-    fake_timer.start.assert_called_once()
+    assert call.kwargs["daemon"] is True
+    fake_thread.start.assert_called_once()
     # TrayApp was still launched
     mock_tray_instance.run.assert_called_once()
 
 
-def test_tray_launch_no_browser_env_suppresses_timer_keeps_banner(monkeypatch, capsys):
-    """JOB_CANNON_NO_BROWSER=1 in tray mode: Timer is suppressed but the URL
-    banner still prints (headless user still needs the URL to copy)."""
+def test_tray_launch_no_browser_env_suppresses_opener_keeps_banner(monkeypatch, capsys):
+    """JOB_CANNON_NO_BROWSER=1 in tray mode: the opener thread is suppressed but
+    the URL banner still prints (headless user still needs the URL to copy)."""
     monkeypatch.setenv("JOB_CANNON_NO_BROWSER", "1")
     monkeypatch.delenv("JOB_CANNON_NO_TRAY", raising=False)
 
@@ -464,7 +464,7 @@ def test_tray_launch_no_browser_env_suppresses_timer_keeps_banner(monkeypatch, c
         patch("job_finder.__main__._port_is_listening", return_value=False),
         patch("job_finder.__main__.acquire_pidfile", return_value=MagicMock(acquired=True)),
         patch("job_finder.web._process_lifecycle.install_kill_on_exit"),
-        patch("job_finder.__main__.threading.Timer") as mock_timer_cls,
+        patch("job_finder.__main__.threading.Thread") as mock_thread_cls,
         patch("job_finder.tray.TrayApp", return_value=mock_tray_instance),
         patch("job_finder.__main__.sys.argv", ["job-cannon"]),
     ):
@@ -477,7 +477,7 @@ def test_tray_launch_no_browser_env_suppresses_timer_keeps_banner(monkeypatch, c
     assert "tray icon" in captured.out
     # "Opening your browser" line must be absent
     assert "Opening your browser" not in captured.out
-    # No Timer was created
-    mock_timer_cls.assert_not_called()
+    # No opener thread when the user opted out.
+    mock_thread_cls.assert_not_called()
     # TrayApp still launched
     mock_tray_instance.run.assert_called_once()
