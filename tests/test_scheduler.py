@@ -765,10 +765,13 @@ class TestSchedulerAgenticBackfill:
 
 
 class TestPidfileSelfRelease:
-    """Validates that the new portalocker-based scheduler lock is released
-    by the OS when the holding process dies — including the unclean-shutdown
-    case (Windows force-kill, atexit not firing) that the psutil-based
-    pidfile self-heal mishandled due to PID reuse.
+    """Validates that the single (host, port) liveness lock (server.lock) is
+    released by the OS when the holding process dies — including the
+    unclean-shutdown case (Windows force-kill, atexit not firing) that the old
+    psutil-based pidfile self-heal mishandled due to PID reuse.
+
+    Since PR3 collapsed the separate scheduler pidfile onto this one lock, this
+    exercises the *sole* lock the scheduler now consults via holds_claim().
 
     Uses subprocess.Popen (not multiprocessing) because Windows
     multiprocessing has a different lifecycle that can mask the lock-release
@@ -779,24 +782,25 @@ class TestPidfileSelfRelease:
         import subprocess
         import sys
 
-        # Patch _acquire_scheduler_pidfile's resolved pidfile path by
-        # pointing the child's "DB_PATH" at our tmp_path. The pidfile
-        # lives at <db_path_dir>/logs/scheduler.pid.
-        pidfile = tmp_path / "logs" / "scheduler.pid"
-        db_path = str(tmp_path / "dummy.db")
+        # The lock + metadata are (host, port)-keyed under <logs_dir>; resolve
+        # the exact filenames through the same claim_paths() authority the
+        # launcher uses, so the test can assert on the real on-disk name.
+        from job_finder.web._pidfile import claim_paths
+
+        logs_dir = tmp_path / "logs"
+        lock_path, meta_path = claim_paths(logs_dir, "127.0.0.1", 5000)
 
         # Child: acquire the lock, write a sentinel, exit cleanly.
         # Holding briefly then exit gives the OS a chance to release.
         child_script = f"""
 import sys
 sys.path.insert(0, {repr(str(__import__("pathlib").Path(__file__).resolve().parent.parent))!s})
-from unittest.mock import MagicMock
-from job_finder.web.scheduler._pidfile import _acquire_scheduler_pidfile
+from pathlib import Path
+from job_finder.web._pidfile import acquire_pidfile, claim_paths
 
-mock_app = MagicMock()
-mock_app.config = {{"DB_PATH": {db_path!r}}}
-ok = _acquire_scheduler_pidfile(mock_app)
-print("CHILD_ACQUIRED" if ok else "CHILD_FAILED", flush=True)
+lock_path, meta_path = claim_paths(Path({str(logs_dir)!r}), "127.0.0.1", 5000)
+result = acquire_pidfile(lock_path, meta_path, {{"pid": 12345}})
+print("CHILD_ACQUIRED" if result.acquired else "CHILD_FAILED", flush=True)
 """
 
         result = subprocess.run(
@@ -808,21 +812,17 @@ print("CHILD_ACQUIRED" if ok else "CHILD_FAILED", flush=True)
         )
         assert "CHILD_ACQUIRED" in result.stdout, result.stdout + result.stderr
 
-        # OS should have released the lock when the child exited. The
-        # pidfile may still exist (diagnostic-only), but the lock is gone.
-        assert pidfile.exists(), "pidfile should remain on disk for diagnostics"
+        # OS should have released the lock when the child exited. The metadata
+        # sidecar remains on disk (diagnostic-only), but the lock is gone.
+        assert meta_path.exists(), "metadata sidecar should remain on disk for diagnostics"
 
         # Parent: now attempt to acquire the same lock. Should succeed —
         # if the OS didn't release on child exit, this would deadlock
         # or return False (the test would fail either way).
-        from unittest.mock import MagicMock as _MagicMock
+        from job_finder.web._pidfile import acquire_pidfile as _acquire_pidfile
 
-        from job_finder.web.scheduler._pidfile import _acquire_scheduler_pidfile
-
-        mock_app = _MagicMock()
-        mock_app.config = {"DB_PATH": db_path}
-        acquired = _acquire_scheduler_pidfile(mock_app)
-        assert acquired is True, "OS should have released lock when child exited"
+        acquired = _acquire_pidfile(lock_path, meta_path, {"pid": 67890})
+        assert acquired.acquired is True, "OS should have released lock when child exited"
 
 
 # ---------------------------------------------------------------------------
