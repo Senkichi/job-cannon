@@ -20,6 +20,17 @@ crawl's Lane-2 origination takes over ongoing extraction + staleness. This is th
 "generalizable navigator" wired to the frozen miss cohort it never reached — not
 a new extractor.
 
+A THIRD pass handles the *wrong-URL* case: many frozen ``careers_url`` values
+point at a marketing/landing shell (an "about our culture" page), while the real
+openings live one click away (a "View Open Positions" link to a deeper listings
+page or an embedded ATS board). When both passes above come up empty, this module
+follows the page's single strongest job-listings link ONE hop and retries ATS
+detection + generic extraction on that deeper page. On success it **repoints**
+``careers_url`` to the real listings URL — fixing the stored data error at its
+source so every future crawl and probe uses the correct page — and either
+promotes the embedded board or re-enables ``scan_enabled`` exactly as the first
+two passes do.
+
 No new scanner, no LLM, no Playwright. The static fetch is a *coverage floor*: it
 catches server-rendered links/listings and misses JS-injected ones. Those are
 caught later by the daily Playwright careers crawl once the company is
@@ -32,8 +43,10 @@ claim) and so cannot mis-route a company to the wrong scanner.
 from __future__ import annotations
 
 import logging
+import re
 import sqlite3
 import time
+from urllib.parse import urljoin, urlparse
 
 import requests
 from bs4 import BeautifulSoup
@@ -66,6 +79,22 @@ _COHORT_SQL = """
      ORDER BY COALESCE(updated_at, created_at) ASC
      LIMIT ?
 """
+
+# Signals that an anchor leads to a real job-listings page (used by the
+# rediscovery pass to recover from a careers_url that points at a marketing
+# shell). Href patterns are a stronger signal than link text.
+_OPENING_HREF_RE = re.compile(
+    r"/(jobs|openings|positions|opportunities|job-search|search/?jobs|"
+    r"current-openings|vacancies|job-listings|joblist|careers/search|open-roles)",
+    re.I,
+)
+_OPENING_TEXT_RE = re.compile(
+    r"view (open|our )?(roles|positions|jobs|openings)|open positions|"
+    r"current openings|search jobs|see all jobs|all (open )?jobs|browse jobs|"
+    r"open roles|job openings|see openings|view all (jobs|openings|positions)|"
+    r"explore (careers|jobs|opportunities)",
+    re.I,
+)
 
 
 def _reprobe_settings(config: dict | None) -> dict:
@@ -119,6 +148,132 @@ def _static_extractable(
     return len(jobs)
 
 
+def _find_openings_link(html: str, base_url: str) -> str | None:
+    """Return the single strongest job-listings link on a careers page.
+
+    Recovers from a "wrong" ``careers_url`` (a marketing shell) by locating the
+    anchor most likely to lead to the real openings page — preferring links whose
+    *href* matches a listings pattern over text-only matches, and always skipping
+    the page we're already on. Returns an absolute URL, or ``None`` if no
+    plausible listings link is present.
+    """
+    try:
+        soup = BeautifulSoup(html, "html.parser")
+    except Exception as exc:  # pure parse, never fatal
+        logger.debug("reprobe openings-link parse failed url=%s: %s", base_url, exc)
+        return None
+    base = urlparse(base_url)
+    base_path = base.path.rstrip("/")
+    href_hits: list[str] = []
+    text_hits: list[str] = []
+    seen: set[str] = set()
+    for a in soup.find_all("a", href=True):
+        href = (a.get("href") or "").strip()
+        if not href or href.startswith(("#", "mailto:", "tel:", "javascript:")):
+            continue
+        href_match = bool(_OPENING_HREF_RE.search(href))
+        text_match = bool(_OPENING_TEXT_RE.search(a.get_text(" ", strip=True)))
+        if not (href_match or text_match):
+            continue
+        absu = urljoin(base_url, href)
+        if absu in seen:
+            continue
+        seen.add(absu)
+        target = urlparse(absu)
+        # Skip the page we're already on (no point re-fetching it).
+        if target.netloc == base.netloc and target.path.rstrip("/") == base_path:
+            continue
+        (href_hits if href_match else text_hits).append(absu)
+    if href_hits:
+        return href_hits[0]
+    if text_hits:
+        return text_hits[0]
+    return None
+
+
+def _attempt_rediscovery(
+    conn: sqlite3.Connection,
+    company_id: int,
+    name: str,
+    html: str,
+    careers_url: str,
+    target_titles: list[str],
+    title_exclusions: list[str],
+    config: dict | None,
+) -> str | None:
+    """Follow the page's top job-listings link one hop and retry discovery there.
+
+    The stored ``careers_url`` may be a marketing shell while the real openings
+    live a click away. This fetches that deeper page and retries BOTH the ATS
+    link classifier and the generic static extractor on it. On any recovery it
+    **repoints** ``careers_url`` to the deeper listings URL (fixing the stored
+    data at its source) and applies the same effect the first two passes do —
+    promoting an embedded board, or re-enabling ``scan_enabled``.
+
+    Returns the summary key for the outcome (``"rediscovered_ats"``,
+    ``"rediscovered_custom"``, ``"verify_failed"``, ``"slug_collision"``), or
+    ``None`` when nothing was recovered (caller counts it as ``no_candidate``).
+    """
+    deeper_url = _find_openings_link(html, careers_url)
+    if not deeper_url:
+        return None
+    deeper_html = _fetch_careers_html(deeper_url)
+    if deeper_html is None:
+        return None
+
+    deep_candidate = best_ats_candidate(deeper_html, deeper_url)
+    if deep_candidate is not None:
+        platform, slug = deep_candidate
+        res = promote_from_careers_link(
+            conn,
+            company_id,
+            platform,
+            slug,
+            page_url=deeper_url,
+            config=config,
+            reenable_scan=True,
+        )
+        outcome = res.get("outcome")
+        if outcome == "promoted":
+            conn.execute(
+                "UPDATE companies SET careers_url = ?, updated_at = ? WHERE id = ?",
+                (deeper_url, utc_now_iso(), company_id),
+            )
+            conn.commit()
+            logger.info(
+                "reprobe rediscovered ATS for company_id=%d (%s): repointed %s -> %s (%s/%s)",
+                company_id,
+                name,
+                careers_url,
+                deeper_url,
+                platform,
+                slug[:50],
+            )
+            return "rediscovered_ats"
+        if outcome in ("verify_failed", "slug_collision"):
+            return outcome
+        return None
+
+    if target_titles and _static_extractable(
+        deeper_html, deeper_url, target_titles, title_exclusions
+    ):
+        conn.execute(
+            "UPDATE companies SET careers_url = ?, scan_enabled = 1, updated_at = ? WHERE id = ?",
+            (deeper_url, utc_now_iso(), company_id),
+        )
+        conn.commit()
+        logger.info(
+            "reprobe rediscovered custom listings for company_id=%d (%s): repointed %s -> %s",
+            company_id,
+            name,
+            careers_url,
+            deeper_url,
+        )
+        return "rediscovered_custom"
+
+    return None
+
+
 def reprobe_custom_miss_cohort(
     db_path: str, config: dict | None = None, *, limit: int | None = None
 ) -> dict:
@@ -143,6 +298,8 @@ def reprobe_custom_miss_cohort(
         "slug_collision": 0,
         "no_candidate": 0,
         "custom_extractable": 0,
+        "rediscovered_ats": 0,
+        "rediscovered_custom": 0,
         "skipped_already_hit": 0,
         "disabled": 0,
     }
@@ -209,7 +366,21 @@ def reprobe_custom_miss_cohort(
                         row["name_raw"],
                     )
                 else:
-                    summary["no_candidate"] += 1
+                    # Third pass: the stored careers_url may be the wrong page.
+                    # Follow its top job-listings link one hop and retry both ATS
+                    # detection and generic extraction on the real listings page,
+                    # repointing careers_url on any recovery.
+                    outcome = _attempt_rediscovery(
+                        conn,
+                        company_id,
+                        row["name_raw"],
+                        html,
+                        careers_url,
+                        target_titles,
+                        title_exclusions,
+                        config,
+                    )
+                    summary[outcome if outcome else "no_candidate"] += 1
                 if delay:
                     time.sleep(delay)
                 continue

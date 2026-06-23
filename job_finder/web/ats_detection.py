@@ -128,6 +128,29 @@ _RIPPLING_HUMAN_URL = re.compile(
     re.IGNORECASE,
 )
 
+# UKG Pro Recruiting (UltiPro). Board URL packs all three slug parts:
+# https://{host}/{tenant}/JobBoard/{boardGuid} (host = recruiting2.ultipro.com).
+# The scanner slug is "{host}/{tenant}/{board}"; tenant case is preserved (the
+# API path is case-sensitive on the customer code), host + GUID lowercased.
+_ULTIPRO_URL = re.compile(
+    r"https?://(recruiting\d*\.ultipro\.com)/([A-Za-z0-9]+)/JobBoard/([0-9a-fA-F-]{36})",
+    re.IGNORECASE,
+)
+
+# Oracle Recruiting Cloud (Fusion Candidate Experience). The board host is the
+# full Fusion pod ({pod}.fa.{region}.oraclecloud.com); the CE site number lives
+# in the page path (/sites/CX_1/) or the REST finder (siteNumber=CX_1). The
+# scanner slug packs "{host}|{site}", defaulting the site to CX_1 when the URL
+# omits it (the near-universal single-site default).
+_ORACLE_CLOUD_URL = re.compile(
+    r"https?://([a-z0-9][a-z0-9-]*\.fa\.[a-z0-9-]+\.oraclecloud\.com)",
+    re.IGNORECASE,
+)
+_ORACLE_CLOUD_SITE = re.compile(
+    r"(?:/sites/|siteNumber=)([A-Za-z0-9_]+)",
+    re.IGNORECASE,
+)
+
 # iCIMS: tenant served on careers-{slug}.icims.com or jobs-{slug}.icims.com.
 # Capture the bare tenant after the prefix (exactly what _probe_icims / _board_url
 # wrap back into the host); require the careers-/jobs- prefix so the vendor's own
@@ -140,7 +163,9 @@ _ICIMS_URL = re.compile(
 # Bump alongside material changes to the regex patterns above (contract tests).
 # m049-v4: + workable / jobvite / paylocity / rippling URL patterns (round 6 audit).
 # m049-v5: + icims URL pattern (careers-/jobs- tenant host) (PR-A2).
-ATS_EXTRACTOR_VERSION = "m049-v5"
+# m049-v6: + oracle_cloud URL pattern (Fusion CE pod host + site number).
+# m049-v7: + ultipro URL pattern (UKG Pro Recruiting host/tenant/board GUID).
+ATS_EXTRACTOR_VERSION = "m049-v7"
 
 # Relative pattern strength within a URL: API/canonical traces win ties in reconciliation.
 _SPECIFICITY_API = 10
@@ -247,6 +272,23 @@ def extract_ats_from_url_best(url: str) -> tuple[str, str, int] | None:
     m = _RIPPLING_HUMAN_URL.search(url)
     if m:
         return "rippling", m.group(1).lower(), _SPECIFICITY_BOARD
+
+    # UKG Pro Recruiting (UltiPro). Board URL carries host + tenant + GUID.
+    m = _ULTIPRO_URL.search(url)
+    if m:
+        host = m.group(1).lower()
+        tenant = m.group(2)  # case-sensitive customer code — preserve
+        board = m.group(3).lower()
+        return "ultipro", f"{host}/{tenant}/{board}", _SPECIFICITY_BOARD
+
+    # Oracle Recruiting Cloud (Fusion CE). Confident, canonical ATS host — the
+    # full Fusion pod hostname is unmistakable. Slug packs "{host}|{site}".
+    m = _ORACLE_CLOUD_URL.search(url)
+    if m:
+        host = m.group(1).lower()
+        sm = _ORACLE_CLOUD_SITE.search(url)
+        site = sm.group(1) if sm else "CX_1"
+        return "oracle_cloud", f"{host}|{site}", _SPECIFICITY_BOARD
 
     # iCIMS — JS-rendered board, served by the Playwright scanner. Tenant is the
     # label after the careers-/jobs- host prefix; the captured slug is exactly

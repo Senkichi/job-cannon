@@ -41,6 +41,7 @@ from job_finder.web.ats_platforms._platforms_jazzhr import SCANNER as _JAZZHR_SC
 from job_finder.web.ats_platforms._platforms_jobvite import SCANNER as _JOBVITE_SCANNER
 from job_finder.web.ats_platforms._platforms_lever import SCANNER as _LEVER_SCANNER
 from job_finder.web.ats_platforms._platforms_microsoft import SCANNER as _MICROSOFT_SCANNER
+from job_finder.web.ats_platforms._platforms_oracle_cloud import SCANNER as _ORACLE_CLOUD_SCANNER
 from job_finder.web.ats_platforms._platforms_paylocity import SCANNER as _PAYLOCITY_SCANNER
 from job_finder.web.ats_platforms._platforms_personio import SCANNER as _PERSONIO_SCANNER
 from job_finder.web.ats_platforms._platforms_pinpoint import SCANNER as _PINPOINT_SCANNER
@@ -50,6 +51,7 @@ from job_finder.web.ats_platforms._platforms_smartrecruiters import (
     SCANNER as _SMARTRECRUITERS_SCANNER,
 )
 from job_finder.web.ats_platforms._platforms_teamtailor import SCANNER as _TEAMTAILOR_SCANNER
+from job_finder.web.ats_platforms._platforms_ultipro import SCANNER as _ULTIPRO_SCANNER
 from job_finder.web.ats_platforms._platforms_workable import SCANNER as _WORKABLE_SCANNER
 from job_finder.web.ats_platforms._platforms_workday import SCANNER as _WORKDAY_SCANNER
 from job_finder.web.ats_platforms._registry import PlatformScanner, run_platform_scan
@@ -88,6 +90,7 @@ SCANNERS_BY_NAME: dict[str, PlatformScanner] = {
         _JOBVITE_SCANNER,
         _LEVER_SCANNER,
         _MICROSOFT_SCANNER,
+        _ORACLE_CLOUD_SCANNER,
         _PAYLOCITY_SCANNER,
         _PERSONIO_SCANNER,
         _PINPOINT_SCANNER,
@@ -95,6 +98,7 @@ SCANNERS_BY_NAME: dict[str, PlatformScanner] = {
         _RIPPLING_SCANNER,
         _SMARTRECRUITERS_SCANNER,
         _TEAMTAILOR_SCANNER,
+        _ULTIPRO_SCANNER,
         _WORKABLE_SCANNER,
         _WORKDAY_SCANNER,
     )
@@ -307,6 +311,29 @@ def scan_eightfold(slug: str, target_titles: list[str], exclusions: list[str]) -
     return run_platform_scan(_EIGHTFOLD_SCANNER, slug, target_titles, exclusions)
 
 
+def scan_ultipro(slug: str, target_titles: list[str], exclusions: list[str]) -> list[dict]:
+    """Scan a UKG Pro Recruiting (UltiPro) job board for matched postings.
+
+    API: POST https://{host}/{tenant}/JobBoard/{board}/JobBoardView/LoadSearchResults
+    Slug packs "{host}/{tenant}/{board}" (e.g.
+    "recruiting2.ultipro.com/JAN1000JANI/693b35f4-..."). Top/Skip pagination up
+    to totalCount. Description is the short blurb; jd_full is filled by enrichment.
+    """
+    return run_platform_scan(_ULTIPRO_SCANNER, slug, target_titles, exclusions)
+
+
+def scan_oracle_cloud(slug: str, target_titles: list[str], exclusions: list[str]) -> list[dict]:
+    """Scan an Oracle Recruiting Cloud (Fusion CE) site for matched postings.
+
+    API: GET https://{host}/hcmRestApi/resources/latest/recruitingCEJobRequisitions
+        ?finder=findReqs;siteNumber={site},limit=50,offset={N},sortBy=POSTING_DATES_DESC
+    Slug packs "{host}|{site}" (e.g. "ibtcjb.fa.ocs.oraclecloud.com|CX_1"); a
+    missing site defaults to CX_1. Offset pagination up to TotalJobsCount.
+    Description is the short blurb; jd_full is filled by enrichment.
+    """
+    return run_platform_scan(_ORACLE_CLOUD_SCANNER, slug, target_titles, exclusions)
+
+
 def scan_amazon(slug: str, target_titles: list[str], exclusions: list[str]) -> list[dict]:
     """Scan Amazon Jobs (single global board) for keyword-matched postings.
 
@@ -345,6 +372,7 @@ __all__ = [
     "scan_jobvite",
     "scan_lever",
     "scan_microsoft",
+    "scan_oracle_cloud",
     "scan_paylocity",
     "scan_personio",
     "scan_pinpoint",
@@ -352,6 +380,7 @@ __all__ = [
     "scan_rippling",
     "scan_smartrecruiters",
     "scan_teamtailor",
+    "scan_ultipro",
     "scan_workable",
     "scan_workday",
 ]

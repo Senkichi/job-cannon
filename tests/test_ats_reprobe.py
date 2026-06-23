@@ -34,6 +34,18 @@ _CUSTOM_OFFTARGET_HTML = (
     '<li><a href="/careers/dishwasher">Dishwasher</a></li>'
     "</ul></body></html>"
 )
+# A marketing/landing shell that lists NO jobs itself but links to the real
+# openings page (the "wrong careers_url" case the rediscovery pass recovers).
+_MARKETING_WITH_OPENINGS = (
+    "<html><body><p>Join our mission to build great things.</p>"
+    '<a href="/careers/openings">View Open Positions</a></body></html>'
+)
+# The deeper openings page embeds a Greenhouse board.
+_DEEPER_GH_EMBED = (
+    "<html><body><h1>Open roles</h1>"
+    '<a href="https://boards.greenhouse.io/deepco">See all jobs on Greenhouse</a>'
+    "</body></html>"
+)
 
 # identity_reconcile must be enabled for the promotion writer to fire; TESTING
 # skips the polite sleep so the suite stays fast.
@@ -277,3 +289,92 @@ def test_no_profile_disables_static_pass(mock_get, db):
     assert summary["custom_extractable"] == 0
     assert summary["no_candidate"] == 1
     assert _row(db, cid)["scan_enabled"] == 0
+
+
+@patch("job_finder.web.ats_identity_reconcile._verify_live", return_value=True)
+@patch("job_finder.web.ats_reprobe.requests.get")
+def test_rediscovers_ats_via_openings_link(mock_get, _verify, db):
+    # careers_url is a marketing shell with no embed; its "View Open Positions"
+    # link leads to a page that embeds Greenhouse. Reprobe follows the link,
+    # promotes on the deeper page, and REPOINTS careers_url to it.
+    cid = _seed(db, "MarketingCo", "https://marketingco.com/careers", scan_enabled=0)
+    mock_get.side_effect = _fake_get(
+        {
+            "https://marketingco.com/careers": _MARKETING_WITH_OPENINGS,
+            "https://marketingco.com/careers/openings": _DEEPER_GH_EMBED,
+        }
+    )
+
+    summary = reprobe_custom_miss_cohort(db, _CONFIG)
+
+    assert summary["rediscovered_ats"] == 1
+    assert summary["promoted"] == 0  # counted under rediscovered_ats
+    assert summary["no_candidate"] == 0
+    row = _row(db, cid)
+    assert row["ats_platform"] == "greenhouse"
+    assert row["ats_slug"] == "deepco"
+    assert row["ats_probe_status"] == "hit"
+    assert row["scan_enabled"] == 1
+    # careers_url repointed from the marketing shell to the real openings page.
+    assert row["careers_url"] == "https://marketingco.com/careers/openings"
+
+
+@patch("job_finder.web.ats_reprobe.requests.get")
+def test_rediscovers_custom_via_openings_link(mock_get, db):
+    # The openings link leads to a bespoke server-rendered list with a
+    # target-matching role. Reprobe re-enables scan and repoints careers_url —
+    # no ATS platform claimed.
+    cid = _seed(db, "BespokeCo", "https://bespokeco.com/careers", scan_enabled=0)
+    mock_get.side_effect = _fake_get(
+        {
+            "https://bespokeco.com/careers": _MARKETING_WITH_OPENINGS,
+            "https://bespokeco.com/careers/openings": _CUSTOM_LIST_HTML,
+        }
+    )
+
+    summary = reprobe_custom_miss_cohort(db, _CONFIG_WITH_PROFILE)
+
+    assert summary["rediscovered_custom"] == 1
+    assert summary["no_candidate"] == 0
+    row = _row(db, cid)
+    assert row["scan_enabled"] == 1
+    assert row["ats_platform"] is None  # no platform claim
+    assert row["ats_probe_status"] == "miss"
+    assert row["careers_url"] == "https://bespokeco.com/careers/openings"  # repointed
+
+
+@patch("job_finder.web.ats_reprobe.requests.get")
+def test_rediscovery_no_openings_link_stays_frozen(mock_get, db):
+    # Marketing shell with no job-listings link anywhere -> nothing to follow.
+    cid = _seed(db, "DeadShell", "https://deadshell.com/careers", scan_enabled=0)
+    mock_get.side_effect = _fake_get({"https://deadshell.com/careers": _NO_ATS_HTML})
+
+    summary = reprobe_custom_miss_cohort(db, _CONFIG_WITH_PROFILE)
+
+    assert summary["no_candidate"] == 1
+    assert summary["rediscovered_ats"] == 0
+    assert summary["rediscovered_custom"] == 0
+    row = _row(db, cid)
+    assert row["scan_enabled"] == 0
+    assert row["careers_url"] == "https://deadshell.com/careers"  # unchanged
+
+
+@patch("job_finder.web.ats_reprobe.requests.get")
+def test_rediscovery_deeper_offtarget_stays_frozen(mock_get, db):
+    # The openings link leads to a real list, but none match target_titles ->
+    # not a viable source; leave frozen and DON'T repoint careers_url.
+    cid = _seed(db, "OffDeep", "https://offdeep.com/careers", scan_enabled=0)
+    mock_get.side_effect = _fake_get(
+        {
+            "https://offdeep.com/careers": _MARKETING_WITH_OPENINGS,
+            "https://offdeep.com/careers/openings": _CUSTOM_OFFTARGET_HTML,
+        }
+    )
+
+    summary = reprobe_custom_miss_cohort(db, _CONFIG_WITH_PROFILE)
+
+    assert summary["no_candidate"] == 1
+    assert summary["rediscovered_custom"] == 0
+    row = _row(db, cid)
+    assert row["scan_enabled"] == 0
+    assert row["careers_url"] == "https://offdeep.com/careers"  # unchanged
