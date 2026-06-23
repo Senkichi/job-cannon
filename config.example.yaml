@@ -411,6 +411,16 @@ agentic:
   # 4:15 AM run clear of careers_crawl at 5:00 AM. Raise to drain a large
   # backlog faster (at the cost of a longer run); default 50.
   batch_limit: 50
+  # Inline agentic pass: after each enrichment_backfill run, run ONE batched
+  # agentic pass (a single reused Chromium) over the rows that just exhausted
+  # the cheaper tiers, so a last-resort JD lands in the same cycle instead of
+  # waiting for the nightly agentic_backfill. Set false to disable (the nightly
+  # batch still runs). This replaced the old per-row agentic tier that spawned a
+  # fresh browser per job.
+  inline_enabled: true
+  # Cap for the inline pass (defaults to batch_limit when unset). Keep modest so
+  # the 3x/day enrichment run stays snappy; overflow drains nightly.
+  inline_limit: 50
 
 # --- Development server ---
 server:

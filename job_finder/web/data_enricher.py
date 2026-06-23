@@ -43,7 +43,7 @@ import json
 import logging
 from typing import Any
 
-from job_finder.config import JD_STORAGE_MAX_CHARS
+from job_finder.config import DEFAULT_AGENTIC_BATCH_LIMIT, JD_STORAGE_MAX_CHARS
 from job_finder.db._direct_link import set_direct_url
 from job_finder.db._jd_content_contract import JD_CONTENT_REASON_CODES
 from job_finder.db._jd_full import set_jd_full as _set_jd_full
@@ -387,35 +387,60 @@ def enrich_job(
                     logger.debug("SerpAPI tier failed for '%s': %s", title, e)
 
         # ---------------------------------------------------------------
-        # Tier 3: agentic — Ollama-driven query + Playwright fetch
+        # Deepest fallback: agentic (Ollama query-gen + Playwright fetch)
         # ---------------------------------------------------------------
-        # Agentic only runs if JD is still missing. Calls into the per-job
-        # entry point in agentic_enricher (Playwright + Ollama; expensive).
-        jd_still_missing = not (
-            job_row.get("jd_full") or fragments.get("url_jd") or fragments.get("jd_full")
-        )
-
-        if start_idx <= TIER_ORDER.index("agentic") and jd_still_missing:
-            try:
-                from job_finder.web.agentic_enricher import enrich_one_job
-
-                agentic_result = enrich_one_job(job_row, conn, config)
-                jd = agentic_result.get("jd_full")
-                if jd and len(jd) >= MIN_FETCH_JD_CHARS:
-                    enriched = {"jd_full": jd}
-                    enriched = _apply_post_fetch_extraction(enriched, job_row, conn, config)
-                    _persist(conn, job_row, enriched, "agentic")
-                    return enriched
-            except Exception as e:
-                logger.debug("Agentic tier failed for '%s': %s", title, e)
-
-        # All tiers exhausted
+        # Deliberately NOT run per-row here. The agentic tier is Playwright-heavy
+        # and used to spin up a FRESH Chromium per row from this synchronous
+        # cascade (the 2026-06-22 process-spawn storm: run_enrichment_backfill
+        # has no limit, so one scheduled run launched N browsers). Rows that
+        # exhaust the cheaper tiers fall through to 'exhausted' and are served by
+        # the BATCHED agentic pass, which launches ONE browser and reuses it
+        # across all rows — driven inline at the tail of run_enrichment_backfill
+        # (so the JD still lands in the same cycle, no cross-run delay) and
+        # nightly by the agentic_backfill scheduled job.
         _persist(conn, job_row, {}, "exhausted")
         return {}
 
     except Exception as e:
         logger.warning("enrich_job failed for '%s': %s", job_row.get("title"), e)
         return {}
+
+
+def _run_inline_agentic_pass(db_path: str, config: dict) -> int:
+    """Run ONE batched agentic enrichment pass (a single reused Chromium).
+
+    Replaces the old per-row agentic tier. Drives
+    ``agentic_enricher.run_agentic_backfill`` over the freshest ``exhausted``
+    rows (the batch SELECT orders ``first_seen DESC``), so a row that just
+    exhausted the cheaper tiers gets its last-resort JD in the SAME enrichment
+    cycle — without spawning a browser per row. Bounded by ``agentic.inline_limit``
+    (defaults to ``agentic.batch_limit``) to keep the run snappy; any overflow is
+    drained by the nightly ``agentic_backfill`` job. Gated by
+    ``agentic.inline_enabled`` (default True).
+
+    Best-effort: returns 0 on any failure or when Playwright is unavailable —
+    a dead agentic pass must never fail the enrichment backfill.
+    """
+    agentic_cfg = config.get("agentic", {}) if isinstance(config, dict) else {}
+    if not agentic_cfg.get("inline_enabled", True):
+        return 0
+    try:
+        batch_limit = int(agentic_cfg.get("batch_limit", DEFAULT_AGENTIC_BATCH_LIMIT))
+    except (TypeError, ValueError):
+        batch_limit = DEFAULT_AGENTIC_BATCH_LIMIT
+    try:
+        inline_limit = int(agentic_cfg.get("inline_limit", batch_limit))
+    except (TypeError, ValueError):
+        inline_limit = batch_limit
+    if inline_limit <= 0:
+        return 0
+    try:
+        from job_finder.web.agentic_enricher import run_agentic_backfill
+
+        return run_agentic_backfill(db_path, config, limit=inline_limit)
+    except Exception as exc:
+        logger.warning("Inline agentic pass failed: %s", exc)
+        return 0
 
 
 def run_enrichment_backfill(
@@ -502,7 +527,12 @@ def run_enrichment_backfill(
             cap_info,
         )
 
-        return enriched_count
+    # Inline agentic pass runs AFTER the per-row connection above is closed, so
+    # the heavy Playwright/Ollama work never holds the SQLite write lock against
+    # the cascade (the same per-operation discipline run_agentic_backfill uses
+    # internally). One reused browser for the freshest just-exhausted rows.
+    enriched_count += _run_inline_agentic_pass(db_path, config)
+    return enriched_count
 
 
 # Minimum jd_full length for the extraction-only pass. Mirrors MIN_FETCH_JD_CHARS

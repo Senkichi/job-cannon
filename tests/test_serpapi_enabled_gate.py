@@ -103,8 +103,9 @@ def _neutralise_other_tiers():
     ]
     for p in patchers:
         p.start()
-    with patch("job_finder.web.agentic_enricher.enrich_one_job", return_value={}):
-        yield
+    # enrich_job no longer runs the agentic tier synchronously (2026-06-22); the
+    # cascade terminates at 'exhausted' with no Playwright/Ollama I/O to stub.
+    yield
     for p in patchers:
         p.stop()
 

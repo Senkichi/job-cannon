@@ -18,14 +18,13 @@ import time
 from typing import Any
 
 import requests
-from bs4 import BeautifulSoup
 from ddgs import DDGS
 
 from job_finder.config import JD_STORAGE_MAX_CHARS
 from job_finder.web.direct_link import resolve_primary_posting
 from job_finder.web.domain_policy import domain_priority, is_blocked_domain
-from job_finder.web.html_extract import html_to_clean_text
 from job_finder.web.model_provider import call_model
+from job_finder.web.platform_extractor import extract_clean_jd
 
 logger = logging.getLogger(__name__)
 
@@ -126,10 +125,12 @@ def fetch_direct_jd(url: str) -> str | None:
         response = requests.get(url, headers=_HEADERS, timeout=_TIMEOUT)
         response.raise_for_status()
 
-        # Structure-aware extraction (JD Layer 2): strips boilerplate, keeps
-        # headings/lists, collapses duplicate blocks. Falls back to a plain
-        # noise-tag strip internally when the page has no article structure.
-        text = html_to_clean_text(response.text)
+        # Single chokepoint (JD Layer 2): platform-scoped extraction (e.g.
+        # LinkedIn's JD container) + page-chrome strip, falling back to
+        # whole-page extraction for unknown hosts. Routing the direct-URL fetch
+        # through here is what stops a LinkedIn source_url from storing the
+        # whole guest page (the 2026-06-22 Penguin AI regression).
+        text = extract_clean_jd(url, response.text)
         if not text:
             logger.debug("fetch_direct_jd('%s'): no extractable text", url)
             return None
@@ -693,25 +694,6 @@ def company_name_in_text(company_name: str, text: str) -> bool:
     return any(t in text_lower for t in tokens)
 
 
-def extract_content_from_html(html: str) -> str | None:
-    """Extract cleaned text content from raw HTML.
-
-    Structure-aware extraction via ``html_to_clean_text`` (JD Layer 2): strips
-    boilerplate, preserves headings/lists, collapses duplicate blocks, and
-    falls back to a plain noise-tag strip when trafilatura can't parse the page.
-    Consumed by ``agentic_enricher`` to convert fetched HTML into ``jd_full``.
-
-    Args:
-        html: Raw HTML string.
-
-    Returns:
-        Cleaned text content, or None if empty.
-    """
-    if not html:
-        return None
-    return html_to_clean_text(html)
-
-
 def is_chrome_or_login_page(text: str) -> bool:
     """Return True if text looks like a browser upgrade or login/signup page.
 
@@ -755,18 +737,15 @@ def fetch_linkedin_jd(url: str) -> str | None:
         response = requests.get(url, headers=_BROWSER_HEADERS, timeout=_TIMEOUT)
         response.raise_for_status()
 
-        soup = BeautifulSoup(response.text, "html.parser")
-
-        jd_el = soup.select_one("div.show-more-less-html__markup")
-        if jd_el is None:
-            jd_el = soup.select_one("div.description__text")
-
-        if jd_el is None:
-            logger.debug("LinkedIn JD container not found for '%s'", url)
-            return None
-
-        text = html_to_clean_text(str(jd_el))
+        # LinkedIn scoping now lives in the single chokepoint (extract_clean_jd
+        # selects div.show-more-less-html__markup / div.description__text and
+        # strips page chrome). This function stays as the LinkedIn-specific
+        # entry point — browser headers + the existing callers (DDG tier, the
+        # agentic Playwright shortcut) — but delegates the actual extraction so
+        # there is exactly one definition of "what a LinkedIn JD looks like".
+        text = extract_clean_jd(url, response.text)
         if not text or not text.strip():
+            logger.debug("LinkedIn JD container not found for '%s'", url)
             return None
 
         return text[:_MAX_JD_CHARS]

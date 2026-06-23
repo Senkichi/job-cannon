@@ -217,7 +217,8 @@ def test_enrich_job_promotes_existing_ats_source_url(tmp_path):
         ),
         patch("job_finder.web.data_enricher.fetch_ddg_jds", return_value=(None, None)),
         patch("job_finder.web.data_enricher.search_duckduckgo", return_value=None),
-        patch("job_finder.web.agentic_enricher.enrich_one_job", return_value={}),
+        # enrich_job no longer invokes the agentic tier synchronously (2026-06-22);
+        # the cascade terminates at 'exhausted' with no Playwright/Ollama I/O.
     ):
         enrich_job(job_row, conn=conn, config={})
 

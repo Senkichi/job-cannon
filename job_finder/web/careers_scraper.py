@@ -27,8 +27,8 @@ from bs4 import BeautifulSoup
 from job_finder.config import JD_STORAGE_MAX_CHARS
 from job_finder.web.careers_crawler._title_filters import clean_title
 from job_finder.web.claude_client import call_claude
-from job_finder.web.html_extract import html_to_clean_text
 from job_finder.web.model_provider import ProviderCascadeExhaustedError, call_model
+from job_finder.web.platform_extractor import extract_clean_jd
 
 logger = logging.getLogger(__name__)
 
@@ -236,10 +236,10 @@ def _find_careers_url_with_low_tier(
 def _fetch_job_description(url: str) -> str:
     """Fetch a job page and extract cleaned description text.
 
-    Delegates structure-aware extraction to ``html_extract.html_to_clean_text``
-    (trafilatura → markdown + block dedup, BeautifulSoup fallback), checks for
-    auth-wall signatures, and caps output at _MAX_JD_CHARS. Returns empty string
-    on any failure (never None).
+    Delegates structure-aware extraction to ``platform_extractor.extract_clean_jd``
+    (platform-scoped container → trafilatura markdown + block dedup + page-chrome
+    strip), checks for auth-wall signatures, and caps output at _MAX_JD_CHARS.
+    Returns empty string on any failure (never None).
 
     Args:
         url: Job page URL to fetch.
@@ -250,7 +250,9 @@ def _fetch_job_description(url: str) -> str:
     try:
         resp = requests.get(url, timeout=_TIMEOUT, headers=_HEADERS)
         resp.raise_for_status()
-        text = html_to_clean_text(resp.text) or ""
+        # Route through the single chokepoint so any platform-scoped pages and
+        # trailing page chrome are handled identically to the other fetch tiers.
+        text = extract_clean_jd(url, resp.text) or ""
         text_lower = text.lower()
         if any(sig in text_lower for sig in _AUTH_WALL_SIGNATURES):
             logger.debug("Auth-wall detected for job page '%s'", url)

@@ -56,11 +56,11 @@ def stub_enrichment_network():
       - search_duckduckgo-> str | None              (caller filters falsy)
       - search_serpapi   -> tuple[dict|None, list]   (caller unpacks 2)
 
-    The deepest tier (agentic) is neutralized file-wide by the
-    _neutralize_agentic_tier autouse below — when every cheaper tier misses (as
-    they do here), enrich_job would otherwise escalate into the live agentic
-    seam (Playwright + Ollama + real DDG), which made these tests SLOWER, not
-    faster.
+    enrich_job's synchronous cascade ends at SerpAPI: when every cheaper tier
+    misses, the row is persisted as 'exhausted' (no Playwright/Ollama from this
+    path anymore — the agentic tier moved to the batched inline pass in
+    run_enrichment_backfill, 2026-06-22), so these tests stay fast without an
+    agentic neutralizer.
     """
     targets = {
         "fetch_direct_jd": None,
@@ -81,26 +81,6 @@ def stub_enrichment_network():
     finally:
         for p in patchers:
             p.stop()
-
-
-@pytest.fixture(autouse=True)
-def _neutralize_agentic_tier():
-    """Block enrich_job's deepest tier (agentic) for every test in this file.
-
-    enrich_job's cost cascade ends in agentic_enricher.enrich_one_job (TIER_ORDER
-    index 'agentic'), which launches Playwright + Ollama + real DuckDuckGo. Any
-    test where the cheaper tiers miss and jd_full stays missing escalates into it
-    — the TierOrder/TierPersistence escalation tests paid 40-65s each this way.
-
-    enrich_job imports it lazily (``from job_finder.web.agentic_enricher import
-    enrich_one_job`` inside the function), so we patch at the source module.
-    Returns {} — its real no-result shape — so escalation still occurs (call-order
-    assertions hold) but no live I/O fires. No test in this file patches or asserts
-    on the real enrich_one_job, so an agentic-only autouse cannot mask a cheap-tier
-    call-order assertion (which is why the cheap-tier stub is opt-in, not autouse).
-    """
-    with patch("job_finder.web.agentic_enricher.enrich_one_job", return_value={}) as m:
-        yield m
 
 
 @pytest.fixture
@@ -1985,6 +1965,17 @@ class TestRunEnrichmentBackfillSelect:
     AND clause filtering for actually-missing fields plus ORDER BY
     first_seen DESC.
     """
+
+    @pytest.fixture(autouse=True)
+    def _no_inline_agentic(self):
+        """Neutralize the post-loop inline agentic pass for selection tests.
+
+        These tests assert which rows enrich_job is called with; the batched
+        agentic pass (real Playwright/Ollama over 'exhausted' rows) is a
+        separate concern covered by its own test, so stub it to a no-op.
+        """
+        with patch("job_finder.web.data_enricher._run_inline_agentic_pass", return_value=0) as m:
+            yield m
 
     @pytest.fixture
     def backfill_db_path(self, tmp_path):
