@@ -1,18 +1,21 @@
 """Tests for the ``job-cannon`` console-script entry point (job_finder/__main__.py).
 
 These tests cover the UAT 2026-05-21 F2 / Issue #290 behaviour: print a URL
-banner and open the user's browser ~1.5 s after launch in BOTH terminal mode
-and tray mode, with ``JOB_CANNON_NO_BROWSER=1`` as the opt-out switch.
+banner and open the user's browser in BOTH terminal mode and tray mode, with
+``JOB_CANNON_NO_BROWSER=1`` as the opt-out switch. The open is readiness-gated
+(``_wait_for_server_then_open`` polls ``/__jc_health`` and opens only once the
+server answers) rather than fired after a fixed delay, so a cold start can't
+produce a first-load "unable to connect".
 
 We don't actually call ``main()`` end-to-end (it would block on
-``app.run()``); instead we exercise ``_open_browser`` and
-``_print_startup_banner`` directly and verify the URL-banner /
-timer-scheduling logic via patching.
+``app.run()``); instead we exercise ``_open_browser``,
+``_print_startup_banner``, and ``_wait_for_server_then_open`` directly and
+verify the URL-banner / opener-thread logic via patching.
 
 Note (Issue #40): tray mode is now the default launch mode, so the tests
 that exercise terminal-mode serving pass ``--terminal`` explicitly. The
-assertions are unchanged — they still verify the banner / Timer / app.run
-wiring, now reached via the explicit flag instead of the bare invocation.
+assertions verify the banner / opener-thread / app.run wiring, reached via
+the explicit flag instead of the bare invocation.
 """
 
 from unittest.mock import MagicMock, patch
@@ -55,7 +58,7 @@ def test_print_startup_banner_terminal_mode_prints_url(monkeypatch, capsys):
     """Terminal mode banner prints 'Job Cannon is starting on <url>' without
     the tray-icon hint."""
     monkeypatch.setenv("JOB_CANNON_NO_BROWSER", "1")
-    with patch("job_finder.__main__.threading.Timer"):
+    with patch("job_finder.__main__.threading.Thread"):
         main_mod._print_startup_banner("http://127.0.0.1:5000", tray_mode=False)
     captured = capsys.readouterr()
     assert "Job Cannon is starting on http://127.0.0.1:5000" in captured.out
@@ -65,36 +68,68 @@ def test_print_startup_banner_terminal_mode_prints_url(monkeypatch, capsys):
 def test_print_startup_banner_tray_mode_prints_url_and_hint(monkeypatch, capsys):
     """Tray mode banner includes both the URL and the tray-icon hint."""
     monkeypatch.setenv("JOB_CANNON_NO_BROWSER", "1")
-    with patch("job_finder.__main__.threading.Timer"):
+    with patch("job_finder.__main__.threading.Thread"):
         main_mod._print_startup_banner("http://127.0.0.1:5000", tray_mode=True)
     captured = capsys.readouterr()
     assert "Job Cannon is starting on http://127.0.0.1:5000" in captured.out
     assert "tray icon" in captured.out
 
 
-def test_print_startup_banner_schedules_timer_when_no_browser_not_set(monkeypatch, capsys):
-    """Without JOB_CANNON_NO_BROWSER, _print_startup_banner schedules the Timer
-    and returns it."""
+def test_print_startup_banner_starts_opener_thread_when_no_browser_not_set(monkeypatch, capsys):
+    """Without JOB_CANNON_NO_BROWSER, _print_startup_banner starts a daemon
+    opener thread (readiness-gated browser open) and returns it."""
     monkeypatch.delenv("JOB_CANNON_NO_BROWSER", raising=False)
-    fake_timer = MagicMock()
-    with patch("job_finder.__main__.threading.Timer", return_value=fake_timer) as mock_timer_cls:
+    fake_thread = MagicMock()
+    with patch(
+        "job_finder.__main__.threading.Thread", return_value=fake_thread
+    ) as mock_thread_cls:
         result = main_mod._print_startup_banner("http://127.0.0.1:5000", tray_mode=False)
-    mock_timer_cls.assert_called_once()
-    call = mock_timer_cls.call_args
-    assert call.args[0] == main_mod._BROWSER_OPEN_DELAY_SEC
-    assert call.args[1] is main_mod._open_browser
+    mock_thread_cls.assert_called_once()
+    call = mock_thread_cls.call_args
+    # Opener targets the readiness poller with the URL, runs as a daemon.
+    assert call.kwargs["target"] is main_mod._wait_for_server_then_open
     assert call.kwargs["args"] == ("http://127.0.0.1:5000",)
-    fake_timer.start.assert_called_once()
-    assert result is fake_timer
+    assert call.kwargs["daemon"] is True
+    fake_thread.start.assert_called_once()
+    assert result is fake_thread
 
 
-def test_print_startup_banner_no_timer_when_no_browser_set(monkeypatch, capsys):
-    """JOB_CANNON_NO_BROWSER=1 suppresses the Timer; returns None."""
+def test_print_startup_banner_no_opener_when_no_browser_set(monkeypatch, capsys):
+    """JOB_CANNON_NO_BROWSER=1 suppresses the opener thread; returns None."""
     monkeypatch.setenv("JOB_CANNON_NO_BROWSER", "1")
-    with patch("job_finder.__main__.threading.Timer") as mock_timer_cls:
+    with patch("job_finder.__main__.threading.Thread") as mock_thread_cls:
         result = main_mod._print_startup_banner("http://127.0.0.1:5000", tray_mode=False)
-    mock_timer_cls.assert_not_called()
+    mock_thread_cls.assert_not_called()
     assert result is None
+
+
+def test_wait_for_server_then_open_opens_once_ready(monkeypatch):
+    """_wait_for_server_then_open polls until the server answers, then opens
+    the browser exactly once. It must NOT open before the server is up."""
+    # First two probes fail (server not bound yet), third succeeds.
+    probe_results = [None, None, {"app": "job-cannon"}]
+    with (
+        patch("job_finder.__main__.probe_existing_jc", side_effect=probe_results),
+        patch("job_finder.__main__._open_browser") as mock_open,
+        patch("job_finder.__main__.time.sleep"),  # don't actually sleep between polls
+    ):
+        main_mod._wait_for_server_then_open("http://127.0.0.1:5000")
+    mock_open.assert_called_once_with("http://127.0.0.1:5000")
+
+
+def test_wait_for_server_then_open_falls_back_after_timeout(monkeypatch):
+    """If the server never confirms ready, the opener gives up after the
+    timeout and opens anyway (degraded, but the user still gets the URL)."""
+    # monotonic advances past the deadline on the 2nd read so the loop exits.
+    ticks = iter([1000.0, 1000.0, 9999.0])
+    with (
+        patch("job_finder.__main__.probe_existing_jc", return_value=None),
+        patch("job_finder.__main__._open_browser") as mock_open,
+        patch("job_finder.__main__.time.sleep"),
+        patch("job_finder.__main__.time.monotonic", side_effect=lambda: next(ticks)),
+    ):
+        main_mod._wait_for_server_then_open("http://127.0.0.1:5000")
+    mock_open.assert_called_once_with("http://127.0.0.1:5000")
 
 
 def test_open_browser_calls_webbrowser_open():
@@ -119,9 +154,9 @@ def test_open_browser_swallows_exceptions(caplog):
         assert any("Could not open browser" in record.getMessage() for record in caplog.records)
 
 
-def test_main_no_browser_env_var_skips_timer_and_message(monkeypatch, capsys):
-    """JOB_CANNON_NO_BROWSER=1 disables both the Timer and the "Opening your
-    browser…" line. The URL banner still prints; it's the only stable place
+def test_main_no_browser_env_var_skips_opener_and_message(monkeypatch, capsys):
+    """JOB_CANNON_NO_BROWSER=1 disables both the opener thread and the "Opening
+    your browser…" line. The URL banner still prints; it's the only stable place
     for the user to copy the URL when running headless."""
     monkeypatch.setenv("JOB_CANNON_NO_BROWSER", "1")
 
@@ -129,7 +164,7 @@ def test_main_no_browser_env_var_skips_timer_and_message(monkeypatch, capsys):
     with (
         patch("job_finder.config.load_config", return_value={}),
         patch("job_finder.web.create_app", return_value=fake_app),
-        patch("job_finder.__main__.threading.Timer") as mock_timer,
+        patch("job_finder.__main__.threading.Thread") as mock_thread,
         patch("job_finder.__main__.sys.argv", ["job-cannon", "--terminal"]),
         # Probe / port checks must be stubbed so the test doesn't depend on
         # what's actually bound on port 5000 during the test run.
@@ -144,21 +179,22 @@ def test_main_no_browser_env_var_skips_timer_and_message(monkeypatch, capsys):
     captured = capsys.readouterr()
     assert "Job Cannon is starting on" in captured.out
     assert "Opening your browser" not in captured.out
-    mock_timer.assert_not_called()
+    mock_thread.assert_not_called()
     fake_app.run.assert_called_once()
 
 
-def test_main_default_schedules_browser_open(monkeypatch, capsys):
-    """Without the opt-out, main() prints the banner AND schedules the timer."""
+def test_main_default_starts_browser_opener(monkeypatch, capsys):
+    """Without the opt-out, main() prints the banner AND starts the readiness-
+    gated opener thread (targeting _wait_for_server_then_open with the URL)."""
     monkeypatch.delenv("JOB_CANNON_NO_BROWSER", raising=False)
 
     fake_app = MagicMock()
-    fake_timer = MagicMock()
+    fake_thread = MagicMock()
 
     with (
         patch("job_finder.config.load_config", return_value={}),
         patch("job_finder.web.create_app", return_value=fake_app),
-        patch("job_finder.__main__.threading.Timer", return_value=fake_timer) as mock_timer_class,
+        patch("job_finder.__main__.threading.Thread", return_value=fake_thread) as mock_thread_cls,
         patch("job_finder.__main__.sys.argv", ["job-cannon", "--terminal"]),
         patch("job_finder.__main__.probe_existing_jc", return_value=None),
         patch("job_finder.__main__._port_is_listening", return_value=False),
@@ -172,14 +208,13 @@ def test_main_default_schedules_browser_open(monkeypatch, capsys):
     assert "Job Cannon is starting on http://127.0.0.1:5000" in captured.out
     assert "Opening your browser" in captured.out
 
-    # Timer constructed with the documented delay + _open_browser callable
-    # + URL passed positionally.
-    mock_timer_class.assert_called_once()
-    call = mock_timer_class.call_args
-    assert call.args[0] == main_mod._BROWSER_OPEN_DELAY_SEC
-    assert call.args[1] is main_mod._open_browser
+    # Opener thread targets the readiness poller with the URL, runs as a daemon.
+    mock_thread_cls.assert_called_once()
+    call = mock_thread_cls.call_args
+    assert call.kwargs["target"] is main_mod._wait_for_server_then_open
     assert call.kwargs["args"] == ("http://127.0.0.1:5000",)
-    fake_timer.start.assert_called_once()
+    assert call.kwargs["daemon"] is True
+    fake_thread.start.assert_called_once()
 
 
 def test_main_respects_server_overrides_in_config(monkeypatch, capsys):

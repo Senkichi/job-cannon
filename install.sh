@@ -422,7 +422,7 @@ if [ "$LAUNCH" -eq 1 ]; then
 
 About to run: ${BOLD}uv run job-cannon${RESET}
 
-This prints a URL banner and opens your default browser ~1.5 s later.
+This prints a URL banner and opens your default browser as soon as the server is ready.
 Press Ctrl+C in this terminal to stop the server.
 
 EOF

@@ -1,7 +1,7 @@
 """Tests for terminal-mode shutdown wiring in job_finder.__main__ and _runtime.
 
 Covers:
-- threading.Timer(...).daemon is True after construction
+- main() starts the browser opener as a daemon thread
 - runtime_shutdown() called N times invokes scheduler.shutdown exactly once
 - Ordering: scheduler.shutdown happens before spawned.terminate
 - SIGINT delivered to test process triggers single runtime_shutdown invocation
@@ -37,37 +37,26 @@ def reset_runtime():
 
 
 # ---------------------------------------------------------------------------
-# Timer daemon flag
+# Browser opener daemon flag
 # ---------------------------------------------------------------------------
 
 
-def test_timer_daemon_true():
-    """threading.Timer constructed in main() must have daemon=True so a fast
-    startup crash does not leave the Timer thread keeping the process alive."""
-    # We test the property directly on a Timer instance (same as production code)
-    timer = threading.Timer(1.5, lambda: None)
-    timer.daemon = True
-    assert timer.daemon is True
-
-
-def test_main_sets_timer_daemon(monkeypatch):
-    """main() must set timer.daemon = True before starting the timer.
+def test_main_sets_browser_opener_daemon(monkeypatch):
+    """main() must start the browser opener as a daemon thread so a fast
+    startup crash does not leave the opener thread keeping the process alive.
 
     Passes --terminal because tray mode is the default since Issue #40; the
-    browser Timer being asserted here only exists on the terminal path.
+    browser opener being asserted here is started on the terminal path too.
     """
-    monkeypatch.setenv("JOB_CANNON_NO_BROWSER", "0")
     monkeypatch.delenv("JOB_CANNON_NO_BROWSER", raising=False)
 
     fake_app = MagicMock()
-    captured_timer: list[threading.Timer] = []
+    captured_threads: list[dict] = []
 
-    original_timer = threading.Timer
-
-    def _capturing_timer(interval, fn, args=None, kwargs=None):
-        t = original_timer(interval, fn, args=args or [], kwargs=kwargs or {})
-        captured_timer.append(t)
-        return t
+    def _capturing_thread(*args, **kwargs):
+        # Capture construction kwargs without starting a real poll loop.
+        captured_threads.append(kwargs)
+        return MagicMock()
 
     acquired = MagicMock()
     acquired.acquired = True
@@ -77,17 +66,10 @@ def test_main_sets_timer_daemon(monkeypatch):
         patch("job_finder.web.create_app", return_value=fake_app),
         patch("job_finder.web._runtime.runtime_shutdown"),
         patch("job_finder.__main__._install_terminal_shutdown"),
-        patch("job_finder.__main__.threading.Timer", side_effect=_capturing_timer),
-        # Neutralize the Timer's payload: this test asserts the Timer's daemon
-        # flag, NOT that a browser opens. The captured Timer is real and armed
-        # (NO_BROWSER is deleted above), so without this it would fire ~1.5s
-        # later — after the test passes and this `with` block exits — and open
-        # a real tab against the running dev app. Mocking the callback keeps a
-        # stray fire harmless; we also cancel() below.
-        patch("job_finder.__main__._open_browser"),
+        patch("job_finder.__main__.threading.Thread", side_effect=_capturing_thread),
         patch("job_finder.__main__.sys.argv", ["job-cannon", "--terminal"]),
         # Hermetic: don't let a live instance on :5000 short-circuit main()
-        # before the Timer is created (the assertion target).
+        # before the opener thread is created (the assertion target).
         patch("job_finder.__main__.probe_existing_jc", return_value=None),
         patch("job_finder.__main__._port_is_listening", return_value=False),
         patch("job_finder.__main__.acquire_pidfile", return_value=acquired),
@@ -97,11 +79,8 @@ def test_main_sets_timer_daemon(monkeypatch):
 
         main_mod.main()
 
-    assert captured_timer, "Timer was not created"
-    assert captured_timer[0].daemon is True, "Timer.daemon must be True"
-
-    # Disarm the real, started Timer so it does not linger as a daemon thread.
-    captured_timer[0].cancel()
+    assert captured_threads, "Browser opener thread was not created"
+    assert captured_threads[0].get("daemon") is True, "opener thread must be daemon"
 
 
 # ---------------------------------------------------------------------------
