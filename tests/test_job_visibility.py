@@ -20,8 +20,8 @@ def _insert_job(
     conn.execute(
         """INSERT INTO jobs
             (dedup_key, title, company, location, sources, source_urls,
-             first_seen, last_seen, score, score_breakdown, pipeline_status)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+             first_seen, last_seen, score_breakdown, pipeline_status)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             dedup_key,
             "Data Scientist",
@@ -31,7 +31,6 @@ def _insert_job(
             '["https://example.com"]',
             first_seen,
             first_seen,
-            75.0,
             "{}",
             status,
         ),
@@ -164,8 +163,8 @@ class TestAutoDismiss:
         conn.execute(
             """INSERT INTO jobs
                 (dedup_key, title, company, location, sources, source_urls,
-                 first_seen, last_seen, score, score_breakdown, pipeline_status)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                 first_seen, last_seen, score_breakdown, pipeline_status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 "intern|job|remote",
                 "Data Science Intern",
@@ -175,7 +174,6 @@ class TestAutoDismiss:
                 '["https://example.com"]',
                 "2026-04-01",
                 "2026-04-01",
-                0,
                 "{}",
                 "discovered",
             ),
@@ -226,8 +224,8 @@ class TestAutoDismiss:
         conn.execute(
             """INSERT INTO jobs
                 (dedup_key, title, company, location, sources, source_urls,
-                 first_seen, last_seen, score, score_breakdown, pipeline_status)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                 first_seen, last_seen, score_breakdown, pipeline_status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 "intern|job|remote",
                 "Data Science Intern",
@@ -237,7 +235,6 @@ class TestAutoDismiss:
                 '["https://example.com"]',
                 "2026-04-01",
                 "2026-04-01",
-                0,
                 "{}",
                 "reviewing",
             ),

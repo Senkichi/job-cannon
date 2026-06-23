@@ -482,10 +482,10 @@ class TestOrchestratorOverride:
             jd_full = self._STUB_JD
         conn.execute(
             """INSERT INTO jobs (dedup_key, title, company, location, sources,
-               source_urls, source_id, first_seen, last_seen, score,
+               source_urls, source_id, first_seen, last_seen,
                score_breakdown, user_interest, jd_full,
                locations_structured, workplace_type, primary_country_code)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 dedup_key,
                 "Data Scientist",
@@ -496,7 +496,6 @@ class TestOrchestratorOverride:
                 "src-1",
                 "2026-01-01T00:00:00",
                 "2026-01-01T00:00:00",
-                0.0,
                 "{}",
                 "unreviewed",
                 jd_full,

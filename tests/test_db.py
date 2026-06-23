@@ -54,9 +54,9 @@ def _insert_job(
     conn.execute(
         """INSERT INTO jobs
             (dedup_key, title, company, location, sources, source_urls,
-             pipeline_status, first_seen, last_seen, score, score_breakdown,
+             pipeline_status, first_seen, last_seen, score_breakdown,
              user_interest, classification, sub_scores_json)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             dedup_key,
             title,
@@ -67,7 +67,6 @@ def _insert_job(
             pipeline_status,
             now,
             now,
-            7.0,
             "{}",
             "unreviewed",
             classification,

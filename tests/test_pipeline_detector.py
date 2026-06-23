@@ -28,9 +28,9 @@ def _insert_job(
         """INSERT OR IGNORE INTO jobs
            (dedup_key, title, company, location, sources, source_urls,
             source_id, salary_min, salary_max, description,
-            first_seen, last_seen, score, score_breakdown, user_interest,
+            first_seen, last_seen, score_breakdown, user_interest,
             pipeline_status)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             dedup_key,
             title,
@@ -44,7 +44,6 @@ def _insert_job(
             "Test job description",
             first_seen,
             last_seen,
-            8.5,
             "{}",
             "interested",
             pipeline_status,

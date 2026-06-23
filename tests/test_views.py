@@ -130,8 +130,8 @@ def app_with_jobs(tmp_db_path):
         """INSERT INTO jobs
             (dedup_key, title, company, location, sources, source_urls,
              source_id, salary_min, salary_max, description,
-             first_seen, last_seen, score, score_breakdown, pipeline_status)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+             first_seen, last_seen, score_breakdown, pipeline_status)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         [
             (
                 "acme|data-scientist|remote",
@@ -146,7 +146,6 @@ def app_with_jobs(tmp_db_path):
                 "Build ML models | Deploy data pipelines | Monitor model performance for Acme Corp",
                 "2026-03-01T10:00:00",
                 "2026-03-09T10:00:00",
-                8.5,
                 '{"skills": 0.9}',
                 "discovered",
             ),
@@ -163,7 +162,6 @@ def app_with_jobs(tmp_db_path):
                 "Lead data science for the entire platform.",
                 "2026-03-03T12:00:00",
                 "2026-03-09T12:00:00",
-                9.1,
                 '{"skills": 0.95}',
                 "reviewing",
             ),
@@ -792,9 +790,9 @@ def app_with_unscored_jobs(tmp_db_path):
         """INSERT INTO jobs
             (dedup_key, title, company, location, sources, source_urls,
              source_id, salary_min, salary_max, description, jd_full,
-             first_seen, last_seen, score, score_breakdown, pipeline_status,
+             first_seen, last_seen, score_breakdown, pipeline_status,
              classification, sub_scores_json)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         [
             (
                 "acme|data-scientist|remote",
@@ -811,7 +809,6 @@ def app_with_unscored_jobs(tmp_db_path):
                 "experimentation, and shipping. 5+ years experience required.",
                 "2026-03-01T10:00:00",
                 "2026-03-09T10:00:00",
-                8.5,
                 '{"skills": 0.9}',
                 "discovered",
                 None,
@@ -832,7 +829,6 @@ def app_with_unscored_jobs(tmp_db_path):
                 "partner cross-functionally with eng and product. 10+ years.",
                 "2026-03-03T12:00:00",
                 "2026-03-09T12:00:00",
-                9.1,
                 '{"skills": 0.95}',
                 "reviewing",
                 # v3 classification='apply' with sub_scores_json, replacing
@@ -1059,8 +1055,8 @@ def app_with_multi_source_job(tmp_db_path):
         """INSERT INTO jobs
             (dedup_key, title, company, location, sources, source_urls,
              source_id, salary_min, salary_max, description,
-             first_seen, last_seen, score, score_breakdown, pipeline_status)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+             first_seen, last_seen, score_breakdown, pipeline_status)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         [
             (
                 # Multi-source job: merged from linkedin + glassdoor
@@ -1076,7 +1072,6 @@ def app_with_multi_source_job(tmp_db_path):
                 "Build ML models at Acme Corp.",
                 "2026-03-01T10:00:00",
                 "2026-03-09T10:00:00",
-                8.5,
                 '{"skills": 0.9}',
                 "discovered",
             ),
@@ -1094,7 +1089,6 @@ def app_with_multi_source_job(tmp_db_path):
                 "Lead data science at Beta Inc.",
                 "2026-03-03T12:00:00",
                 "2026-03-09T12:00:00",
-                9.1,
                 '{"skills": 0.95}',
                 "reviewing",
             ),
@@ -1718,9 +1712,9 @@ def app_with_entity_job(tmp_db_path):
         """INSERT INTO jobs
             (dedup_key, title, company, location, sources, source_urls,
              source_id, salary_min, salary_max, description, jd_full,
-             first_seen, last_seen, score, score_breakdown, pipeline_status,
+             first_seen, last_seen, score_breakdown, pipeline_status,
              classification)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             "test|entity-job|remote",
             "Data Engineer",
@@ -1735,7 +1729,6 @@ def app_with_entity_job(tmp_db_path):
             "Full JD for AT&amp;T role.\nWe&#39;re looking for someone who can:\n- Build data pipelines\n- Work with cross-functional teams",
             "2026-03-01T10:00:00",
             "2026-03-09T10:00:00",
-            8.0,
             '{"skills": 0.8}',
             "discovered",
             "consider",  # v3 classification replacing legacy haiku_score=72
@@ -1787,9 +1780,9 @@ def app_with_html_tag_job(tmp_db_path):
         """INSERT INTO jobs
             (dedup_key, title, company, location, sources, source_urls,
              source_id, description, jd_full,
-             first_seen, last_seen, score, score_breakdown, pipeline_status,
+             first_seen, last_seen, score_breakdown, pipeline_status,
              classification)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             "test|html-tag-job|remote",
             "Software Engineer",
@@ -1802,7 +1795,6 @@ def app_with_html_tag_job(tmp_db_path):
             None,
             "2026-03-01T10:00:00",
             "2026-03-09T10:00:00",
-            7.5,
             '{"skills": 0.7}',
             "discovered",
             "consider",  # v3 classification replacing legacy haiku_score=65
@@ -2153,9 +2145,9 @@ def app_with_jd_full_job(tmp_db_path):
         """INSERT INTO jobs
             (dedup_key, title, company, location, sources, source_urls,
              source_id, salary_min, salary_max, description, jd_full,
-             first_seen, last_seen, score, score_breakdown, pipeline_status,
+             first_seen, last_seen, score_breakdown, pipeline_status,
              classification)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             "test|jd-full-job|remote",
             "ML Engineer",
@@ -2170,7 +2162,6 @@ def app_with_jd_full_job(tmp_db_path):
             "This is a full job description for testing.\nLine 2 of description.\nRequirements: Python, SQL",
             "2026-03-01T10:00:00",
             "2026-03-09T10:00:00",
-            8.0,
             '{"skills": 0.8}',
             "discovered",
             "consider",  # v3 classification replacing legacy haiku_score=72
@@ -2307,9 +2298,9 @@ def app_with_scored_jobs(tmp_db_path):
             """INSERT INTO jobs
                 (dedup_key, title, company, location, sources, source_urls,
                  source_id, salary_min, salary_max, description,
-                 first_seen, last_seen, score, score_breakdown, pipeline_status,
+                 first_seen, last_seen, score_breakdown, pipeline_status,
                  classification, sub_scores_json, fit_analysis)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 dk,
                 title,
@@ -2323,7 +2314,6 @@ def app_with_scored_jobs(tmp_db_path):
                 "desc",
                 "2026-04-27T10:00:00",
                 "2026-04-27T10:00:00",
-                0.0,
                 "{}",
                 "discovered",
                 cls,

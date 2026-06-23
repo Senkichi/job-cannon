@@ -106,10 +106,10 @@ class TestIdempotence:
         conn = sqlite3.connect(db_path)
         conn.execute(
             "INSERT INTO jobs (dedup_key, title, company, location, sources, "
-            "source_urls, first_seen, last_seen, score, score_breakdown, "
+            "source_urls, first_seen, last_seen, score_breakdown, "
             "pipeline_status, workplace_type, unresolved_reasons) "
             "VALUES ('stray_row', 'X', 'Y', 'Z', '[]', '[]', '2026-01-01', "
-            "'2026-01-01', 0, '{}', 'discovered', 'UNSPECIFIED', '[]')"
+            "'2026-01-01', '{}', 'discovered', 'UNSPECIFIED', '[]')"
         )
         conn.commit()
         conn.close()

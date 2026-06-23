@@ -54,8 +54,8 @@ def seeded_job(db_conn):
         """
         INSERT INTO jobs (dedup_key, title, company, location, sources,
                           source_urls, source_id, first_seen, last_seen,
-                          score, score_breakdown, user_interest, jd_full)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                          score_breakdown, user_interest, jd_full)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             "job-abc",
@@ -67,7 +67,6 @@ def seeded_job(db_conn):
             "src-1",
             "2026-01-01T00:00:00Z",
             "2026-01-01T00:00:00Z",
-            0.0,
             "{}",
             "unreviewed",
             "About the role you will design build and operate data and ML systems at scale "

@@ -789,7 +789,6 @@ def _score_and_persist(
         result = upsert_job(
             conn,
             parsed,
-            score=job.score,
             score_breakdown=job.score_breakdown,
         )
         if result.kind == "inserted":

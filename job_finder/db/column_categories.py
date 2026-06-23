@@ -80,7 +80,9 @@ COLUMN_CATEGORIES: dict[str, str] = {
     "employment_type": "system",  # NEW m106 — raw employmentType/typeOfEmployment/commitment
     "department": "system",  # NEW m106 — raw department/team string
     # ── scoring-owned ─────────────────────────────────────────────────────
-    "score": "scoring",
+    # m113 dropped the vestigial 0-100 ``score`` column (the v3.0 "Plan 4"
+    # single-tier tail) — intentionally absent here, like the m083-dropped
+    # columns noted below.
     "score_breakdown": "scoring",
     "scoring_provider": "scoring",
     "scoring_model": "scoring",

@@ -389,9 +389,9 @@ def migrated_db_with_jobs(_migrated_template_db):
         """INSERT INTO jobs
             (dedup_key, title, company, location, sources, source_urls,
              source_id, salary_min, salary_max, description,
-             first_seen, last_seen, score, score_breakdown, user_interest,
+             first_seen, last_seen, score_breakdown, user_interest,
              pipeline_status)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         [
             (
                 "stripe|senior data scientist|remote",
@@ -406,7 +406,6 @@ def migrated_db_with_jobs(_migrated_template_db):
                 "Build data products at Stripe.",
                 five_days_ago,
                 now,
-                8.5,
                 "{}",
                 "interested",
                 "reviewing",
@@ -424,7 +423,6 @@ def migrated_db_with_jobs(_migrated_template_db):
                 "Run experiments at BetterHelp.",
                 five_days_ago,
                 now,
-                7.2,
                 "{}",
                 "unreviewed",
                 "reviewing",
@@ -442,7 +440,6 @@ def migrated_db_with_jobs(_migrated_template_db):
                 "Lead data science at Thumbtack.",
                 five_days_ago,
                 now,
-                9.1,
                 "{}",
                 "interested",
                 "applied",

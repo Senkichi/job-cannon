@@ -221,7 +221,10 @@ def _run_batch_bg(db_path: str, session_id: int, config: dict) -> None:
                 # returns as 'apply'. COALESCE keeps legacy NULL-reasons rows
                 # scorable (clean); only genuinely-flagged rows are withheld.
                 "AND COALESCE(unresolved_reasons, '[]') = '[]' "
-                "ORDER BY score DESC"
+                # v3.0: the legacy heuristic ``score`` column was dropped in m113.
+                # These rows are unscored (classification IS NULL), so order the
+                # scoring queue freshest-first (served by idx_jobs_last_seen).
+                "ORDER BY last_seen DESC"
             ).fetchall()
 
             # BATCH-04: Pre-loop cancellation check (was per-job inside loop)
