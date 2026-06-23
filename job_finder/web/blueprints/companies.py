@@ -30,6 +30,7 @@ from flask import (
 )
 
 from job_finder.json_utils import utc_now_iso
+from job_finder.web._htmx import htmx_fragment
 from job_finder.web.ats_platforms import NON_SCANNABLE_PLATFORMS
 from job_finder.web.ats_prober import probe_single_company
 from job_finder.web.ats_scanner import probe_ats_slugs, run_ats_scan
@@ -161,6 +162,7 @@ def index():
 
 
 @companies_bp.route("/health", strict_slashes=False)
+@htmx_fragment("companies.index")
 def health_fragment():
     """HTMX fragment — the 5 pipeline-health stat cards.
 
@@ -174,6 +176,7 @@ def health_fragment():
 
 
 @companies_bp.route("/<int:company_id>/expand", strict_slashes=False)
+@htmx_fragment("companies.index")
 def expand(company_id):
     """HTMX: expand company row with jobs and scan history."""
     conn = get_db()
@@ -234,6 +237,7 @@ def expand(company_id):
 
 
 @companies_bp.route("/<int:company_id>/collapse", strict_slashes=False)
+@htmx_fragment("companies.index")
 def collapse(company_id):
     """HTMX: collapse company row back to compact view."""
     conn = get_db()
@@ -669,6 +673,7 @@ _ATS_SCAN_HX_TRIGGER = {"dashboard-refresh": None, "jobs-updated": None}
 
 
 @companies_bp.route("/scan/status/<int:session_id>", strict_slashes=False)
+@htmx_fragment("companies.index")
 def scan_status(session_id):
     """Poll route for ATS scan progress (mirrors batch_scoring.batch_score_status)."""
     return render_polling_status(
@@ -935,6 +940,7 @@ def research(company_id):
     "/<int:company_id>/research/status/<int:research_id>",
     strict_slashes=False,
 )
+@htmx_fragment("companies.index")
 def research_status(company_id, research_id):
     """Poll research generation status. Returns final section or keeps polling."""
     conn = get_db()

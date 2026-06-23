@@ -2,7 +2,7 @@
 
 import logging
 
-from flask import Blueprint, current_app, redirect, render_template, request, url_for
+from flask import Blueprint, current_app, render_template
 
 from job_finder.config import DEFAULT_DAILY_BUDGET_USD
 from job_finder.db import (
@@ -13,6 +13,7 @@ from job_finder.db import (
     get_recent_pipeline_events,
     get_recent_runs,
 )
+from job_finder.web._htmx import htmx_fragment
 from job_finder.web.autoheal.health_monitor import degraded_sources
 from job_finder.web.claude_client import get_cost_stats
 from job_finder.web.db_helpers import get_db
@@ -294,6 +295,7 @@ def _get_inbox_banner(config: dict, conn):
 
 
 @dashboard_bp.route("/stats", strict_slashes=False)
+@htmx_fragment("dashboard.index")
 def stats_fragment():
     """HTMX fragment — returns refreshed stat cards.
 
@@ -306,6 +308,7 @@ def stats_fragment():
 
 
 @dashboard_bp.route("/history", strict_slashes=False)
+@htmx_fragment("dashboard.index")
 def history_fragment():
     """HTMX fragment — pipeline summary + the activity/history tables.
 
@@ -326,6 +329,7 @@ def history_fragment():
 
 
 @dashboard_bp.route("/review-queue", strict_slashes=False)
+@htmx_fragment("dashboard.index")
 def review_queue_fragment():
     """HTMX fragment — pending-detection cards + an OOB header-badge refresh.
 
@@ -348,6 +352,7 @@ def review_queue_fragment():
 
 
 @dashboard_bp.route("/quick-actions", strict_slashes=False)
+@htmx_fragment("dashboard.index")
 def quick_actions_fragment():
     """HTMX fragment — returns refreshed quick actions with active session detection.
 
@@ -361,10 +366,9 @@ def quick_actions_fragment():
 
 
 @dashboard_bp.route("/cost-detail", strict_slashes=False)
+@htmx_fragment("dashboard.index")
 def cost_detail():
     """HTMX partial — returns cost breakdown panel."""
-    if not request.headers.get("HX-Request"):
-        return redirect(url_for("dashboard.index"))
     conn = get_db()
     config = current_app.config.get("JF_CONFIG", {})
     budget_cap = config.get("scoring", {}).get("daily_budget_usd", DEFAULT_DAILY_BUDGET_USD)
@@ -378,14 +382,13 @@ def cost_detail():
 
 
 @dashboard_bp.route("/degraded-sources", strict_slashes=False)
+@htmx_fragment("dashboard.index")
 def degraded_sources_fragment():
     """HTMX fragment — parser-health widget showing currently-degraded sources.
 
     Non-HTMX direct browser hits redirect to the dashboard index so the widget
     is never rendered as a bare standalone page.
     """
-    if not request.headers.get("HX-Request"):
-        return redirect(url_for("dashboard.index"))
     conn = get_db()
     return render_template(
         "dashboard/_degraded_sources.html",

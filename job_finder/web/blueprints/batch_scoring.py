@@ -12,6 +12,7 @@ from flask import Blueprint, current_app, render_template
 
 from job_finder.db import JOBS_ALL_COLUMNS, update_pipeline_status
 from job_finder.json_utils import utc_now_iso
+from job_finder.web._htmx import htmx_fragment
 from job_finder.web.db_helpers import (
     PollingSessionConfig,
     render_polling_status,
@@ -109,6 +110,7 @@ _BATCH_HX_TRIGGER = {"dashboard-refresh": None, "jobs-updated": None}
 
 
 @batch_scoring_bp.route("/batch-score/status/<int:session_id>", strict_slashes=False)
+@htmx_fragment("dashboard.index")
 def batch_score_status(session_id):
     """Poll route for batch scoring progress (delegates to ``render_polling_status``).
 
