@@ -324,3 +324,76 @@ def test_default_server_debug_is_false():
         "DEFAULT_SERVER_DEBUG must be False for public release. "
         "The Werkzeug interactive debugger must NOT be on by default."
     )
+
+
+# ---------------------------------------------------------------------------
+# 6. Template auto-reload auto-enables in a dev checkout, off in shipped builds
+# ---------------------------------------------------------------------------
+
+
+def test_template_auto_reload_off_in_shipped_build(monkeypatch):
+    """Not a dev checkout -> templates do NOT auto-reload.
+
+    Keeps a packaged/pipx build byte-identical to today: no per-request
+    template stat for users who never edit the .html files.
+    """
+    from job_finder import web
+
+    monkeypatch.setattr(web, "_is_dev_checkout", lambda: False)
+    app = web.create_app()
+
+    assert app.config.get("TEMPLATES_AUTO_RELOAD") is not True
+
+
+def test_template_auto_reload_on_in_dev_checkout(monkeypatch):
+    """Dev checkout -> templates re-read from disk every request.
+
+    Must NOT be coupled to `debug` (which also arms the Werkzeug interactive
+    debugger forbidden by test_default_server_debug_is_false) -- assert the
+    detection alone flips it, with debug untouched.
+    """
+    from job_finder import web
+
+    monkeypatch.setattr(web, "_is_dev_checkout", lambda: True)
+    app = web.create_app()
+
+    assert app.config["TEMPLATES_AUTO_RELOAD"] is True
+    assert app.debug is False
+
+
+def test_is_dev_checkout_true_from_source_tree(monkeypatch):
+    """Zero-friction default: running from this checkout (a .git entry sits at
+    the repo root, not frozen, no override) detects dev mode on its own."""
+    import sys
+
+    from job_finder.web import _is_dev_checkout
+
+    monkeypatch.delenv("JOB_CANNON_DEV", raising=False)
+    monkeypatch.setattr(sys, "frozen", False, raising=False)
+
+    assert _is_dev_checkout() is True
+
+
+def test_is_dev_checkout_false_when_frozen(monkeypatch):
+    """A PyInstaller build (sys.frozen) is never a dev checkout, regardless of
+    the .git probe -- unless the explicit override is set."""
+    import sys
+
+    from job_finder.web import _is_dev_checkout
+
+    monkeypatch.delenv("JOB_CANNON_DEV", raising=False)
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+
+    assert _is_dev_checkout() is False
+
+
+def test_is_dev_checkout_env_override_wins(monkeypatch):
+    """JOB_CANNON_DEV=1 forces dev mode on even in a frozen build."""
+    import sys
+
+    from job_finder.web import _is_dev_checkout
+
+    monkeypatch.setenv("JOB_CANNON_DEV", "1")
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+
+    assert _is_dev_checkout() is True
