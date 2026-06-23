@@ -655,6 +655,71 @@ class TestQueryAtsApiWarning:
         assert "ATS API query failed" in warnings[0].message
 
 
+class TestQueryAtsApiRegistry:
+    """query_ats_api() must dispatch via the SCANNERS_BY_NAME registry, not a
+    hardcoded lever/greenhouse/ashby if/elif (the half-wired bug: 13 of 16
+    registered platforms were silently never enriched)."""
+
+    def _company_row(self, platform: str) -> dict:
+        return {"ats_platform": platform, "ats_slug": "acme", "ats_probe_status": "hit"}
+
+    def test_dispatches_a_non_original_platform(self):
+        """A SmartRecruiters company (not in the old if/elif) now scans via the registry."""
+        from job_finder.web.enrichment_tiers import query_ats_api
+
+        conn = MagicMock()
+        conn.execute.return_value.fetchone.return_value = self._company_row("smartrecruiters")
+        job_row = {"title": "Senior Data Scientist", "company_id": 7, "location": "Remote"}
+        posting = {
+            "title": "Senior Data Scientist",
+            "description": "JD body",
+            "source_url": "https://x",
+        }
+
+        with (
+            patch(
+                "job_finder.web.ats_platforms.run_platform_scan", return_value=[posting]
+            ) as mock_scan,
+            patch(
+                "job_finder.web.enrichment_tiers.resolve_primary_posting",
+                return_value=(posting, "https://x", "high"),
+            ),
+        ):
+            result = query_ats_api(job_row, conn=conn, config={})
+
+        assert mock_scan.called, "registry dispatch must reach smartrecruiters"
+        assert mock_scan.call_args.args[0].name == "smartrecruiters"
+        assert result.get("direct_url") == "https://x"
+
+    def test_unregistered_platform_returns_empty(self):
+        """A Playwright-only / unknown platform (iCIMS) is absent from the registry → {}."""
+        from job_finder.web.enrichment_tiers import query_ats_api
+
+        conn = MagicMock()
+        conn.execute.return_value.fetchone.return_value = self._company_row("icims")
+        job_row = {"title": "Data Scientist", "company_id": 9, "location": "Remote"}
+
+        with patch("job_finder.web.ats_platforms.run_platform_scan") as mock_scan:
+            result = query_ats_api(job_row, conn=conn, config={})
+
+        assert result == {}
+        assert not mock_scan.called
+
+    def test_non_scannable_platform_returns_empty(self):
+        """A registered-but-non-scannable platform (jobvite) short-circuits to {}."""
+        from job_finder.web.enrichment_tiers import query_ats_api
+
+        conn = MagicMock()
+        conn.execute.return_value.fetchone.return_value = self._company_row("jobvite")
+        job_row = {"title": "Data Scientist", "company_id": 11, "location": "Remote"}
+
+        with patch("job_finder.web.ats_platforms.run_platform_scan") as mock_scan:
+            result = query_ats_api(job_row, conn=conn, config={})
+
+        assert result == {}
+        assert not mock_scan.called
+
+
 class TestScrapeCareeersWarning:
     """scrape_careers() must log at WARNING (not debug) when an exception occurs."""
 

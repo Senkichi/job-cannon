@@ -35,8 +35,9 @@ def test_query_ats_api_returns_direct_url(tmp_path):
             "description": "x" * 300,
         },
     ]
-    # query_ats_api lazily imports scan_lever from job_finder.web.ats_scanner.
-    with patch("job_finder.web.ats_scanner.scan_lever", return_value=fake_postings):
+    # query_ats_api dispatches via the SCANNERS_BY_NAME registry, so patch the
+    # registry's run_platform_scan seam (not the per-platform scan_* wrappers).
+    with patch("job_finder.web.ats_platforms.run_platform_scan", return_value=fake_postings):
         result = enrichment_tiers.query_ats_api(
             {"company_id": 1, "title": "Senior Data Scientist"}, conn, {}
         )
@@ -58,7 +59,7 @@ def test_query_ats_api_no_postings_omits_direct_url(tmp_path):
     )
     conn.commit()
 
-    with patch("job_finder.web.ats_scanner.scan_lever", return_value=[]):
+    with patch("job_finder.web.ats_platforms.run_platform_scan", return_value=[]):
         result = enrichment_tiers.query_ats_api(
             {"company_id": 1, "title": "Senior Data Scientist"}, conn, {}
         )
@@ -95,7 +96,7 @@ def test_query_ats_api_ambiguous_match_yields_link_only(tmp_path):
             "salary_min": 90000,
         },
     ]
-    with patch("job_finder.web.ats_scanner.scan_lever", return_value=fake_postings):
+    with patch("job_finder.web.ats_platforms.run_platform_scan", return_value=fake_postings):
         result = enrichment_tiers.query_ats_api(
             {"company_id": 1, "title": "Senior Data Scientist"}, conn, {}
         )
@@ -131,7 +132,7 @@ def test_query_ats_api_strict_match_includes_primary_posting(tmp_path):
             "salary_max": 190000,
         },
     ]
-    with patch("job_finder.web.ats_scanner.scan_lever", return_value=fake_postings):
+    with patch("job_finder.web.ats_platforms.run_platform_scan", return_value=fake_postings):
         result = enrichment_tiers.query_ats_api(
             {"company_id": 1, "title": "Senior Data Scientist"}, conn, {}
         )
@@ -171,7 +172,7 @@ def test_query_ats_api_location_disambiguates_duplicate_titles(tmp_path):
             "description": "LON " + "x" * 300,
         },
     ]
-    with patch("job_finder.web.ats_scanner.scan_lever", return_value=fake_postings):
+    with patch("job_finder.web.ats_platforms.run_platform_scan", return_value=fake_postings):
         result = enrichment_tiers.query_ats_api(
             {"company_id": 1, "title": "Senior Data Scientist", "location": "New York, NY"},
             conn,

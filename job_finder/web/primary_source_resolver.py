@@ -74,6 +74,7 @@ from typing import Any
 
 from job_finder.db._direct_link import set_direct_url, stamp_direct_url_checks
 from job_finder.json_utils import utc_now_iso
+from job_finder.web.db_helpers import standalone_connection
 from job_finder.web.direct_link import (
     _posting_link,
     promote_existing_direct_url,
@@ -288,10 +289,12 @@ def resolve_primary_sources(
 
 
 def run_primary_source_resolution(db_path: str, config: dict) -> dict:
-    """Scheduler entry point — own connection (APScheduler thread safety)."""
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    try:
+    """Scheduler entry point — own connection (APScheduler thread safety).
+
+    Uses ``standalone_connection`` so this 5:45 AM job gets WAL +
+    busy_timeout=30000 and waits (rather than raising "database is locked")
+    when it contends with the 5:00 careers_crawl / company_linkage jobs or
+    Flask HTMX polling.
+    """
+    with standalone_connection(db_path) as conn:
         return resolve_primary_sources(conn, config)
-    finally:
-        conn.close()
