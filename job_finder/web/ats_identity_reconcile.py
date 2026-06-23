@@ -127,6 +127,7 @@ def _verify_and_write_promotion(
     base_meta: dict[str, Any],
     unique_url_count: int | None,
     job_count: int | None,
+    reenable_scan: bool = False,
 ) -> dict[str, Any]:
     """Single ATS promotion writer: live-verify → collision-guard → UPDATE.
 
@@ -198,6 +199,7 @@ def _verify_and_write_promotion(
                    SET ats_platform = ?,
                        ats_slug = ?,
                        ats_probe_status = 'hit',
+                       scan_enabled = CASE WHEN ? = 1 THEN 1 ELSE scan_enabled END,
                        ats_probe_attempted_at = ?,
                        ats_evidence_trigger = ?,
                        ats_evidence_extractor_version = ?,
@@ -209,6 +211,7 @@ def _verify_and_write_promotion(
             (
                 platform,
                 slug,
+                1 if reenable_scan else 0,
                 now,
                 reason[:240] if isinstance(reason, str) else "",
                 ATS_EXTRACTOR_VERSION,
@@ -426,6 +429,7 @@ def promote_from_careers_link(
     *,
     page_url: str,
     config: dict | None = None,
+    reenable_scan: bool = False,
 ) -> dict[str, Any]:
     """Promote a custom-site company to an existing scanner from a careers link.
 
@@ -437,6 +441,13 @@ def promote_from_careers_link(
     collision guard, and flip ``ats_probe_status`` to ``'hit'`` with an
     ``ats_evidence_trigger`` of ``careers_link:<page_url>``. Idempotent: skips
     when the company is already a ``hit``.
+
+    ``reenable_scan``: when True, a company whose ``scan_enabled`` was cleared
+    (e.g. a ``speculative_exhausted`` custom-miss frozen by the batch reprobe in
+    ``ats_reprobe``) is NOT skipped — instead the live-verified promotion ALSO
+    re-enables scanning, atomically and only on verify success. A confirmed live
+    ATS board is fresh positive evidence that overrides the earlier give-up.
+    Default False preserves the careers-crawler caller's behavior exactly.
     """
     st = identity_reconcile_settings(config)
     if not st["enabled"]:
@@ -454,7 +465,7 @@ def promote_from_careers_link(
     if company.get("ats_probe_status") == "hit":
         return {"outcome": "skipped_already_hit", "company_id": company_id}
 
-    if not company.get("scan_enabled"):
+    if not company.get("scan_enabled") and not reenable_scan:
         return {"outcome": "skipped_scan_disabled", "company_id": company_id}
 
     base_meta = {
@@ -474,6 +485,7 @@ def promote_from_careers_link(
         base_meta=base_meta,
         unique_url_count=None,
         job_count=None,
+        reenable_scan=reenable_scan,
     )
 
 

@@ -10,9 +10,10 @@ inline-JS string. This module harvests those outbound links from an
 then promotes the company to the matching existing scanner.
 
 This is **link discovery**, not a new extractor: no new scanner, no LLM, no
-network call. Pure functions over an HTML string. The five target scanners are
-the only platforms eligible for promotion — non-target URLs (recruitee, breezy,
-etc.) are filtered out and left as custom sites.
+network call. Pure functions over an HTML string. Only platforms that own a
+working scanner are eligible for promotion (``_TARGET_PLATFORMS``, derived from
+the scanner registry); a URL pointing at a non-scannable platform (e.g. the
+jobvite stub) is dropped and the company left as a custom site.
 """
 
 from __future__ import annotations
@@ -22,10 +23,19 @@ import re
 from bs4 import BeautifulSoup
 
 from job_finder.web.ats_detection import extract_ats_from_url_best
+from job_finder.web.ats_platforms import NON_SCANNABLE_PLATFORMS, SCANNERS_BY_NAME
 
-# Only these five platforms own a real scanner that promotion can hand off to.
-# A URL matching any other ATS (recruitee/breezy/...) is intentionally dropped.
-_TARGET_PLATFORMS = frozenset({"greenhouse", "lever", "ashby", "workday", "smartrecruiters"})
+# Platforms eligible for promotion = every platform that owns a working scanner,
+# DERIVED from the scanner registry so this set can never drift behind a newly
+# added scanner. The old hardcoded {greenhouse,lever,ashby,workday,smartrecruiters}
+# silently dropped six already-supported, already-detected platforms
+# (paylocity/workable/rippling/bamboohr/breezy/jazzhr) — their embeds were
+# classified, then thrown away. ``NON_SCANNABLE_PLATFORMS`` (jobvite, a stub that
+# returns no jobs) is excluded; iCIMS is scannable via the Playwright path but is
+# registered in a separate registry, so it is added explicitly. A contract test
+# (test_ats_link_discovery) pins this set against the live registry.
+_PLAYWRIGHT_SCANNABLE = frozenset({"icims"})
+_TARGET_PLATFORMS = (frozenset(SCANNERS_BY_NAME) - NON_SCANNABLE_PLATFORMS) | _PLAYWRIGHT_SCANNABLE
 
 # Permissive absolute-URL matcher for inline-JS / raw-text scraping. Stops at
 # whitespace and the common string/markup delimiters so a URL embedded in a
@@ -67,7 +77,7 @@ def discover_ats_links_from_html(html: str, page_url: str) -> list[tuple[str, st
 
     Pulls candidate URLs from ``<a href>``, ``<iframe src>``, and inline-JS /
     raw-text matches, classifies each via ``extract_ats_from_url_best``, and
-    keeps only the five target scanners. The result is deduped on
+    keeps only scanner-backed target platforms. The result is deduped on
     ``(platform, slug)`` (highest specificity wins) and sorted by specificity
     descending so the canonical/API-shaped trace ranks above the board-shaped
     one. ``page_url`` is accepted for signature symmetry with the caller and

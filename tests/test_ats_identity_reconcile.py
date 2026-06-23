@@ -298,3 +298,99 @@ class TestReconcileCompanyAts:
         assert racer_row["ats_platform"] == "greenhouse"
         assert racer_row["ats_slug"] == "acmecorp"
         real_conn.close()
+
+
+def _seed_scan_disabled_miss(db_path: str) -> int:
+    """Insert a frozen custom-miss company (scan_enabled=0) with a careers_url."""
+    from job_finder.web.db_migrate import run_migrations
+
+    run_migrations(db_path)
+    now = datetime.now().isoformat()
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        """INSERT INTO companies
+              (name, name_raw, careers_url, ats_probe_status, miss_reason,
+               scan_enabled, created_at, updated_at)
+           VALUES ('frozenco', 'FrozenCo', 'https://frozenco.com/careers',
+                   'miss', 'speculative_exhausted', 0, ?, ?)""",
+        (now, now),
+    )
+    cid = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+    conn.commit()
+    conn.close()
+    return int(cid)
+
+
+class TestPromoteFromCareersLinkReenableScan:
+    """The batch reprobe re-promotes frozen (scan_enabled=0) custom-miss companies
+    when their careers page now embeds a live ATS board. ``reenable_scan`` lets a
+    live-verified promotion override the earlier give-up — atomically, and only on
+    verify success."""
+
+    @patch("job_finder.web.ats_identity_reconcile._verify_live", return_value=True)
+    def test_reenable_scan_promotes_and_reenables(self, _verify, tmp_db_path):
+        from job_finder.web.ats_identity_reconcile import promote_from_careers_link
+
+        cid = _seed_scan_disabled_miss(tmp_db_path)
+        conn = sqlite3.connect(tmp_db_path)
+        conn.row_factory = sqlite3.Row
+        res = promote_from_careers_link(
+            conn,
+            cid,
+            "greenhouse",
+            "frozenco",
+            page_url="https://frozenco.com/careers",
+            config={"ats": {"identity_reconcile": {"enabled": True, "shadow": False}}},
+            reenable_scan=True,
+        )
+        assert res["outcome"] == "promoted"
+        row = dict(conn.execute("SELECT * FROM companies WHERE id = ?", (cid,)).fetchone())
+        conn.close()
+        assert row["ats_probe_status"] == "hit"
+        assert row["ats_platform"] == "greenhouse"
+        assert row["ats_slug"] == "frozenco"
+        assert row["scan_enabled"] == 1  # re-enabled atomically with the promotion
+
+    def test_default_still_skips_scan_disabled(self, tmp_db_path):
+        from job_finder.web.ats_identity_reconcile import promote_from_careers_link
+
+        cid = _seed_scan_disabled_miss(tmp_db_path)
+        conn = sqlite3.connect(tmp_db_path)
+        conn.row_factory = sqlite3.Row
+        res = promote_from_careers_link(
+            conn,
+            cid,
+            "greenhouse",
+            "frozenco",
+            page_url="https://frozenco.com/careers",
+            config={"ats": {"identity_reconcile": {"enabled": True, "shadow": False}}},
+        )
+        row = dict(conn.execute("SELECT * FROM companies WHERE id = ?", (cid,)).fetchone())
+        conn.close()
+        # Without reenable_scan the existing contract is unchanged: frozen → skip.
+        assert res["outcome"] == "skipped_scan_disabled"
+        assert row["ats_probe_status"] == "miss"
+        assert row["scan_enabled"] == 0
+
+    @patch("job_finder.web.ats_identity_reconcile._verify_live", return_value=False)
+    def test_reenable_scan_no_write_when_verify_fails(self, _verify, tmp_db_path):
+        from job_finder.web.ats_identity_reconcile import promote_from_careers_link
+
+        cid = _seed_scan_disabled_miss(tmp_db_path)
+        conn = sqlite3.connect(tmp_db_path)
+        conn.row_factory = sqlite3.Row
+        res = promote_from_careers_link(
+            conn,
+            cid,
+            "greenhouse",
+            "frozenco",
+            page_url="https://frozenco.com/careers",
+            config={"ats": {"identity_reconcile": {"enabled": True, "shadow": False}}},
+            reenable_scan=True,
+        )
+        row = dict(conn.execute("SELECT * FROM companies WHERE id = ?", (cid,)).fetchone())
+        conn.close()
+        # A dead board must not flip status OR re-enable scan.
+        assert res["outcome"] == "verify_failed"
+        assert row["ats_probe_status"] == "miss"
+        assert row["scan_enabled"] == 0
