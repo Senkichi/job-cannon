@@ -8,6 +8,7 @@ Tests cover:
 - Base template has dark mode class
 """
 
+import json
 from datetime import UTC, datetime
 
 import pytest
@@ -551,18 +552,43 @@ class TestJobBoardRoutes:
 class TestJobBoardReactivity:
     """Tests for HTMX reactivity: HX-Trigger headers on scoring/archive routes."""
 
-    def test_update_status_archived_suppresses_hx_trigger(self, jobs_client):
-        """POST /jobs/{key}/status with archived status does NOT set HX-Trigger.
+    def test_update_status_archived_via_button_suppresses_jobs_updated(self, jobs_client):
+        """Archive *button* path (archive_via_button sentinel) must NOT emit
+        jobs-updated.
 
-        The jobs-updated trigger is suppressed when archiving to prevent the main
-        tbody from refetching, which would kill the in-flight archive fadeout animation.
+        The button removes the row client-side via archiveRow(this)'s fadeout; a
+        tbody refetch (jobs-updated) would kill the in-flight animation. It still
+        emits archived-section-changed so the Archived section reveals on 0->1.
+        """
+        response = jobs_client.post(
+            "/jobs/acme%7Cdata-scientist%7Cremote/status",
+            data={"pipeline_status": "archived", "archive_via_button": "1"},
+        )
+        assert response.status_code == 200
+        trigger = response.headers.get("HX-Trigger-After-Settle")
+        assert trigger is not None
+        events = json.loads(trigger)
+        assert "jobs-updated" not in events
+        assert "archived-section-changed" in events
+
+    def test_update_status_archived_via_dropdown_emits_jobs_updated(self, jobs_client):
+        """Archive via the inline status *dropdown* (no sentinel) MUST emit
+        jobs-updated so the row is removed from the active board (bug #10).
+
+        The dropdown has no client-side row remover, so without this trigger the
+        archived row stayed on the active board until a manual reload.
         """
         response = jobs_client.post(
             "/jobs/acme%7Cdata-scientist%7Cremote/status",
             data={"pipeline_status": "archived"},
         )
         assert response.status_code == 200
-        assert "HX-Trigger" not in response.headers
+        trigger = response.headers.get("HX-Trigger-After-Settle")
+        assert trigger is not None
+        events = json.loads(trigger)
+        assert events.get("jobs-updated") is True
+        # Same path also reveals the Archived section on the 0->1 transition.
+        assert "archived-section-changed" in events
 
     def test_archive_response_includes_oob_counter(self, jobs_client):
         """POST /jobs/{key}/status with archived includes OOB archived-count span."""
@@ -612,6 +638,25 @@ class TestJobBoardReactivity:
         html = response.data.decode()
         assert 'hx-target="#status-cell-' in html
         assert 'hx-disable-elt="this"' in html
+
+    def test_archive_button_sends_via_button_sentinel(self, jobs_client):
+        """Archive button posts archive_via_button so the server suppresses
+        jobs-updated (it removes the row via archiveRow's fadeout instead)."""
+        response = jobs_client.get(
+            "/jobs/acme%7Cdata-scientist%7Cremote/expand",
+            headers={"HX-Request": "true"},
+        )
+        assert response.status_code == 200
+        html = response.data.decode()
+        assert "archive_via_button" in html
+
+    def test_index_listens_for_archived_section_changed(self, jobs_client):
+        """The board wires a listener that reveals #archived-section on count
+        change (bug #11: first-ever archive flips the section from hidden)."""
+        response = jobs_client.get("/jobs")
+        assert response.status_code == 200
+        html = response.data.decode()
+        assert "archived-section-changed" in html
 
 
 # ---------------------------------------------------------------------------
@@ -702,14 +747,43 @@ class TestArchivedSection:
         assert "archived-count" in html
         assert ">1<" in html  # count badge value
 
-    def test_index_hides_archived_section_when_none_archived(self, app_with_jobs):
-        """GET /jobs does NOT contain archived-section when 0 archived jobs."""
+    def test_index_renders_hidden_archived_section_when_none_archived(self, app_with_jobs):
+        """GET /jobs ALWAYS renders #archived-section (hidden when 0 archived).
+
+        Bug #11: the #archived-count OOB target must exist even at 0 so archiving
+        the first-ever job (0->1) can reveal the section without a full reload.
+        The section is present but carries the `hidden` class while empty.
+        """
         # app_with_jobs fixture has 2 active jobs, no archived jobs
         client = app_with_jobs.test_client()
         response = client.get("/jobs")
         assert response.status_code == 200
         html = response.data.decode()
-        assert "archived-section" not in html
+        # OOB target id must exist even with 0 archived jobs.
+        assert 'id="archived-section"' in html
+        assert 'id="archived-count"' in html
+        # And it must start hidden so the empty state isn't visible.
+        marker = 'id="archived-section"'
+        tag_start = html.index(marker)
+        tag_open = html.rindex("<div", 0, tag_start)
+        tag_close = html.index(">", tag_start)
+        section_tag = html[tag_open:tag_close]
+        assert "hidden" in section_tag, f"empty archived section must be hidden: {section_tag!r}"
+
+    def test_index_archived_section_not_hidden_when_archived_exist(self, app_with_archived_job):
+        """When archived jobs exist, #archived-section is rendered WITHOUT `hidden`."""
+        client = app_with_archived_job.test_client()
+        response = client.get("/jobs")
+        assert response.status_code == 200
+        html = response.data.decode()
+        marker = 'id="archived-section"'
+        tag_start = html.index(marker)
+        tag_open = html.rindex("<div", 0, tag_start)
+        tag_close = html.index(">", tag_start)
+        section_tag = html[tag_open:tag_close]
+        assert "hidden" not in section_tag, (
+            f"non-empty archived section must be visible: {section_tag!r}"
+        )
 
     def test_archived_section_has_lazy_load_js(self, app_with_archived_job):
         """GET /jobs contains toggleArchived function and dataset.loaded lazy-load guard."""

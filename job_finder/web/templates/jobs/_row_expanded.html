@@ -195,7 +195,11 @@
               <button type="button"
                       aria-label="Archive this job"
                       hx-post="{{ url_for('jobs.update_status', dedup_key=job.dedup_key) }}"
-                      hx-vals='{"pipeline_status": "archived"}'
+                      {# archive_via_button: opt OUT of the server-side jobs-updated
+                         trigger — this path removes the row via archiveRow(this)'s
+                         fadeout; a tbody refetch would kill the animation. The inline
+                         status dropdown omits this sentinel and gets jobs-updated. #}
+                      hx-vals='{"pipeline_status": "archived", "archive_via_button": "1"}'
                       hx-target="#status-cell-{{ jd_key_safe }}" hx-swap="innerHTML"
                       hx-confirm="Archive this job?" hx-disable-elt="this"
                       hx-on::after-request="archiveRow(this)"
