@@ -20,6 +20,7 @@ import requests
 from jsonschema import ValidationError, validate
 
 # DEFAULT_MODEL_* imports removed in Phase 39 (replaced by _PROVIDER_DEFAULTS)
+from job_finder.constants import SUB_SCORE_KEYS
 from job_finder.json_utils import local_day_utc_window
 from job_finder.web.claude_client import (  # noqa: F401 — record_cost + BudgetExceededError re-exported for callers/tests
     FREE_PROVIDERS,
@@ -480,16 +481,9 @@ def _sanitized_result(result: ModelResult, schema: dict | None, provider_name: s
 # Issue #227 quality floor: the six ordinal axis keys that define a scoring
 # result. The degenerate predicate only fires when ALL six are present (i.e.
 # this is a scoring-tier result, not a quick/triage/extraction payload).
-_SCORING_AXIS_KEYS: frozenset[str] = frozenset(
-    {
-        "title_fit",
-        "location_fit",
-        "comp_fit",
-        "domain_match",
-        "seniority_match",
-        "skills_match",
-    }
-)
+# Derived from the canonical job_finder.constants.SUB_SCORE_KEYS (membership
+# test only — order is irrelevant here, so a frozenset view is taken).
+_SCORING_AXIS_KEYS: frozenset[str] = frozenset(SUB_SCORE_KEYS)
 
 # The four rationale arrays a genuine scoring result populates. A degenerate
 # result leaves every one of them empty (post-_sanitize_output backfill).

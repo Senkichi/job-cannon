@@ -12,18 +12,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from job_finder.constants import SUB_SCORE_KEYS as _SUB_SCORE_KEYS
 from job_finder.enrichment_states import LOW_SIGNAL_TERMINAL
 
 # Canonical sub-score key order (matches CONTEXT D-05 and the v3 scoring prompt's
 # JSON schema). Used for JSON serialization stability and for derive_classification.
-_SUB_SCORE_KEYS: tuple[str, ...] = (
-    "title_fit",
-    "location_fit",
-    "comp_fit",
-    "domain_match",
-    "seniority_match",
-    "skills_match",
-)
+# Single source of truth is job_finder.constants.SUB_SCORE_KEYS; this private
+# alias preserves the historical `from ._classification import _SUB_SCORE_KEYS`
+# import surface (db/__init__.py re-export, _assessment_writer).
 
 # Tiers from which no further automatic enrichment will run AND the JD is genuinely
 # unobtainable. A job at one of these tiers with a short JD has no signal ->

@@ -25,6 +25,7 @@ import logging
 import sqlite3
 from dataclasses import dataclass
 
+from job_finder.constants import SUB_SCORE_KEYS
 from job_finder.db import JobAssessment
 from job_finder.db._classification import _TERMINAL_ENRICHMENT_TIERS
 from job_finder.web.model_provider import call_model
@@ -40,15 +41,9 @@ __all__ = ["JOB_ASSESSMENT_SCHEMA", "ScoringResult", "score_job"]
 
 # Canonical sub-score keys (matches v3 prompt schema + CONTEXT D-05).
 # The LLM emits these at the TOP LEVEL of the response alongside `rationale`
-# and `legitimacy_note` — NOT nested under "sub_scores".
-_SUB_SCORE_KEYS: tuple[str, ...] = (
-    "title_fit",
-    "location_fit",
-    "comp_fit",
-    "domain_match",
-    "seniority_match",
-    "skills_match",
-)
+# and `legitimacy_note` — NOT nested under "sub_scores". Single source of truth
+# is job_finder.constants.SUB_SCORE_KEYS; aliased here to keep the local name.
+_SUB_SCORE_KEYS: tuple[str, ...] = SUB_SCORE_KEYS
 
 # Safety-net ceiling on JD size sent to the scorer. The cleaned jd_full is
 # normally sent WHOLE — real JD prose is short (~6k chars; p95 of naively

@@ -36,6 +36,7 @@ import uuid
 from collections import defaultdict
 from pathlib import Path
 
+from job_finder.constants import CLASSIFICATIONS, SUB_SCORE_KEYS
 from job_finder.eval import metrics
 from job_finder.json_utils import utc_now_iso
 
@@ -46,16 +47,10 @@ logger = logging.getLogger(__name__)
 # encounter a metrics row at an old version know the comparison is stale.
 GOLD_SET_VERSION = "v1-40-jobs"
 
-AXES: tuple[str, ...] = (
-    "title_fit",
-    "location_fit",
-    "comp_fit",
-    "domain_match",
-    "seniority_match",
-    "skills_match",
-)
-
-CLASSES: tuple[str, ...] = ("apply", "consider", "skip", "reject", "low_signal")
+# Aliases onto the canonical vocabularies (job_finder.constants). Kept as
+# module-level names because reports/tests reference harness.AXES / harness.CLASSES.
+AXES: tuple[str, ...] = SUB_SCORE_KEYS
+CLASSES: tuple[str, ...] = CLASSIFICATIONS
 
 
 # ---------------------------------------------------------------------------
