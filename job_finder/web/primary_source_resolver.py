@@ -203,8 +203,9 @@ def resolve_primary_sources(
 
     # Deferred import: the platform package pulls in the scanner modules and
     # requests; the scheduler only pays that cost when the job actually runs.
-    from job_finder.web.ats_platforms import NON_SCANNABLE_PLATFORMS, SCANNERS_BY_NAME
+    from job_finder.web.ats_platforms import SCANNERS_BY_NAME
     from job_finder.web.ats_platforms._registry import run_platform_scan
+    from job_finder.web.ats_registry import NON_SCANNABLE_PLATFORMS
 
     fetched_any = False
     tiebreak_enabled = settings["llm_tiebreak"]

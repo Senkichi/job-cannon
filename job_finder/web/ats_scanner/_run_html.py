@@ -15,7 +15,7 @@ import sqlite3
 import time
 
 from job_finder.json_utils import utc_now_iso
-from job_finder.web.ats_platforms import NON_SCANNABLE_PLATFORMS
+from job_finder.web.ats_registry import NON_SCANNABLE_PLATFORMS
 from job_finder.web.db_helpers import standalone_connection
 
 # Lazy import of HTML careers scraper (ImportError guard — Plan 03)

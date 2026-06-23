@@ -31,8 +31,8 @@ from flask import (
 
 from job_finder.json_utils import utc_now_iso
 from job_finder.web._htmx import htmx_fragment
-from job_finder.web.ats_platforms import NON_SCANNABLE_PLATFORMS
 from job_finder.web.ats_prober import probe_single_company
+from job_finder.web.ats_registry import NON_SCANNABLE_PLATFORMS
 from job_finder.web.ats_scanner import probe_ats_slugs, run_ats_scan
 from job_finder.web.db_helpers import (
     _POLLING_TIMEOUT_MINUTES,

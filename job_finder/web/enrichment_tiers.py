@@ -211,11 +211,11 @@ def query_ats_api(job_row: dict, conn: Any, config: dict) -> dict:
         # and absent from the registry, so it correctly falls through to {}.
         try:
             from job_finder.web.ats_platforms import (
-                NON_SCANNABLE_PLATFORMS,
                 SCANNERS_BY_NAME,
                 run_platform_scan,
             )
             from job_finder.web.ats_platforms._registry import BoardGoneError
+            from job_finder.web.ats_registry import NON_SCANNABLE_PLATFORMS
         except ImportError:
             return {}
 

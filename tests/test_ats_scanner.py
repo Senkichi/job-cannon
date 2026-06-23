@@ -2274,7 +2274,8 @@ class TestNonScannablePlatformRouting:
     def test_jobvite_registered_and_non_scannable(self):
         """Invariant: jobvite is in BOTH registries — registered for dispatch,
         and flagged as non-scannable so the scan path knows to skip its API."""
-        from job_finder.web.ats_platforms import NON_SCANNABLE_PLATFORMS, SCANNERS_BY_NAME
+        from job_finder.web.ats_platforms import SCANNERS_BY_NAME
+        from job_finder.web.ats_registry import NON_SCANNABLE_PLATFORMS
         from job_finder.web.ats_scanner._run import _PLATFORM_SCANNERS
 
         assert "jobvite" in SCANNERS_BY_NAME
