@@ -30,13 +30,17 @@ from job_finder.web.ats_platforms._detail_fetchers import (  # noqa: F401
     _fetch_smartrecruiters_description,
     _fetch_workday_description,
 )
+from job_finder.web.ats_platforms._platforms_amazon import SCANNER as _AMAZON_SCANNER
 from job_finder.web.ats_platforms._platforms_ashby import SCANNER as _ASHBY_SCANNER
 from job_finder.web.ats_platforms._platforms_bamboohr import SCANNER as _BAMBOOHR_SCANNER
 from job_finder.web.ats_platforms._platforms_breezy import SCANNER as _BREEZY_SCANNER
+from job_finder.web.ats_platforms._platforms_eightfold import SCANNER as _EIGHTFOLD_SCANNER
+from job_finder.web.ats_platforms._platforms_google import SCANNER as _GOOGLE_SCANNER
 from job_finder.web.ats_platforms._platforms_greenhouse import SCANNER as _GREENHOUSE_SCANNER
 from job_finder.web.ats_platforms._platforms_jazzhr import SCANNER as _JAZZHR_SCANNER
 from job_finder.web.ats_platforms._platforms_jobvite import SCANNER as _JOBVITE_SCANNER
 from job_finder.web.ats_platforms._platforms_lever import SCANNER as _LEVER_SCANNER
+from job_finder.web.ats_platforms._platforms_microsoft import SCANNER as _MICROSOFT_SCANNER
 from job_finder.web.ats_platforms._platforms_paylocity import SCANNER as _PAYLOCITY_SCANNER
 from job_finder.web.ats_platforms._platforms_personio import SCANNER as _PERSONIO_SCANNER
 from job_finder.web.ats_platforms._platforms_pinpoint import SCANNER as _PINPOINT_SCANNER
@@ -60,24 +64,30 @@ from job_finder.web.ats_platforms._title_match import (  # noqa: F401
     _title_matches,
 )
 
-NON_SCANNABLE_PLATFORMS: frozenset[str] = frozenset({"jobvite"})
+NON_SCANNABLE_PLATFORMS: frozenset[str] = frozenset({"jobvite", "google"})
 """Platforms registered in SCANNERS_BY_NAME that intentionally return no jobs.
 
-A platform lands here when it has no public unauthenticated API (Jobvite is
-the canonical example). Callers can check this set to surface a "no public
-API" badge instead of the generic "No ATS" / "0 jobs" messaging.
+A platform lands here when it has no public unauthenticated API (Jobvite and
+Google are the canonical examples — Google's careers board is a JS-only
+``batchexecute`` SPA with no GET-JSON surface). Callers can check this set to
+surface a "no public API" badge instead of the generic "No ATS" / "0 jobs"
+messaging.
 """
 
 SCANNERS_BY_NAME: dict[str, PlatformScanner] = {
     s.name: s
     for s in (
+        _AMAZON_SCANNER,
         _ASHBY_SCANNER,
         _BAMBOOHR_SCANNER,
         _BREEZY_SCANNER,
+        _EIGHTFOLD_SCANNER,
+        _GOOGLE_SCANNER,
         _GREENHOUSE_SCANNER,
         _JAZZHR_SCANNER,
         _JOBVITE_SCANNER,
         _LEVER_SCANNER,
+        _MICROSOFT_SCANNER,
         _PAYLOCITY_SCANNER,
         _PERSONIO_SCANNER,
         _PINPOINT_SCANNER,
@@ -275,18 +285,66 @@ def scan_rippling(slug: str, target_titles: list[str], exclusions: list[str]) ->
     return run_platform_scan(_RIPPLING_SCANNER, slug, target_titles, exclusions)
 
 
+def scan_microsoft(slug: str, target_titles: list[str], exclusions: list[str]) -> list[dict]:
+    """Scan Microsoft Careers (Phenom pcsx) for keyword-matched postings.
+
+    API: GET https://apply.careers.microsoft.com/api/pcsx/search?domain=microsoft.com&start={N}
+    Offset pagination, page size fixed at 10. Slug is the ``domain`` param
+    (defaults to "microsoft.com"). Description is NOT in the list endpoint;
+    enrichment fills jd_full from the position_details endpoint.
+    """
+    return run_platform_scan(_MICROSOFT_SCANNER, slug, target_titles, exclusions)
+
+
+def scan_eightfold(slug: str, target_titles: list[str], exclusions: list[str]) -> list[dict]:
+    """Scan an Eightfold (SmartApply) tenant for keyword-matched postings.
+
+    API: GET https://{host}/api/apply/v2/jobs?domain={domain}&start={N}
+    Slug encodes "host|domain" (e.g. "explore.jobs.netflix.net|netflix.com").
+    Offset pagination, page size fixed at 10. One adapter serves every
+    Eightfold tenant; description is filled by enrichment.
+    """
+    return run_platform_scan(_EIGHTFOLD_SCANNER, slug, target_titles, exclusions)
+
+
+def scan_amazon(slug: str, target_titles: list[str], exclusions: list[str]) -> list[dict]:
+    """Scan Amazon Jobs (single global board) for keyword-matched postings.
+
+    API: GET https://www.amazon.jobs/en/search.json?base_query={slug}&sort=recent
+    Slug is the ``base_query`` keyword (empty → most-recent across all of
+    Amazon). Recent-sorted and capped; the driver's title gate filters to
+    target roles. Description is included inline on the list endpoint.
+    """
+    return run_platform_scan(_AMAZON_SCANNER, slug, target_titles, exclusions)
+
+
+def scan_google(slug: str, target_titles: list[str], exclusions: list[str]) -> list[dict]:
+    """Scan Google Careers — stub. Always returns [].
+
+    Google has no public unauthenticated JSON board (the live careers path is
+    a JS-only ``batchexecute`` SPA). Registered as a non-scannable platform so
+    a company can be classified ``ats_platform='google'`` and badged "no public
+    API" instead of "0 jobs". See _platforms_google.py.
+    """
+    return run_platform_scan(_GOOGLE_SCANNER, slug, target_titles, exclusions)
+
+
 __all__ = [
     "NON_SCANNABLE_PLATFORMS",
     "SCANNERS_BY_NAME",
     "PlatformScanner",
     "run_platform_scan",
+    "scan_amazon",
     "scan_ashby",
     "scan_bamboohr",
     "scan_breezy",
+    "scan_eightfold",
+    "scan_google",
     "scan_greenhouse",
     "scan_jazzhr",
     "scan_jobvite",
     "scan_lever",
+    "scan_microsoft",
     "scan_paylocity",
     "scan_personio",
     "scan_pinpoint",
