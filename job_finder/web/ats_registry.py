@@ -227,3 +227,10 @@ SCANNABLE_PLATFORMS: frozenset[str] = frozenset(
     for n, s in PLATFORMS.items()
     if s.requests_scanner is not None or s.playwright_scanner is not None
 )
+
+# Promotion-target population for careers-link discovery: every scannable
+# platform except the non-scannable stubs (jobvite/google). Replaces
+# _ats_link_discovery's hand-rolled
+# ``_TARGET_PLATFORMS = (SCANNERS_BY_NAME - NON_SCANNABLE) | {icims}`` — a
+# careers link to a platform in this set is promotable; one to a stub is not.
+SCANNABLE_TARGET_PLATFORMS: frozenset[str] = SCANNABLE_PLATFORMS - NON_SCANNABLE_PLATFORMS

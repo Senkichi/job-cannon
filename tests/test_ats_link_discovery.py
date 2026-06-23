@@ -146,7 +146,8 @@ def test_target_platforms_derived_from_scanner_registry():
     iCIMS, so adding a scanner automatically makes its embeds promotable and a
     stub (jobvite) can never be promoted to.
     """
-    from job_finder.web.ats_platforms import NON_SCANNABLE_PLATFORMS, SCANNERS_BY_NAME
+    from job_finder.web.ats_platforms import SCANNERS_BY_NAME
+    from job_finder.web.ats_registry import NON_SCANNABLE_PLATFORMS
     from job_finder.web.careers_crawler._ats_link_discovery import _TARGET_PLATFORMS
 
     expected = (frozenset(SCANNERS_BY_NAME) - NON_SCANNABLE_PLATFORMS) | {"icims"}

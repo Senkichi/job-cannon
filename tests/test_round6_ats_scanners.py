@@ -419,7 +419,7 @@ class TestDispatcherWiring:
     def test_new_platform_adapters_in_dispatcher(self):
         """Regression (#529 fallout): every registered, scannable adapter must
         be reachable by the scan dispatch."""
-        from job_finder.web.ats_platforms import NON_SCANNABLE_PLATFORMS
+        from job_finder.web.ats_registry import NON_SCANNABLE_PLATFORMS
         from job_finder.web.ats_scanner._run import _PLATFORM_SCANNERS
 
         for platform in ("amazon", "microsoft", "eightfold"):
@@ -497,17 +497,17 @@ class TestNonScannablePlatformsConstant:
     subset of registered scanner names (no phantom entries)."""
 
     def test_non_scannable_platforms_is_frozenset(self):
-        from job_finder.web.ats_platforms import NON_SCANNABLE_PLATFORMS
+        from job_finder.web.ats_registry import NON_SCANNABLE_PLATFORMS
 
         assert isinstance(NON_SCANNABLE_PLATFORMS, frozenset)
 
     def test_jobvite_in_non_scannable_platforms(self):
-        from job_finder.web.ats_platforms import NON_SCANNABLE_PLATFORMS
+        from job_finder.web.ats_registry import NON_SCANNABLE_PLATFORMS
 
         assert "jobvite" in NON_SCANNABLE_PLATFORMS
 
     def test_non_scannable_platforms_subset_of_registered_scanners(self):
         """Every entry in NON_SCANNABLE_PLATFORMS must be a registered scanner name."""
-        from job_finder.web.ats_platforms import NON_SCANNABLE_PLATFORMS, SCANNERS_BY_NAME
+        from job_finder.web.ats_registry import NON_SCANNABLE_PLATFORMS, SCANNERS_BY_NAME
 
         assert set(SCANNERS_BY_NAME) >= NON_SCANNABLE_PLATFORMS

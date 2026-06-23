@@ -24,12 +24,13 @@ from job_finder.db import derive_classification
 from job_finder.db._jd_full import set_jd_full as _set_jd_full
 from job_finder.json_utils import utc_now_iso
 from job_finder.secrets import get_secret
-from job_finder.web.ats_platforms import NON_SCANNABLE_PLATFORMS, SCANNERS_BY_NAME
+from job_finder.web.ats_platforms import SCANNERS_BY_NAME
 from job_finder.web.ats_platforms._registry import (
     BoardGoneError,
     run_platform_scan,
 )
 from job_finder.web.ats_prober import _handle_scan_error, _is_transient_error
+from job_finder.web.ats_registry import NON_SCANNABLE_PLATFORMS
 from job_finder.web.ats_scanner._run_html import _run_html_fallback_scan
 from job_finder.web.ats_scanner._run_playwright import (
     _run_playwright_scan,

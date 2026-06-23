@@ -66,15 +66,9 @@ from job_finder.web.ats_platforms._title_match import (  # noqa: F401
     _title_matches,
 )
 
-NON_SCANNABLE_PLATFORMS: frozenset[str] = frozenset({"jobvite", "google"})
-"""Platforms registered in SCANNERS_BY_NAME that intentionally return no jobs.
-
-A platform lands here when it has no public unauthenticated API (Jobvite and
-Google are the canonical examples — Google's careers board is a JS-only
-``batchexecute`` SPA with no GET-JSON surface). Callers can check this set to
-surface a "no public API" badge instead of the generic "No ATS" / "0 jobs"
-messaging.
-"""
+# NON_SCANNABLE_PLATFORMS now lives in job_finder.web.ats_registry, derived from
+# each PlatformSpec's `non_scannable` flag (single source of truth). It used to be
+# a hand-maintained frozenset here; importers now take it from the registry.
 
 SCANNERS_BY_NAME: dict[str, PlatformScanner] = {
     s.name: s
@@ -357,7 +351,6 @@ def scan_google(slug: str, target_titles: list[str], exclusions: list[str]) -> l
 
 
 __all__ = [
-    "NON_SCANNABLE_PLATFORMS",
     "SCANNERS_BY_NAME",
     "PlatformScanner",
     "run_platform_scan",

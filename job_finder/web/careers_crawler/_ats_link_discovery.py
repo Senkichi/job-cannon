@@ -23,19 +23,14 @@ import re
 from bs4 import BeautifulSoup
 
 from job_finder.web.ats_detection import extract_ats_from_url_best
-from job_finder.web.ats_platforms import NON_SCANNABLE_PLATFORMS, SCANNERS_BY_NAME
+from job_finder.web.ats_registry import SCANNABLE_TARGET_PLATFORMS as _TARGET_PLATFORMS
 
-# Platforms eligible for promotion = every platform that owns a working scanner,
-# DERIVED from the scanner registry so this set can never drift behind a newly
-# added scanner. The old hardcoded {greenhouse,lever,ashby,workday,smartrecruiters}
-# silently dropped six already-supported, already-detected platforms
-# (paylocity/workable/rippling/bamboohr/breezy/jazzhr) — their embeds were
-# classified, then thrown away. ``NON_SCANNABLE_PLATFORMS`` (jobvite, a stub that
-# returns no jobs) is excluded; iCIMS is scannable via the Playwright path but is
-# registered in a separate registry, so it is added explicitly. A contract test
-# (test_ats_link_discovery) pins this set against the live registry.
-_PLAYWRIGHT_SCANNABLE = frozenset({"icims"})
-_TARGET_PLATFORMS = (frozenset(SCANNERS_BY_NAME) - NON_SCANNABLE_PLATFORMS) | _PLAYWRIGHT_SCANNABLE
+# Platforms eligible for promotion = every scannable platform (requests OR the
+# Playwright iCIMS path) MINUS the non-scannable stubs (jobvite/google), derived
+# once in ``ats_registry`` so this set can never drift behind a newly added
+# scanner. (Previously hand-rolled here as
+# ``(SCANNERS_BY_NAME - NON_SCANNABLE) | {icims}``.) A contract test
+# (test_ats_link_discovery) pins it against the live registry.
 
 # Permissive absolute-URL matcher for inline-JS / raw-text scraping. Stops at
 # whitespace and the common string/markup delimiters so a URL embedded in a

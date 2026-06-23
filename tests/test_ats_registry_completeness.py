@@ -141,8 +141,23 @@ def test_parity_scanner_registry():
     assert set(ats_registry.SCANNERS_BY_NAME) == set(ats_platforms.SCANNERS_BY_NAME)
 
 
-def test_parity_non_scannable():
-    assert ats_registry.NON_SCANNABLE_PLATFORMS == ats_platforms.NON_SCANNABLE_PLATFORMS
+def test_non_scannable_derivation():
+    # Derived from each spec's `non_scannable` flag — the registered stubs with no
+    # public API. Was a hand-maintained frozenset in ats_platforms (now deleted).
+    assert frozenset({"jobvite", "google"}) == ats_registry.NON_SCANNABLE_PLATFORMS
+
+
+def test_scannable_target_platforms():
+    # Promotion-target set for careers-link discovery = scannable minus the
+    # non-scannable stubs. A real requests scanner and the Playwright-only iCIMS
+    # are promotable; the stubs never are. Replaces _ats_link_discovery's
+    # hand-rolled _TARGET_PLATFORMS.
+    targets = ats_registry.SCANNABLE_TARGET_PLATFORMS
+    assert targets == ats_registry.SCANNABLE_PLATFORMS - ats_registry.NON_SCANNABLE_PLATFORMS
+    for p in ("greenhouse", "lever", "icims"):
+        assert p in targets
+    for stub in ("jobvite", "google"):
+        assert stub not in targets
 
 
 def test_parity_playwright_platforms():
