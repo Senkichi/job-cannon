@@ -966,6 +966,16 @@ class TestStage75Helpers:
         assert "Foo" in out and "Bar" in out
         assert "FooBar" not in out
 
+    def test_strip_html_preserves_list_structure(self):
+        """Routing through the canonical converter keeps bullet/paragraph
+        structure (the renderer needs it) that BS4 get_text flattened away."""
+        from job_finder.sources.portal_search_source import _strip_html
+
+        out = _strip_html("<p>About the role</p><ul><li>Build APIs</li><li>Mentor peers</li></ul>")
+        assert "- Build APIs" in out
+        assert "- Mentor peers" in out
+        assert "About the role" in out
+
     def test_strip_html_none_and_empty(self):
         from job_finder.sources.portal_search_source import _strip_html
 

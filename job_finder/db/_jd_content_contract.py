@@ -35,12 +35,15 @@ THREE-OUTCOME VERDICT (so the LLM only runs on the genuine residual)
 
 ENFORCEMENT (single points, mirrored from the title contract)
 -------------------------------------------------------------
-* ``jd_content_reject`` (content-only signals, no title needed) runs inside the
-  sole sanctioned writer ``set_jd_full`` and at the ``ParsedJob.from_job`` ingest
-  gate — the deterministic floor that can never store obvious junk.
-* ``classify_jd_content`` (the full 3-way) runs in the enrichment fetch path
-  (reject a bad capture so the fetcher falls through to the next tier) and in the
-  versioned re-sweep, so a rule improvement heals the whole corpus on a
+* ``jd_content_reject`` runs inside the sole sanctioned writer ``set_jd_full``
+  and at the ``ParsedJob.from_job`` ingest gate — the deterministic floor that
+  can never store obvious junk. Both callers pass the job's ``title`` when they
+  have it (the enrichment write path always does), so the title cross-field
+  reject (I-17 ``title_zero_overlap``) fires at the write chokepoint, falling
+  back to content-only signals when no title is available.
+* ``classify_jd_content`` (the full 3-way) runs in the background adjudicator
+  and the versioned re-sweep, so the AMBIGUOUS residual is LLM-resolved off the
+  hot path and a rule improvement heals the whole corpus on a
   ``JD_CONTENT_VERSION`` bump.
 
 The module is PURE (regex + the shared ``normalizers`` token helpers) so it is

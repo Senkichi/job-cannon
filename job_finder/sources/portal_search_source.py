@@ -11,13 +11,11 @@ Three tiers of portal discovery, in order:
 from __future__ import annotations
 
 import logging
-import re
 import time
 from datetime import UTC, datetime
 from typing import Protocol
 
 import requests
-from bs4 import BeautifulSoup
 from ftfy import fix_text
 
 from job_finder.models import Job
@@ -164,7 +162,8 @@ def _fetch_himalayas(keywords: list[str]) -> list[Job]:
     per keyword to avoid downloading the entire 100K+ listing catalog.
 
     Stage 7.5 parse hygiene:
-      - description is raw HTML; we strip tags via BeautifulSoup before storage
+      - description is raw HTML; we strip tags via the canonical
+        description_formatter.html_to_plain_text before storage
         so the scoring prompt sees clean prose, not <div>/<a>/<p> markup.
       - truncate cap widened from 2000 -> 8000 chars to match the jd_full
         eager-promote write width in job_finder/db/_jobs.py (post-strip the
@@ -949,23 +948,24 @@ def _strip_html(text: str | None) -> str:
     """Strip HTML markup, returning plain text. Tolerant of None / non-strings.
 
     Used by Himalayas, whose ``description`` field is raw HTML
-    (``<div>``, ``<p>``, ``<a>``, etc.). ftfy is applied after stripping
-    so the cleaner sees normalized text rather than markup.
+    (``<div>``, ``<p>``, ``<a>``, etc.). Routes through the canonical
+    ``description_formatter.html_to_plain_text`` (the same converter the jd_full
+    write path and the m079 heal pass use) instead of a private BeautifulSoup
+    ``get_text`` — the canonical converter preserves paragraph/bullet/section
+    structure (``<br>``→newline, ``<li>``→"- ", block tags→newline) that the
+    ``format_description`` renderer relies on, whereas ``get_text`` flattened it
+    to space-separated text. ftfy is applied after so the source's occasional
+    mojibake is normalized.
     """
     if not text:
         return ""
-    try:
-        soup = BeautifulSoup(text, "html.parser")
-        # get_text with a space separator keeps word boundaries intact
-        # across removed tags (e.g., "<b>Foo</b><i>Bar</i>" -> "Foo Bar"
-        # not "FooBar").
-        stripped = soup.get_text(separator=" ", strip=True)
-    except Exception:
-        # Defensive: if BS4 chokes on a pathological input, fall back
-        # to a regex-based tag-strip rather than dropping the row.
-        stripped = re.sub(r"<[^>]+>", " ", text)
-        stripped = re.sub(r"\s+", " ", stripped).strip()
-    return fix_text(stripped)
+    # Lazy import — keeps sources/ free of a module-load-time sources/ -> web/
+    # edge (mirrors db/_jd_full.normalize_jd's deferred import of the same
+    # module). description_formatter pulls in only stdlib + markupsafe, so there
+    # is no real cycle, but the deferred import keeps the dependency explicit.
+    from job_finder.web.description_formatter import html_to_plain_text
+
+    return fix_text(html_to_plain_text(text))
 
 
 def _synthesize_yc_description(item: dict) -> str:
