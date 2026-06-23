@@ -412,6 +412,18 @@ def _parse_form_to_config(form) -> dict:
         """Check if a form field was actually submitted."""
         return key in form
 
+    def _has_value(key):
+        """True iff a field was submitted AND is non-blank.
+
+        For numeric fields, a blank submission means "leave the existing value
+        alone" (omit from form_config so _deep_merge preserves it) rather than
+        silently substituting a non-empty default. Clearing the budget cap used
+        to snap it back to $10 — re-enabling paid spend — and clearing the score
+        thresholds reset them to 40, all under a "saved successfully" flash. An
+        explicit "0" still strips truthy and is written through.
+        """
+        return key in form and form[key].strip() != ""
+
     def _checked(key):
         """True iff a checkbox is checked in the submitted form.
 
@@ -438,7 +450,7 @@ def _parse_form_to_config(form) -> dict:
         # Anything unexpected falls back to "remote" — the wizard's default.
         wa = form["work_arrangement"].strip().lower()
         profile["work_arrangement"] = wa if wa in ("remote", "hybrid", "on-site") else "remote"
-    if _has("min_salary"):
+    if _has_value("min_salary"):
         profile["min_salary"] = safe_int(form["min_salary"])
     if _has("industries"):
         profile["industries"] = lines_to_list(form["industries"])
@@ -638,15 +650,15 @@ def _parse_form_to_config(form) -> dict:
             weights[wk] = safe_float(form[fk])
     if weights:
         scoring["weights"] = weights
-    if _has("min_score_threshold"):
+    if _has_value("min_score_threshold"):
         scoring["min_score_threshold"] = safe_int(
             form["min_score_threshold"], DEFAULT_MIN_SCORE_THRESHOLD
         )
-    if _has("candidate_score_threshold"):
+    if _has_value("candidate_score_threshold"):
         scoring["candidate_score_threshold"] = safe_int(
             form["candidate_score_threshold"], DEFAULT_CANDIDATE_SCORE_THRESHOLD
         )
-    if _has("daily_budget_usd"):
+    if _has_value("daily_budget_usd"):
         scoring["daily_budget_usd"] = safe_float(
             form["daily_budget_usd"], DEFAULT_DAILY_BUDGET_USD
         )

@@ -313,6 +313,64 @@ class TestSettingsProviderSection:
         assert '<option value="ollama" selected>' in body
 
 
+class TestSettingsNumericBlankGuard:
+    """Blank numeric fields must NOT silently snap back to a non-empty default —
+    the dangerous case is clearing the budget cap re-enabling paid spend. Blank
+    means 'leave the existing value alone'; an explicit value (incl. '0') writes
+    through."""
+
+    def test_blank_min_salary_preserves_existing(self, settings_client, settings_app):
+        resp = settings_client.post(
+            "/settings/save",
+            data={
+                "target_titles": "Staff Data Scientist\nSenior Data Scientist",
+                "profile_skills": "Python\nSQL\nSpark",
+                "min_salary": "",  # cleared
+            },
+        )
+        assert resp.status_code == 302
+        with open(settings_app._test_config_path, encoding="utf-8") as f:
+            config = yaml.safe_load(f)
+        # Fixture seeds 150000 — must be preserved, not snapped to 0.
+        assert config["profile"]["min_salary"] == 150000
+
+    def test_blank_budget_does_not_reenable_paid_spend(self, settings_client, settings_app):
+        # Seed paid spend disabled (budget 0).
+        config_path = settings_app._test_config_path
+        with open(config_path, encoding="utf-8") as f:
+            existing = yaml.safe_load(f)
+        existing.setdefault("scoring", {})["daily_budget_usd"] = 0.0
+        with open(config_path, "w", encoding="utf-8") as f:
+            yaml.dump(existing, f, default_flow_style=False)
+
+        resp = settings_client.post(
+            "/settings/save",
+            data={
+                "target_titles": "Staff Data Scientist\nSenior Data Scientist",
+                "profile_skills": "Python\nSQL\nSpark",
+                "daily_budget_usd": "",  # cleared — must NOT become the $10 default
+            },
+        )
+        assert resp.status_code == 302
+        with open(config_path, encoding="utf-8") as f:
+            config = yaml.safe_load(f)
+        assert config["scoring"]["daily_budget_usd"] == 0.0
+
+    def test_explicit_zero_writes_through(self, settings_client, settings_app):
+        resp = settings_client.post(
+            "/settings/save",
+            data={
+                "target_titles": "Staff Data Scientist\nSenior Data Scientist",
+                "profile_skills": "Python\nSQL\nSpark",
+                "daily_budget_usd": "0",  # explicit zero — disable paid spend
+            },
+        )
+        assert resp.status_code == 302
+        with open(settings_app._test_config_path, encoding="utf-8") as f:
+            config = yaml.safe_load(f)
+        assert config["scoring"]["daily_budget_usd"] == 0.0
+
+
 class TestSettingsKeyringWrite:
     """Commit 3.5: SerpAPI keys submitted via the Settings form
     land in the OS keyring; the plaintext field in config.yaml is cleared on
