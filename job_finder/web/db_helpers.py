@@ -114,25 +114,45 @@ def get_config_snapshot(app) -> dict:
 
 
 def refresh_jf_config(app, config: dict) -> None:
-    """Update the live in-memory config after a config.yaml write.
+    """Atomically refresh the live in-memory config after a config.yaml write.
 
-    Single point of enforcement for the JF_CONFIG + DB_PATH refresh that must
-    happen whenever config.yaml is written to disk — both the Settings save
-    route and the onboarding wizard Done step call this so neither can drift.
+    Single point of enforcement called by both the Settings save route and the
+    onboarding wizard Done step so neither can drift.
 
-    Thread-safety: APScheduler and batch background threads MUST snapshot
-    JF_CONFIG at job-start time (read once into a local variable before any
-    await/sleep) rather than reading individual keys across multiple statements.
-    This replacement is atomic at the Python dict level but readers may observe
-    the old dict between the two assignments below.
+    JF_CONFIG is replaced in a single dict-key assignment (atomic under the GIL),
+    so a concurrent reader sees either the whole old config or the whole new one
+    — never a torn mix of the two. Background threads should still snapshot it
+    once (``get_config_snapshot``) at job-start rather than re-reading keys
+    across awaits.
+
+    DB_PATH is the process-wide authority for the database location and is fixed
+    at ``create_app()`` time; it is deliberately NOT mutated here. A ``db.path``
+    that differs from the running DB_PATH means the user is trying to relocate
+    the database, which requires a restart — open connections, WAL files, and
+    scheduler jobs are all bound to the original path — so we log a warning
+    instead of half-applying a live swap (the torn cross-key write this used to
+    risk). Both real callers pass the current DB_PATH back in, so this is a
+    no-op warning in practice.
 
     Args:
         app: Flask application instance (concrete object, not a proxy).
         config: The fully-merged config dict that was just written to disk.
     """
+    new_db_path = config.get("db", {}).get("path")
+    current_db_path = app.config.get("DB_PATH")
+    if current_db_path and new_db_path and str(new_db_path) != str(current_db_path):
+        logger.warning(
+            "config db.path=%r differs from the running DB_PATH=%r; the database "
+            "location is fixed for this process. Restart to use the new path.",
+            new_db_path,
+            current_db_path,
+        )
+    elif not current_db_path and new_db_path:
+        # First-time seed only (create_app always sets DB_PATH, so this is just a
+        # defensive path for bare-app callers); never overwrites an existing one.
+        app.config["DB_PATH"] = str(new_db_path)
+    # Atomic single-key swap — no cross-key torn-read window.
     app.config["JF_CONFIG"] = config
-    if "db" in config:
-        app.config["DB_PATH"] = config["db"].get("path", app.config.get("DB_PATH"))
 
 
 # ---------------------------------------------------------------------------

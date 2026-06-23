@@ -533,17 +533,51 @@ class TestJfConfigRefreshedAfterDone:
             "JF_CONFIG would not update after a settings change"
         )
 
-    def test_refresh_jf_config_helper_updates_db_path(self, app):
-        """refresh_jf_config must also update DB_PATH when config contains db.path."""
+    def test_refresh_jf_config_swaps_config_atomically(self, app, caplog):
+        """The common path: config carries the live DB_PATH (both real callers
+        copy it back in), so JF_CONFIG is swapped in one assignment with no
+        warning and DB_PATH is unchanged."""
+        import logging
+
         from job_finder.web.db_helpers import refresh_jf_config
 
+        current = app.config["DB_PATH"]
         cfg = {
-            "db": {"path": "/tmp/new_jobs.db"},
+            "db": {"path": current},
             "scoring": {},
             "profile": {"target_titles": ["Eng"]},
         }
-        with app.app_context():
+        with (
+            app.app_context(),
+            caplog.at_level(logging.WARNING, logger="job_finder.web.db_helpers"),
+        ):
             refresh_jf_config(app, cfg)
 
         assert app.config["JF_CONFIG"] is cfg
-        assert app.config["DB_PATH"] == "/tmp/new_jobs.db"
+        assert app.config["DB_PATH"] == current
+        assert "fixed for this process" not in caplog.text
+
+    def test_refresh_jf_config_keeps_db_path_immutable(self, app, caplog):
+        """DB_PATH is the process-wide authority and is fixed at create_app()
+        time. A differing db.path (a live relocation attempt) warns and defers
+        to restart rather than half-applying a torn cross-key write."""
+        import logging
+
+        from job_finder.web.db_helpers import refresh_jf_config
+
+        original = app.config["DB_PATH"]
+        cfg = {
+            "db": {"path": "/tmp/relocated_jobs.db"},
+            "scoring": {},
+            "profile": {"target_titles": ["Eng"]},
+        }
+        with (
+            app.app_context(),
+            caplog.at_level(logging.WARNING, logger="job_finder.web.db_helpers"),
+        ):
+            refresh_jf_config(app, cfg)
+
+        assert app.config["JF_CONFIG"] is cfg
+        # NOT mutated live — relocation requires a restart.
+        assert app.config["DB_PATH"] == original
+        assert "fixed for this process" in caplog.text
