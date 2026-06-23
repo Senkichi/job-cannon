@@ -59,35 +59,32 @@ _ELIGIBLE_TIERS_QUERY = f"enrichment_tier IS NULL OR {backfill_skip_sql()}"
 _BORDERLINE_MIN = 40
 _BORDERLINE_MAX = 70
 
-# Offline-only provider routing. Live pipeline config intentionally has no
-# providers.low / providers.mid so scoring_runner stays on the Claude CLI
-# (lower latency after cold-start flag tuning). Backfill wraps its config
-# through _offline_config() to opt into Ollama with a CLI fallback, trading a
-# few extra seconds per call for zero API cost on nightly/manual batches.
-_OFFLINE_PROVIDERS: dict = {
-    "scoring": {
-        "provider": "ollama",
-        "model": "qwen2.5:14b",
-        "fallback_chain": [
-            {"provider": "anthropic", "model": "claude-sonnet-4-6"},
-        ],
-    },
-}
+# The provider name the backfill forces as primary — local, zero API cost.
+_OFFLINE_PRIMARY: str = "ollama"
 
 
 def _offline_config(config: dict) -> dict:
-    """Return a shallow-copied config with Ollama routing injected for scoring.
+    """Return a shallow-copied config that forces Ollama-first routing.
 
-    Preserves every other field unchanged. An existing user-set
-    providers.scoring entry wins over the default (lets a caller override
-    the routing on a per-run basis via CLI flags or env).
+    Backfill is a nightly/manual batch that trades a few extra seconds per call
+    for zero API cost, so it pins ``providers.primary = "ollama"``. Ollama has a
+    model for every workload via ``_PROVIDER_DEFAULTS`` (quick/score = qwen2.5:14b),
+    so no override is required; the user's existing ``fallback_chain`` / ``overrides``
+    / meta-keys are preserved untouched, so the cascade *after* Ollama stays
+    whatever the user configured (free providers in the shipped default) and
+    cost_gate still guards any paid entry.
+
+    Why this changed (issue #150): the prior version injected a
+    ``providers.scoring`` block, but ``resolve_workload_routing`` reads the
+    Phase-40 schema (``providers.primary`` / ``providers.fallback_chain`` /
+    ``providers.overrides.<provider>.<workload>``) and never looked at
+    ``providers.scoring``. The injection was inert, so the backfill silently ran
+    on the live config's primary instead of Ollama. Setting ``primary`` is the
+    schema-correct knob and also routes the enrichment quick-tier calls through
+    Ollama for the duration of the batch (intended — same zero-cost trade).
     """
     existing = config.get("providers", {}) or {}
-    merged_providers = {**_OFFLINE_PROVIDERS, **existing}
-    # Preserve cascade meta-keys if the caller set them
-    for meta in ("daily_limits", "throttle_delays"):
-        if meta in existing:
-            merged_providers[meta] = existing[meta]
+    merged_providers = {**existing, "primary": _OFFLINE_PRIMARY}
     return {**config, "providers": merged_providers}
 
 

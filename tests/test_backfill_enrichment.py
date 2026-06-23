@@ -563,13 +563,16 @@ def test_agentic_and_agentic_exhausted_excluded_from_backfill(migrated_db):
 
 
 def test_run_enrichment_pass_wraps_config_through_offline_providers(migrated_db):
-    """run_enrichment_pass must pass the cascade-enabled config to enrich_job.
+    """run_enrichment_pass must pass the Ollama-forced config to enrich_job.
 
     Without the _offline_config wrapper, enrich_job would call enrichment_tiers
-    with the raw user config and the Haiku/Sonnet tiers would stay on the
-    direct CLI path even after the tier migrations — defeating backfill's
-    whole reason for opting into Ollama.
+    with the raw user config and stay on whatever the live primary is —
+    defeating backfill's whole reason for opting into Ollama. Asserting on the
+    *resolved* routing (not the injected key) guards against the issue #150
+    regression where the injected providers.scoring block was never read.
     """
+    from job_finder.web.model_provider import resolve_workload_routing
+
     path, conn = migrated_db
     insert_job(conn, "job_offline_probe")
 
@@ -591,26 +594,40 @@ def test_run_enrichment_pass_wraps_config_through_offline_providers(migrated_db)
 
     assert captured_configs, "enrich_job was never called"
     injected = captured_configs[0]
-    providers = injected.get("providers", {})
-    assert "scoring" in providers
-    assert providers["scoring"]["provider"] == "ollama"
+    # The resolver must actually route scoring to Ollama (not just carry a key).
+    routing = resolve_workload_routing("score", injected)
+    assert routing["primary"]["provider"] == "ollama"
+    assert routing["primary"]["model"] == "qwen2.5:14b"
 
 
-def test_offline_providers_use_fallback_chain_not_fallback():
-    """_OFFLINE_PROVIDERS entries must use fallback_chain (list) — not the
-    singular fallback (string), which triggers call_model's backward-compat
-    path and raises generic RuntimeError instead of
-    ProviderCascadeExhaustedError."""
-    from job_finder.web.backfill_enrichment import _OFFLINE_PROVIDERS
+def test_offline_config_forces_ollama_primary_preserving_user_cascade():
+    """_offline_config must force providers.primary = "ollama" (the real Phase-40
+    routing knob) while leaving the user's fallback_chain / overrides / meta-keys
+    untouched. The prior version injected a providers.scoring block the resolver
+    never read (issue #150), so backfill silently ran on the live primary."""
+    from job_finder.web.backfill_enrichment import _offline_config
+    from job_finder.web.model_provider import resolve_workload_routing
 
-    for tier, cfg in _OFFLINE_PROVIDERS.items():
-        assert "fallback_chain" in cfg, f"{tier!r} should use fallback_chain"
-        assert isinstance(cfg["fallback_chain"], list)
-        assert cfg["fallback_chain"], f"{tier!r} fallback_chain must be non-empty"
-        assert "fallback" not in cfg, (
-            f"{tier!r} still uses the singular fallback key; "
-            "call_model cascade path won't activate"
-        )
+    cfg = {
+        "providers": {
+            "primary": "gemini",
+            "fallback_chain": ["claude_code_cli"],
+            "overrides": {"ollama": {"score": "qwen2.5:14b"}},
+            "daily_limits": {"gemini": 100},
+        }
+    }
+    out = _offline_config(cfg)
+    providers = out["providers"]
+
+    assert providers["primary"] == "ollama", "backfill must force the Ollama primary"
+    # Everything else the user configured is preserved verbatim.
+    assert providers["fallback_chain"] == ["claude_code_cli"]
+    assert providers["overrides"] == {"ollama": {"score": "qwen2.5:14b"}}
+    assert providers["daily_limits"] == {"gemini": 100}
+    # And the resolver actually routes scoring to Ollama under the forced config.
+    assert resolve_workload_routing("score", out)["primary"]["provider"] == "ollama"
+    # Input config is not mutated (shallow-copy contract).
+    assert cfg["providers"]["primary"] == "gemini"
 
 
 # ---------------------------------------------------------------------------
