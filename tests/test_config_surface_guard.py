@@ -110,17 +110,9 @@ _FORM_ONLY_ALLOWED: frozenset[str] = frozenset(
 )
 
 # _has("X") branches in _parse_form_to_config that have no rendered form field.
-# Each entry is a known case of config being written by the settings parser
-# but not exposed in the UI.  Remove once the corresponding cleanup lands.
-_PARSER_ONLY_XFAIL: frozenset[str] = frozenset(
-    {
-        # Google Drive integration fields — the settings parser still writes
-        # drive_folder_id / drive_convert_to_gdoc after the Drive UI was
-        # removed.  Pending #dead-config cleanup issue.
-        "drive_folder_id",
-        "drive_convert_to_gdoc",
-    }
-)
+# A non-empty set xfails the guard for known parser-writes-but-UI-lacks cases;
+# add an entry only alongside a tracking issue to remove it once the cleanup lands.
+_PARSER_ONLY_XFAIL: frozenset[str] = frozenset()
 
 # ---------------------------------------------------------------------------
 # Invariant 3 — sources without implementations

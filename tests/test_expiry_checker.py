@@ -593,26 +593,6 @@ class TestRunStalenessCheck:
 
         mock_check.assert_not_called()
 
-    def test_run_expiry_check_is_deprecated_alias(self, tmp_db_path):
-        """Legacy entry point emits DeprecationWarning and returns the
-        nested phase summary from run_staleness_check."""
-        import warnings
-
-        from job_finder.web.expiry_checker import run_expiry_check
-
-        self._setup_db(tmp_db_path)
-
-        with patch("job_finder.web.expiry_checker._check_job_expiry") as mock_check:
-            mock_check.return_value = ("inconclusive", "")
-            with warnings.catch_warnings(record=True) as caught:
-                warnings.simplefilter("always")
-                result = run_expiry_check(tmp_db_path, self._base_config())
-
-        assert any(issubclass(w.category, DeprecationWarning) for w in caught)
-        assert "phase_a" in result
-        assert "phase_b" in result
-        assert "phase_c" in result
-
     def test_phase_order_is_b_then_c_then_a(self, tmp_db_path):
         """Phase A (clock-based) must run LAST so it judges against the
         liveness evidence Phases B and C just refreshed."""

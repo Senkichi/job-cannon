@@ -105,8 +105,8 @@ def get_distinct_workplace_types(conn: sqlite3.Connection) -> list[str]:
 # v3.0 classification-rank ordering (Phase 34 Plan 3 Commit A)
 # ---------------------------------------------------------------------------
 # SQL CASE expression mapping classification enum -> numeric priority for ORDER BY.
-# Plan 4 deletes legacy score columns; this expression becomes the ONLY score-like
-# sort signal available.
+# The legacy jobs.score column is vestigial under v3.0 (never written by the scoring
+# path); this expression is the score-like sort signal.
 _CLASSIFICATION_RANK_CASE = (
     "CASE classification "
     "WHEN 'apply' THEN 4 "
@@ -167,35 +167,6 @@ _CLASSIFICATION_SORT_KEYS: set[str] = {
 }
 
 
-# Map of >=-threshold min_score/max_score (legacy numeric filter API) -> list of
-# classifications that satisfy it. The numeric-score→classification mapping below
-# preserves the *monotonic shim math* from Plan 2 (mean(sub_scores) * 20, range
-# 20-100): apply rows have mean>=3 (>=60), consider rows may be 40-60, skip rows
-# may be 20-40, reject rows may be NULL-20. Plan 4 removes min_score/max_score
-# entirely; this shim only exists to keep existing callers (tests, URL params)
-# working throughout Plan 3.
-def _classifications_for_min_score(min_score: float) -> list[str]:
-    """Translate a legacy min_score threshold into a classification IN-list."""
-    if min_score >= 80:
-        return ["apply"]
-    if min_score >= 60:
-        return ["apply", "consider"]
-    if min_score >= 40:
-        return ["apply", "consider", "skip"]
-    return ["apply", "consider", "skip", "reject"]
-
-
-def _classifications_for_max_score(max_score: float) -> list[str]:
-    """Translate a legacy max_score threshold into a classification IN-list."""
-    if max_score < 40:
-        return ["skip", "reject"]
-    if max_score < 60:
-        return ["consider", "skip", "reject"]
-    if max_score < 80:
-        return ["apply", "consider", "skip", "reject"]
-    return ["apply", "consider", "skip", "reject"]
-
-
 def get_filtered_jobs(
     conn: sqlite3.Connection,
     status: str | list[str] | None = None,
@@ -207,8 +178,6 @@ def get_filtered_jobs(
     limit: int = 100,
     hide_stale: bool = False,
     show_hidden: bool = False,
-    min_score: float | None = None,
-    max_score: float | None = None,
     salary_min: int | None = None,
     source: str | None = None,
     date_from: str | None = None,
@@ -233,9 +202,8 @@ def get_filtered_jobs(
     time (first_seen). Unknown values fall back to 'posted'.
 
     Plan 34-03 Commit A: migrated from COALESCE(sonnet_score, haiku_score,
-    score) to classification-based ordering; min_score/max_score translate
-    to classification IN-list shim via the mapping above.
-    The explicit `classification=` kwarg is the preferred filter.
+    score) to classification-based ordering. Use the `classification=` kwarg
+    to filter by fit bucket.
     """
     # Recency = best-known posting date with an explicit detection-time
     # fallback (#365). Display marks the fallback cohort; filters and the
@@ -376,23 +344,6 @@ def get_filtered_jobs(
         conditions.append(f"classification IN ({placeholders})")
         params.extend(sorted(classification_candidates))
 
-    # Legacy min_score/max_score back-compat — Plan 4 removes this shim entirely.
-    # The legacy `jobs.score` column is vestigial under v3.0 (the LLM scoring
-    # path never writes it; ~40% of classified rows carry score=0), so the
-    # translation now matches on classification alone. Rows with NULL
-    # classification (pre-v3 or unscored) are filtered out by this shim — they
-    # were already noise in the old score-disjunct path since v3.0 never
-    # populates `score`.
-    if min_score is not None:
-        mapped = _classifications_for_min_score(min_score)
-        placeholders = ", ".join("?" * len(mapped))
-        conditions.append(f"classification IN ({placeholders})")
-        params.extend(mapped)
-    if max_score is not None:
-        mapped = _classifications_for_max_score(max_score)
-        placeholders = ", ".join("?" * len(mapped))
-        conditions.append(f"classification IN ({placeholders})")
-        params.extend(mapped)
     if salary_min is not None:
         conditions.append("salary_min >= ?")
         params.append(salary_min)

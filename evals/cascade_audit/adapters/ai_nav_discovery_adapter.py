@@ -68,10 +68,6 @@ class AiNavDiscoveryAdapter:
         """Score candidate against gold reference."""
         metrics = {}
 
-        # Recipe yield: replay produced at least 1 job
-        # For now, placeholder - actual implementation depends on replay results
-        metrics["recipe_yield"] = False
-
         # Step count delta
         gold_steps = gold.get("step_count", 0) if isinstance(gold, dict) else 0
         candidate_steps = candidate.get("step_count", 0) if isinstance(candidate, dict) else 0

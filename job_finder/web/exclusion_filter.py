@@ -168,8 +168,3 @@ def count_scorable(conn, config: dict) -> int:
     except Exception:
         logger.warning("count_scorable failed; returning 0", exc_info=True)
         return 0
-
-
-# Back-compat alias — Plan 4 removes along with the rest of the legacy nomenclature.
-# PLAN-4-REMOVE
-count_haiku_scorable = count_scorable

@@ -65,17 +65,10 @@ class CompanyResearchAdapter:
                 "judge_position_swap_agreement": agreement,
             }
 
-        metrics = {
+        # No judge provider configured (set OPENROUTER_API_KEY so
+        # run_audit._load_judge_provider wires one in) — fall back to a neutral tie.
+        return {
             "judge_winner": "tie",
-            "judge_rationale": "Not yet implemented",
+            "judge_rationale": "no judge provider configured",
             "judge_confidence": 0.5,
         }
-
-        # TODO: Implement actual judge call with OpenRouter provider
-        # provider = _make_adapter("openrouter", None, None, config)
-        # verdict, _ = judge_with_position_swap(gold, candidate, "company_research", provider)
-        # metrics["judge_winner"] = verdict.winner
-        # metrics["judge_rationale"] = verdict.rationale
-        # metrics["judge_confidence"] = verdict.confidence
-
-        return metrics

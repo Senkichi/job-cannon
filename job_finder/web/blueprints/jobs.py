@@ -125,16 +125,6 @@ def infer_title_company_from_listing_url(url: str) -> tuple[str, str]:
     return title_guess, company_guess
 
 
-def _safe_float(raw: str, param_name: str) -> float | None:
-    """Coerce a query-string value to float, or abort 400 on malformed input."""
-    if not raw:
-        return None
-    try:
-        return float(raw)
-    except (ValueError, TypeError):
-        abort(400, description=f"Invalid value for {param_name}: {raw!r}")
-
-
 def _safe_int(raw: str, param_name: str) -> int | None:
     """Coerce a query-string value to int, or abort 400 on malformed input."""
     if not raw:
@@ -155,8 +145,6 @@ def _get_filter_kwargs() -> dict:
     return {
         "status": statuses if len(statuses) > 1 else (statuses[0] if statuses else None),
         "location": args.get("location") or None,
-        "min_score": _safe_float(args.get("min_score", ""), "min_score"),
-        "max_score": _safe_float(args.get("max_score", ""), "max_score"),
         "salary_min": _safe_int(args.get("salary_min", ""), "salary_min"),
         "source": args.get("source") or None,
         "posted_within": args.get("posted_within") or None,
