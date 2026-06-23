@@ -428,8 +428,10 @@ server:
   host: "127.0.0.1"
   # Port number
   port: 5000
-  # Debug mode (set to false in production-like environments)
-  debug: true
+  # Debug mode. Default false: this is a single-user local app, so the
+  # interactive Werkzeug debugger is unnecessary and the reloader it implies
+  # is a double-process hazard. Set true only when actively debugging.
+  debug: false
 
 # --- Unified staleness orchestrator (nightly 2:00 AM) ---
 # Consolidates expiry_check / liveness_check into one run that does:
