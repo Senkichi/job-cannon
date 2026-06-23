@@ -127,7 +127,7 @@
         <li class="ml-4">
           <div class="absolute -left-1.5 mt-1.5 h-3 w-3 rounded-full bg-indigo-500 border-2 border-slate-900"></div>
           <div class="flex items-center gap-2 text-xs">
-            <span class="text-slate-400">{{ event.timestamp[:16] | replace("T", " ") }}</span>
+            <span class="text-slate-400">{{ event.timestamp | local_datetime }}</span>
             <span class="text-slate-600">&bull;</span>
             {% if event.from_status %}
               <span class="text-slate-500">{{ event.from_status }}</span>

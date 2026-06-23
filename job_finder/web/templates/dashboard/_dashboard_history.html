@@ -40,7 +40,7 @@
             {% for run in recent_runs %}
               <tr class="border-b border-slate-700/50 hover:bg-slate-700/30 transition-colors">
                 <td class="px-4 py-3 text-slate-300 font-mono text-xs">
-                  {{ run.timestamp[:19] | replace('T', ' ') }}
+                  {{ run.timestamp | local_datetime }}
                 </td>
                 <td class="px-4 py-3 text-slate-200">{{ run.source }}</td>
                 <td class="px-4 py-3 text-slate-300 text-right">{{ run.jobs_fetched }}</td>
@@ -80,7 +80,7 @@
               {% set meta = item.metadata | from_json if item.metadata else {} %}
               <tr class="border-b border-slate-700/50 hover:bg-slate-700/30 transition-colors">
                 <td class="px-4 py-3 text-slate-300 font-mono text-xs">
-                  {{ item.occurred_at[:19] | replace('T', ' ') }}
+                  {{ item.occurred_at | local_datetime }}
                 </td>
                 <td class="px-4 py-3 text-slate-200">
                   {{ item.action | replace('_', ' ') | title }}
@@ -127,7 +127,7 @@
             {% for event in pipeline_events %}
               <tr class="border-b border-slate-700/50 hover:bg-slate-700/30 transition-colors">
                 <td class="px-4 py-3 text-slate-300 font-mono text-xs">
-                  {{ event.timestamp[:19] | replace('T', ' ') }}
+                  {{ event.timestamp | local_datetime }}
                 </td>
                 <td class="px-4 py-3 text-slate-200 text-xs max-w-[200px] truncate">
                   {% if event.job_title %}

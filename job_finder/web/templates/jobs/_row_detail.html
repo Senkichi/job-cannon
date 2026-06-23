@@ -162,7 +162,7 @@
                   {% if event.from_status %}<span class="text-slate-500 text-xs">from {{ event.from_status }}</span>{% endif %}
                   {% if event.source and event.source != 'manual' %}<span class="text-slate-600 text-xs italic">via {{ event.source }}</span>{% endif %}
                 </div>
-                <span class="text-[11px] font-mono text-slate-500">{{ event.timestamp[:16] | replace("T", " ") }}</span>
+                <span class="text-[11px] font-mono text-slate-500">{{ event.timestamp | local_datetime }}</span>
               </li>
               {% endfor %}
             </ol>
