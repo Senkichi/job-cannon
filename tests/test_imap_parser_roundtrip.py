@@ -69,50 +69,64 @@ def test_all_registered_senders_have_eml_fixtures():
         assert len(fixtures) >= 1, f"Sender {sender} has no fixtures"
 
 
-def test_eml_fixture_round_trips_to_jobs():
-    """Test that .eml fixtures round-trip through IMAP decode path to jobs."""
+def _sender_fixture_cases() -> list[tuple[str, str]]:
+    """Flatten FIXTURES_BY_SENDER into (sender, fixture_file) pairs for params."""
+    return [
+        (sender, fixture_file)
+        for sender in SENDER_PARSERS
+        for fixture_file in FIXTURES_BY_SENDER.get(sender, [])
+    ]
+
+
+@pytest.mark.parametrize(
+    ("sender", "fixture_file"),
+    _sender_fixture_cases(),
+    ids=[f"{sender}:{fixture}" for sender, fixture in _sender_fixture_cases()],
+)
+def test_eml_fixture_round_trips_to_jobs(sender, fixture_file):
+    """Each registered sender's real .eml fixture round-trips through the IMAP
+    decode path to >=1 job with core fields populated.
+
+    Parametrized per (sender, fixture) so a single missing fixture skips ONLY
+    its own case. Previously this was one big loop with an inline ``pytest.skip``
+    on the first missing file, so the absent ``ziprecruiter.eml`` silently
+    disabled real-email validation for *every* sender.
+    """
     fixtures_dir = Path(__file__).parent / "fixtures" / "emails"
+    parser_func = SENDER_PARSERS[sender]
+    fixture_path = fixtures_dir / fixture_file
 
-    for sender, parser_func in SENDER_PARSERS.items():
-        fixture_files = FIXTURES_BY_SENDER.get(sender, [])
+    if not fixture_path.exists():
+        pytest.skip(f"Fixture file not found: {fixture_path}")
 
-        if not fixture_files:
-            pytest.fail(f"No fixtures for sender: {sender}")
+    # Read .eml bytes and parse as RFC 5322 message
+    with open(fixture_path, "rb") as f:
+        eml_bytes = f.read()
+    message = email.message_from_bytes(eml_bytes, policy=email.policy.default)
 
-        for fixture_file in fixture_files:
-            fixture_path = fixtures_dir / fixture_file
+    # Simulate IMAP decode path
+    imap_source = ImapSource()
+    body = imap_source._extract_body(message)
+    date = imap_source._extract_date(message)
 
-            if not fixture_path.exists():
-                pytest.skip(f"Fixture file not found: {fixture_path}")
+    if not body:
+        pytest.fail(f"Could not extract body from fixture: {fixture_path}")
 
-            # Read .eml bytes and parse as RFC 5322 message
-            with open(fixture_path, "rb") as f:
-                eml_bytes = f.read()
-            message = email.message_from_bytes(eml_bytes, policy=email.policy.default)
+    # Call the parser with decoded body
+    jobs = parser_func(body, date or "")
 
-            # Simulate IMAP decode path
-            imap_source = ImapSource()
-            body = imap_source._extract_body(message)
-            date = imap_source._extract_date(message)
+    # Assert at least one job returned
+    assert len(jobs) >= 1, f"No jobs parsed from fixture: {fixture_path}"
 
-            if not body:
-                pytest.fail(f"Could not extract body from fixture: {fixture_path}")
-
-            # Call the parser with decoded body
-            jobs = parser_func(body, date or "")
-
-            # Assert at least one job returned
-            assert len(jobs) >= 1, f"No jobs parsed from fixture: {fixture_path}"
-
-            # Assert core fields are populated
-            for job in jobs:
-                assert job.title, f"Job missing title from fixture: {fixture_path}"
-                assert job.company, f"Job missing company from fixture: {fixture_path}"
-                assert job.source, f"Job missing source from fixture: {fixture_path}"
-                # Check for either source_url or url depending on model field
-                assert job.source_url or getattr(job, "url", None), (
-                    f"Job missing source_url/url from fixture: {fixture_path}"
-                )
+    # Assert core fields are populated
+    for job in jobs:
+        assert job.title, f"Job missing title from fixture: {fixture_path}"
+        assert job.company, f"Job missing company from fixture: {fixture_path}"
+        assert job.source, f"Job missing source from fixture: {fixture_path}"
+        # Check for either source_url or url depending on model field
+        assert job.source_url or getattr(job, "url", None), (
+            f"Job missing source_url/url from fixture: {fixture_path}"
+        )
 
 
 def test_email_fixtures_do_not_contain_obvious_pii():

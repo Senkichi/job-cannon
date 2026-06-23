@@ -4,12 +4,16 @@ ZipRecruiter sends HTML emails from no-reply@ziprecruiter.com.
 This is a best-effort parser -- the HTML structure may change over time.
 If parsing fails for any job card, it is skipped and the error is logged.
 
-Since we don't have a sample ZipRecruiter email to inspect, the parser
-uses generic HTML heuristics to find job data. Common ZipRecruiter patterns:
-- Job title in <h2> or <a> tags within job card divs
-- Company name in spans near the title
-- Location in spans with location-related text
-- Apply links pointing to ziprecruiter.com/jobs/
+The parser uses generic HTML heuristics (job title in <h2>/<a> tags, company
+in nearby spans, apply links pointing to ziprecruiter.com/jobs/). These were
+written without a captured sample, so they are unverified against a real email.
+
+To validate and harden them, drop a sanitized real alert at
+``tests/fixtures/emails/ziprecruiter.eml``; the parametrized round-trip test in
+``tests/test_imap_parser_roundtrip.py`` then exercises this parser against it
+(it currently skips only that one case). Until that fixture lands, a runtime
+zero-yield warning fires (see ``parse_ziprecruiter_alert``) when a live email
+matches nothing, so a heuristic mismatch is at least observable in the logs.
 
 If the structure is unrecognized, an empty list is returned (graceful degradation).
 """
