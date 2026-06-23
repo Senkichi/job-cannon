@@ -401,6 +401,30 @@ class TestDispatcherWiring:
         for platform in ("workable", "jobvite", "paylocity", "rippling"):
             assert platform in _PLATFORM_SCANNERS, f"{platform} missing from _PLATFORM_SCANNERS"
 
+    def test_dispatcher_uses_central_registry(self):
+        """The scan dispatch MUST consume the single central registry, never a
+        parallel hardcoded dict.
+
+        A second copy of the platform list silently dropped the
+        Amazon/Microsoft/Eightfold adapters from the live scan: they were in
+        SCANNERS_BY_NAME but not the dispatcher's private dict, so the scan
+        logged 'Unknown ATS platform' and ingested zero jobs for them.
+        """
+        from job_finder.web.ats_platforms import SCANNERS_BY_NAME
+        from job_finder.web.ats_scanner._run import _PLATFORM_SCANNERS
+
+        assert _PLATFORM_SCANNERS is SCANNERS_BY_NAME
+
+    def test_new_platform_adapters_in_dispatcher(self):
+        """Regression (#529 fallout): every registered, scannable adapter must
+        be reachable by the scan dispatch."""
+        from job_finder.web.ats_platforms import NON_SCANNABLE_PLATFORMS
+        from job_finder.web.ats_scanner._run import _PLATFORM_SCANNERS
+
+        for platform in ("amazon", "microsoft", "eightfold"):
+            assert platform not in NON_SCANNABLE_PLATFORMS
+            assert platform in _PLATFORM_SCANNERS, f"{platform} missing from scan dispatch"
+
     def test_round6_platforms_except_jobvite_in_fastpath_set(self):
         """Workable / Paylocity / Rippling are URL-fast-path eligible.
 
