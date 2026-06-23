@@ -163,6 +163,7 @@ def _fetch_gmail(config: dict, conn: sqlite3.Connection, summary: dict) -> list[
         jobs, new_ids = source.fetch_jobs(
             lookback_days=lookback_days,
             processed_message_ids=known_ids,
+            config=config,
         )
 
         logger.info(
@@ -386,17 +387,27 @@ _SERPAPI_SPEC = SourceSpec(
 )
 
 
-_IMAP_SPEC = SourceSpec(
-    name="imap",
-    secret_path="sources.imap.app_password",  # noqa: S106 — config path, not a secret value
-    build_source=_build_imap_source,
-    require_queries=False,
-    # IMAP's fetch_jobs() returns a (jobs, ids) tuple and takes no queries arg.
-    extract_jobs=lambda src, source_cfg: src.fetch_jobs()[0],
-    # IMAP requires `email` in the config in addition to the app_password
-    # secret; surface a non-silent error if it's missing.
-    validate_config=lambda cfg: "sources.imap.email is required" if not cfg.get("email") else None,
-)
+def _imap_spec(config: dict) -> SourceSpec:
+    """Build the IMAP SourceSpec bound to the full config.
+
+    ``extract_jobs`` receives only the ``sources.imap`` subtree, but the sender
+    FROM-address overrides live under ``sources.gmail.senders`` — so the full
+    config must be closed over here to thread it into ``fetch_jobs(config=...)``.
+    """
+    return SourceSpec(
+        name="imap",
+        secret_path="sources.imap.app_password",  # noqa: S106 — config path, not a secret value
+        build_source=_build_imap_source,
+        require_queries=False,
+        # IMAP's fetch_jobs() returns a (jobs, ids) tuple and takes no queries arg.
+        # Full config is threaded in for sources.gmail.senders override resolution.
+        extract_jobs=lambda src, source_cfg: src.fetch_jobs(config=config)[0],
+        # IMAP requires `email` in the config in addition to the app_password
+        # secret; surface a non-silent error if it's missing.
+        validate_config=lambda cfg: (
+            "sources.imap.email is required" if not cfg.get("email") else None
+        ),
+    )
 
 
 def _fetch_serpapi(config: dict, summary: dict, db_path: str = "") -> list[Job]:
@@ -415,8 +426,9 @@ def _fetch_imap(config: dict, summary: dict, db_path: str = "") -> list[Job]:
     activity — without it, IMAP-only installs always read RED ("no job alerts").
     No-DB callers (benchmarks, unit tests) pass no db_path and skip the write.
     """
+    imap_spec = _imap_spec(config)
     if not db_path:
-        return _run_simple_source(_IMAP_SPEC, config, summary)
+        return _run_simple_source(imap_spec, config, summary)
 
     def _drain(source):
         with standalone_connection(db_path) as c:
@@ -424,7 +436,7 @@ def _fetch_imap(config: dict, summary: dict, db_path: str = "") -> list[Job]:
 
     run_id = f"imap_run_{utc_now_iso()}"
     errors_before = len(summary.get("imap_errors", []))
-    jobs = _run_simple_source(_IMAP_SPEC, config, summary, post_extract=_drain, db_path=db_path)
+    jobs = _run_simple_source(imap_spec, config, summary, post_extract=_drain, db_path=db_path)
 
     # Mirror the Gmail run-level email_parse_log write so inbox_check sees IMAP
     # activity. Skip when the source is disabled (no run actually happened).

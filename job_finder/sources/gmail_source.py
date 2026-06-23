@@ -80,6 +80,83 @@ SENDER_LABEL: dict[str, str] = {
     "monster@notifications.monster.com": "monster",
 }
 
+# Sender keys whose FROM address users may override in Settings
+# (sources.gmail.senders.<key>). Maps each form key to its DEFAULT address —
+# the SENDER_PARSERS / SENDER_LABEL key that an override swaps out. Keys mirror
+# settings.py `_parse_form_to_config` and config.example.yaml's `senders:` block.
+_OVERRIDABLE_SENDERS: dict[str, str] = {
+    "linkedin_alerts": "jobalerts-noreply@linkedin.com",
+    "linkedin_jobs": "jobs-noreply@linkedin.com",
+    "glassdoor": "noreply@glassdoor.com",
+    "indeed": "alert@indeed.com",
+    "ziprecruiter": "no-reply@ziprecruiter.com",
+}
+
+
+def resolve_sender_parsers(config: dict | None = None) -> dict:
+    """Return SENDER_PARSERS with any user-overridden FROM addresses swapped in.
+
+    Wires ``sources.gmail.senders.<key>`` (saved by the Settings page) into the
+    address→parser map. For each overridable sender key, if the config supplies a
+    non-empty address that differs from the default, the default key is *renamed*
+    to the override (its parser function is preserved). Non-overridable senders
+    (greenhouse, indeed-match, trueup, monster) are untouched.
+
+    Safety invariant: ``resolve_sender_parsers(None)``, ``resolve_sender_parsers({})``,
+    and any config with no senders overrides all return a dict equal to
+    ``SENDER_PARSERS`` — the no-override path is identical to today's behaviour.
+
+    Args:
+        config: Full config dict (or None). Reads ``sources.gmail.senders``.
+
+    Returns:
+        A new dict mapping sender address → parser function.
+    """
+    parsers = dict(SENDER_PARSERS)
+    senders = (config or {}).get("sources", {}).get("gmail", {}).get("senders", {}) or {}
+    for sender_key, default in _OVERRIDABLE_SENDERS.items():
+        override = senders.get(sender_key)
+        if (
+            isinstance(override, str)
+            and override.strip()
+            and override != default
+            and default in parsers
+        ):
+            parsers[override] = parsers.pop(default)
+    return parsers
+
+
+def resolve_sender_label(config: dict | None = None) -> dict:
+    """Return SENDER_LABEL with overridden FROM addresses mapped to the canonical label.
+
+    For each overridden sender, the new address is ADDED to the label map pointing
+    at the same canonical label as the default (the default entry is kept too, so
+    autoheal recipes that key on the canonical label keep resolving). This mirrors
+    ``resolve_sender_parsers`` so the resolved address has both a parser and a label.
+
+    Safety invariant: the no-override path (None / {} / no senders) returns a dict
+    equal to ``SENDER_LABEL``.
+
+    Args:
+        config: Full config dict (or None). Reads ``sources.gmail.senders``.
+
+    Returns:
+        A new dict mapping sender address → canonical label.
+    """
+    labels = dict(SENDER_LABEL)
+    senders = (config or {}).get("sources", {}).get("gmail", {}).get("senders", {}) or {}
+    for sender_key, default in _OVERRIDABLE_SENDERS.items():
+        override = senders.get(sender_key)
+        if (
+            isinstance(override, str)
+            and override.strip()
+            and override != default
+            and default in labels
+        ):
+            labels[override] = labels[default]
+    return labels
+
+
 TOKEN_PATH: str = _resolve_token_path()
 SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
 
@@ -191,6 +268,7 @@ class GmailSource:
         self,
         lookback_days: int = 7,
         processed_message_ids: set[str] | None = None,
+        config: dict | None = None,
     ) -> tuple[list[Job], list[str]]:
         """Fetch all job alert emails from the last N days and parse them.
 
@@ -199,6 +277,9 @@ class GmailSource:
             processed_message_ids: Set of Gmail message IDs already processed
                 in a previous sync. Matching messages are skipped to avoid
                 re-fetching and re-parsing. Pass None (default) to process all.
+            config: Full config dict (or None). Used to resolve user-overridden
+                sender FROM addresses (``sources.gmail.senders``); None uses the
+                built-in defaults unchanged.
 
         Returns:
             Tuple of (jobs, processed_ids) where:
@@ -211,7 +292,10 @@ class GmailSource:
         newly_processed: list[str] = []
         after_date = (datetime.now() - timedelta(days=lookback_days)).strftime("%Y/%m/%d")
 
-        for sender, parser_fn in SENDER_PARSERS.items():
+        sender_parsers = resolve_sender_parsers(config)
+        sender_label = resolve_sender_label(config)
+
+        for sender, parser_fn in sender_parsers.items():
             query = f"from:{sender} after:{after_date}"
             messages = self._search_messages(query)
 
@@ -244,7 +328,7 @@ class GmailSource:
                     newly_processed.append(msg_id)
                     # Phase C: email override pre-check (dormant when no override files present).
                     # With no override, falls through to extract_with_fallback unchanged.
-                    _label = SENDER_LABEL.get(sender, sender)
+                    _label = sender_label.get(sender, sender)
                     _recipe = _override_loader.html_recipe(_label)
                     _legacy_count = None
                     _extractor = "legacy"
