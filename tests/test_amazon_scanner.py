@@ -19,7 +19,9 @@ def _job(
         "title": title,
         "job_path": path if path is not None else f"/en/jobs/{icims}/role",
         "normalized_location": loc,
-        "posting_date": posted,
+        # Real field is ``posted_date`` (verified live 2026-06-22) — NOT
+        # ``posting_date``, which silently returned None on every Amazon job.
+        "posted_date": posted,
         "job_schedule_type": schedule,
         "job_category": category,
         "description": desc,

@@ -141,7 +141,7 @@ def _posting_to_job(posting: dict, slug: str) -> dict:
         "salary_max": None,
         "comp_json": None,
         "source_id": source_id,
-        "posted_date": _posted_date(posting.get("posting_date")),
+        "posted_date": _posted_date(posting.get("posted_date")),
         "is_remote": _is_remote(posting),
         "employment_type": label_or_str(posting.get("job_schedule_type")),
         "department": label_or_str(posting.get("job_category")),

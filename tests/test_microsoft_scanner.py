@@ -26,13 +26,16 @@ class TestScanMicrosoft:
 
         resp = MagicMock(status_code=200)
         resp.json.return_value = {
+            # The API ALWAYS returns an empty error object on success (verified
+            # live 2026-06-22). A truthy-dict check here aborted every page.
+            "error": {"message": "", "body": ""},
             "data": {
                 "count": 2,
                 "positions": [
                     _position("Senior Data Scientist", pid="111"),
                     _position("Retail Associate", pid="222"),
                 ],
-            }
+            },
         }
         mock_get.return_value = resp
 
@@ -151,5 +154,46 @@ class TestMicrosoftCompleteness:
 
         mock_get.return_value = MagicMock(status_code=403)
         postings, complete = _fetch_postings_with_completeness("blocked.com")
+        assert postings == []
+        assert complete is False
+
+    @patch("job_finder.web.ats_platforms._platforms_microsoft.requests.get")
+    def test_empty_error_object_does_not_abort(self, mock_get):
+        """Regression: the always-present empty ``error`` object is not an error.
+
+        The live API returns ``error: {"message": "", "body": ""}`` on every
+        successful response; a truthy-dict check aborted the fetch and returned
+        zero jobs against a board with 1,382 live positions.
+        """
+        from job_finder.web.ats_platforms._platforms_microsoft import (
+            _fetch_postings_with_completeness,
+        )
+
+        resp = MagicMock(status_code=200)
+        resp.json.return_value = {
+            "error": {"message": "", "body": ""},
+            "data": {"count": 1, "positions": [_position("Data Scientist", pid="9")]},
+        }
+        mock_get.return_value = resp
+
+        postings, complete = _fetch_postings_with_completeness("microsoft.com")
+        assert len(postings) == 1
+        assert complete is True
+
+    @patch("job_finder.web.ats_platforms._platforms_microsoft.requests.get")
+    def test_nonempty_error_message_aborts(self, mock_get):
+        """A real (non-empty) error message stops pagination."""
+        from job_finder.web.ats_platforms._platforms_microsoft import (
+            _fetch_postings_with_completeness,
+        )
+
+        resp = MagicMock(status_code=200)
+        resp.json.return_value = {
+            "error": {"message": "rate limited", "body": ""},
+            "data": {"count": 5, "positions": [_position("Data Scientist", pid="9")]},
+        }
+        mock_get.return_value = resp
+
+        postings, complete = _fetch_postings_with_completeness("microsoft.com")
         assert postings == []
         assert complete is False
