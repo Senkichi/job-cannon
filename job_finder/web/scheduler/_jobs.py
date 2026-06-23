@@ -339,6 +339,41 @@ def register_ats_slug_probe(scheduler, app) -> None:
 
 
 # ---------------------------------------------------------------------------
+# ATS reprobe (weekly Sun 8:00 AM)
+# ---------------------------------------------------------------------------
+
+
+def register_ats_reprobe(scheduler, app) -> None:
+    """Register the weekly custom-miss reprobe job (Sunday 8:00 AM).
+
+    Statically re-fetches the frozen ``ats_platform IS NULL`` / miss cohort's
+    careers pages and promotes any that now embed a supported ATS board (PR-A3).
+    Weekly (not daily) because most of the cohort are true custom sites with no
+    ATS embed — re-fetching them daily would be pure waste; promoted companies
+    leave the cohort, so it converges. Guarded by ``ats.reprobe.enabled``.
+    """
+
+    def _import_ats_reprobe():
+        from job_finder.web.ats_reprobe import reprobe_custom_miss_cohort
+
+        return reprobe_custom_miss_cohort
+
+    scheduler.add_job(
+        _make_simple_job(
+            app,
+            "ATS reprobe",
+            _import_ats_reprobe,
+            publish_events=(COMPANIES_CHANGED,),
+        ),
+        trigger=CronTrigger(day_of_week="sun", hour=8, minute=0),
+        id="ats_reprobe",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+
+
+# ---------------------------------------------------------------------------
 # ATS source-URL promotion (daily 4:45 AM)
 # ---------------------------------------------------------------------------
 
@@ -812,6 +847,7 @@ def register_all_jobs(scheduler, app) -> None:
     register_pipeline_detection(scheduler, app)
     register_ats_scan(scheduler, app)
     register_ats_slug_probe(scheduler, app)
+    register_ats_reprobe(scheduler, app)
     register_ats_promote(scheduler, app)
     register_careers_crawl(
         scheduler,

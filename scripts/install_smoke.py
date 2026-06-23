@@ -38,8 +38,8 @@ from unittest import mock
 # Live count of cron/interval jobs register_all_jobs() adds at boot. Pinned to
 # the live registration by tests/test_install_smoke.py -- adding or removing a
 # scheduler job forces a matching update here (and to the CI smoke lane).
-# 15 since the daily jd-content LLM adjudication backfill (register_jd_adjudication).
-EXPECTED_BOOT_JOB_COUNT = 15
+# 16 since the weekly custom-miss reprobe (register_ats_reprobe).
+EXPECTED_BOOT_JOB_COUNT = 16
 
 # Completion-chained successors that must NOT be cron-registered at boot (#229).
 CHAINED_SUCCESSORS: tuple[str, ...] = ("agentic_backfill", "company_linkage")

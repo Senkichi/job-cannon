@@ -439,6 +439,35 @@ class TestSchedulerAtsScan:
         job_ids_kw = [call[1].get("id") for call in mock_sched.add_job.call_args_list]
         assert "ats_slug_probe" in job_ids_kw
 
+    def test_scheduler_registers_ats_reprobe_job(self):
+        """init_scheduler registers 'ats_reprobe' on a weekly Sunday 8:00 trigger."""
+        from unittest.mock import MagicMock, patch
+
+        from job_finder.web.scheduler import reset_scheduler
+
+        reset_scheduler()
+
+        mock_app = MagicMock()
+        mock_app.config.get.side_effect = lambda key, default=None: {
+            "TESTING": False,
+        }.get(key, default)
+
+        with patch("job_finder.web.scheduler.os.environ.get", return_value=None):
+            with patch("job_finder.web.scheduler.BackgroundScheduler") as mock_scheduler_cls:
+                mock_sched = MagicMock()
+                mock_scheduler_cls.return_value = mock_sched
+
+                from job_finder.web.scheduler import init_scheduler
+
+                init_scheduler(mock_app)
+
+        calls = mock_sched.add_job.call_args_list
+        job_ids_kw = [call[1].get("id") for call in calls]
+        assert "ats_reprobe" in job_ids_kw
+        # Weekly cadence: the trigger fires only on Sundays.
+        reprobe_trigger = next(c[1]["trigger"] for c in calls if c[1].get("id") == "ats_reprobe")
+        assert "day_of_week='sun'" in str(reprobe_trigger)
+
 
 # ---------------------------------------------------------------------------
 # Staleness check scheduler tests (replaces old expiry_check/liveness_check)

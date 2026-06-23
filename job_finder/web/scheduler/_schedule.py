@@ -93,6 +93,7 @@ class JobSlot:
 #   06:30  homepage_discovery
 #   07:00  ats_scan               (heavy)
 #   07:30  ats_slug_probe
+#   08:00  ats_reprobe            (heavy, weekly Sun) — drains the custom-miss cohort
 #   --:--  pipeline_detection     (every 30 min interval)
 #   company_linkage              (heavy, chained off careers_crawl)
 # ---------------------------------------------------------------------------
@@ -116,6 +117,9 @@ SCHEDULE: dict[str, JobSlot] = {
     "homepage_discovery": JobSlot(hour=6, minute=30),
     "ats_scan": JobSlot(hour=7, minute=0, heavy_writer=True),
     "ats_slug_probe": JobSlot(hour=7, minute=30),
+    # Weekly (Sun): static reprobe of the frozen custom-miss cohort. Promotes
+    # companies whose careers page embeds a now-supported ATS board.
+    "ats_reprobe": JobSlot(hour=8, minute=0, heavy_writer=True),
     # Monthly hygiene (day=1).
     "orphan_cleanup": JobSlot(hour=3, minute=0),
     "registry_hygiene": JobSlot(hour=3, minute=30),
