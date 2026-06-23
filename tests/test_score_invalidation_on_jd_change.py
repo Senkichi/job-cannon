@@ -79,12 +79,12 @@ def _insert_scored_job(
     conn.execute(
         """INSERT INTO jobs
                (dedup_key, title, company, location, sources, source_urls,
-                first_seen, last_seen, score, score_breakdown, locations_raw,
+                first_seen, last_seen, score_breakdown, locations_raw,
                 unresolved_reasons, jd_full,
                 classification, sub_scores_json, fit_analysis,
                 scoring_provider, scoring_model)
            VALUES (?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'),
-                   0, '{}', '[]', '[]', ?,
+                   '{}', '[]', '[]', ?,
                    ?, ?, ?, ?, ?)""",
         (
             dedup_key,
@@ -144,8 +144,8 @@ def test_jd_null_to_set_invalidates_score(db):
     assert row["sub_scores_json"] is None
     assert row["fit_analysis"] is None
     assert row["scoring_model"] is None
-    # scoring_provider is tied to the heuristic `score` (I-03) and re-stamped on
-    # the next score — left intact by design, not part of the cleared LLM tuple.
+    # scoring_provider is re-stamped on the next score — left intact by design,
+    # not part of the cleared LLM tuple.
 
 
 def test_jd_materially_changed_invalidates_score(db):
@@ -217,7 +217,7 @@ def test_invalidate_job_score_clears_all_columns(db):
     assert row["sub_scores_json"] is None
     assert row["fit_analysis"] is None
     assert row["scoring_model"] is None
-    # scoring_provider is preserved by design (I-03: required while `score` set).
+    # scoring_provider is preserved by design (not part of the cleared LLM tuple).
     assert row["scoring_provider"] == "ollama"
     # jd_full is scoring-input, not a scoring-owned column — left untouched.
     assert row["jd_full"] == _LONG_JD_A

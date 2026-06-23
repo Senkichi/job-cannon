@@ -168,18 +168,18 @@ def test_merge_source_id_conflict_is_skipped(tmp_path):
     conn.close()
 
 
-def test_merge_preserves_score_and_unresolved_reasons(tmp_path):
+def test_merge_preserves_unresolved_reasons(tmp_path):
+    # jobs.score was dropped in m113; the score-preservation half of this
+    # contract is retired. The unresolved_reasons preservation contract remains.
     conn = _migrated_db(tmp_path)
     key = _seed(
         conn,
-        score=42.0,
         unresolved_reasons='["title_metadata_blob"]',
     )
 
     merge_primary_posting_fields(conn, {"dedup_key": key}, _posting())
 
     row = _row(conn, key)
-    assert row["score"] == 42.0
     assert json.loads(row["unresolved_reasons"]) == ["title_metadata_blob"]
     conn.close()
 

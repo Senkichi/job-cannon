@@ -80,7 +80,6 @@ def _insert_job(conn: sqlite3.Connection, dedup_key: str, **kwargs) -> None:
         "description": "Build ML models.",
         "first_seen": "2026-01-01T00:00:00",
         "last_seen": "2026-03-01T00:00:00",
-        "score": 0.0,
         "score_breakdown": "{}",
         "user_interest": "unreviewed",
         "fit_analysis": None,
@@ -94,12 +93,12 @@ def _insert_job(conn: sqlite3.Connection, dedup_key: str, **kwargs) -> None:
     conn.execute(
         """INSERT OR REPLACE INTO jobs
         (dedup_key, title, company, location, sources, source_urls, source_id,
-         salary_min, salary_max, description, first_seen, last_seen, score,
+         salary_min, salary_max, description, first_seen, last_seen,
          score_breakdown, user_interest, fit_analysis, classification,
          sub_scores_json, jd_full, enrichment_tier, pipeline_status)
         VALUES
         (:dedup_key, :title, :company, :location, :sources, :source_urls, :source_id,
-         :salary_min, :salary_max, :description, :first_seen, :last_seen, :score,
+         :salary_min, :salary_max, :description, :first_seen, :last_seen,
          :score_breakdown, :user_interest, :fit_analysis, :classification,
          :sub_scores_json, :jd_full, :enrichment_tier, :pipeline_status)""",
         {"dedup_key": dedup_key, **defaults},
@@ -818,9 +817,7 @@ class TestRunAgenticBackfillIsolation:
         path, conn = _make_migrated_db()
         try:
             _insert_job(conn, "acme|job1|remote", title="Job One", enrichment_tier="exhausted")
-            _insert_job(
-                conn, "acme|job2|remote", title="Job Two", enrichment_tier="exhausted", score=0.1
-            )
+            _insert_job(conn, "acme|job2|remote", title="Job Two", enrichment_tier="exhausted")
             conn.close()
 
             long_jd = "Full job description text for the second job. " * 20

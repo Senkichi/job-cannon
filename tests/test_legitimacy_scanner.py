@@ -43,9 +43,9 @@ def _insert_job(conn: sqlite3.Connection, dedup_key: str, jd_full: str | None) -
         """
         INSERT INTO jobs
             (dedup_key, title, company, location, sources, source_urls,
-             source_id, first_seen, last_seen, score, score_breakdown,
+             source_id, first_seen, last_seen, score_breakdown,
              user_interest, jd_full)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             dedup_key,
@@ -57,7 +57,6 @@ def _insert_job(conn: sqlite3.Connection, dedup_key: str, jd_full: str | None) -
             "src-001",
             _NOW,
             _NOW,
-            0.0,
             "{}",
             "unreviewed",
             jd_full,

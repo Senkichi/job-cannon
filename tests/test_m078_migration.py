@@ -1,10 +1,12 @@
 """Tests for migration m078 — contract invariants (Phase 47.04).
 
 Covers:
-  - schema lands: unresolved_reasons column, 16 triggers, 1 unique index;
-  - each trigger ABORTs a staged violating write (I-01..I-06, I-12, I-13);
-  - I-04/I-05 gate on scoring_model (LLM-presence), not score — a heuristic-only
-    row succeeds;
+  - schema lands: unresolved_reasons column, the m078 triggers, 1 unique index;
+  - each surviving trigger ABORTs a staged violating write (I-01/I-02, I-04..I-06,
+    I-12, I-13). NOTE: I-03 (scoring_provider-when-scored) was retired by m113
+    together with the jobs.score column, so it is no longer asserted at HEAD;
+  - I-04/I-05 gate on scoring_model (LLM-presence) — a heuristic-only row
+    (scoring_model NULL) succeeds;
   - I-13 rejects each documented junk prefix + the length floor, accepts a
     legitimate JD;
   - I-11 partial unique index rejects duplicate (company_id, source_id) but
@@ -93,13 +95,17 @@ def test_m078_creates_schema(tmp_path):
                 "SELECT name FROM sqlite_master WHERE type='trigger' AND name LIKE 'tg_jobs_%'"
             ).fetchall()
         }
-        # m078 owns exactly 16 (8 invariants × _ins + _upd); later migrations
+        # m078 defines 16 triggers (8 invariants × _ins + _upd); later migrations
         # (e.g. m095's I-14 pair) add their own — assert m078's as a subset.
         m078_triggers = {
             f"{base}_{suffix}" for base in m078._TRIGGER_BASE.values() for suffix in ("ins", "upd")
         }
         assert len(m078_triggers) == 16
-        assert m078_triggers <= triggers
+        # m113 retires the I-03 pair (its WHEN clause references NEW.score) at
+        # HEAD; the other 14 m078 triggers persist.
+        i03_pair = {f"{m078._TRIGGER_BASE['I-03']}_{suffix}" for suffix in ("ins", "upd")}
+        assert (m078_triggers - i03_pair) <= triggers
+        assert triggers.isdisjoint(i03_pair)
 
         indexes = {
             r[0]
@@ -110,7 +116,7 @@ def test_m078_creates_schema(tmp_path):
         assert indexes == {"ix_jobs_company_source_id"}
 
         # unresolved_reasons defaults to '[]' for inserted rows.
-        _insert(conn, "default_check", score=10.0, scoring_provider="heuristic")
+        _insert(conn, "default_check", scoring_provider="heuristic")
         val = conn.execute(
             "SELECT unresolved_reasons FROM jobs WHERE dedup_key='default_check'"
         ).fetchone()[0]
@@ -146,19 +152,6 @@ def test_i02_salary_range(tmp_path):
         conn.close()
 
 
-def test_i03_scoring_provider_required(tmp_path):
-    conn = _head_conn(tmp_path)
-    try:
-        # scoring_provider has a non-NULL column default, so the violation only
-        # arises on an explicit NULL write (the F-03 regression shape).
-        with pytest.raises(sqlite3.IntegrityError, match="I-03"):
-            _insert(conn, "i03", score=50.0, scoring_provider=None)
-        # Heuristic-scored row (provider set, no LLM fields) succeeds.
-        _insert(conn, "i03ok", score=50.0, scoring_provider="heuristic")
-    finally:
-        conn.close()
-
-
 def test_i04_subscores_required_when_llm_scored(tmp_path):
     conn = _head_conn(tmp_path)
     try:
@@ -168,13 +161,12 @@ def test_i04_subscores_required_when_llm_scored(tmp_path):
             _insert(
                 conn,
                 "i04",
-                score=50.0,
                 scoring_provider="ollama",
                 scoring_model="qwen2.5:14b",
                 classification="consider",
             )
         # Heuristic-only row (scoring_model NULL) is unaffected by I-04.
-        _insert(conn, "i04ok", score=50.0, scoring_provider="heuristic")
+        _insert(conn, "i04ok", scoring_provider="heuristic")
     finally:
         conn.close()
 
@@ -186,7 +178,6 @@ def test_i05_classification_required_when_llm_scored(tmp_path):
             _insert(
                 conn,
                 "i05",
-                score=50.0,
                 scoring_provider="ollama",
                 scoring_model="qwen2.5:14b",
                 sub_scores_json="{}",
@@ -195,7 +186,6 @@ def test_i05_classification_required_when_llm_scored(tmp_path):
         _insert(
             conn,
             "i05ok",
-            score=50.0,
             scoring_provider="ollama",
             scoring_model="qwen2.5:14b",
             sub_scores_json="{}",

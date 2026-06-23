@@ -1,10 +1,11 @@
 """upsert_job INSERT path tags scoring_provider='heuristic'.
 
 JobScorer (the heuristic ingestion-time scorer) always runs before the
-upsert, populating job.score. Persisted rows must carry
-``scoring_provider='heuristic'`` so consumers can distinguish them from
-LLM-scored rows (where persist_job_assessment overwrites the tag with
-the actual LLM provider via COALESCE).
+upsert. Persisted rows must carry ``scoring_provider='heuristic'`` so
+consumers can distinguish them from LLM-scored rows (where
+persist_job_assessment overwrites the tag with the actual LLM provider via
+COALESCE). The heuristic ``score`` column itself was dropped in m113; only
+the provider tag remains.
 
 UPDATE path intentionally does NOT write scoring_provider — the
 existing tag is preserved across re-ingestions of an already-known job,
@@ -42,11 +43,12 @@ def conn() -> Iterator[sqlite3.Connection]:
         path.unlink(missing_ok=True)
 
 
-def _make_job(*, title: str = "Senior Eng", score: float = 50.0) -> tuple[ParsedJob, float]:
-    """Build a (parsed, score) pair — post-48.07 the score is a separate kwarg.
+def _make_job(*, title: str = "Senior Eng") -> ParsedJob:
+    """Build a ParsedJob for the heuristic-tag test.
 
-    The score used to ride on Job; after Phase 48.07 callers thread it via
-    ``upsert_job(conn, parsed, score=...)``.
+    The heuristic JobScorer used to populate ``job.score`` before persist, but
+    the ``score`` column was dropped in m113, so nothing threads through
+    ``upsert_job`` anymore — only the ``scoring_provider='heuristic'`` INSERT tag.
     """
     j = Job(
         title=title,
@@ -56,7 +58,7 @@ def _make_job(*, title: str = "Senior Eng", score: float = 50.0) -> tuple[Parsed
         source_url=f"https://example.com/j/{title}",
         description="x" * 250,
     )
-    return ParsedJob.from_job(j), score  # type: ignore[return-value]
+    return ParsedJob.from_job(j)  # type: ignore[return-value]
 
 
 def _read_provider(conn: sqlite3.Connection, dedup_key: str) -> str | None:
@@ -68,22 +70,23 @@ def _read_provider(conn: sqlite3.Connection, dedup_key: str) -> str | None:
 
 class TestInsertTagsHeuristic:
     def test_new_row_tagged_heuristic(self, conn: sqlite3.Connection):
-        parsed, score = _make_job(title="a")
-        upsert_job(conn, parsed, score=score)
+        parsed = _make_job(title="a")
+        upsert_job(conn, parsed)
         assert _read_provider(conn, "testco|a") == "heuristic"
 
-    def test_zero_score_still_tagged(self, conn: sqlite3.Connection):
-        # Heuristic 0.0 (title-exclusion hit) is a real score, not absence.
-        parsed, score = _make_job(title="b", score=0.0)
-        upsert_job(conn, parsed, score=score)
+    def test_second_insert_also_tagged(self, conn: sqlite3.Connection):
+        # Every INSERT-path row is tagged heuristic (the scorer ran pre-persist),
+        # independent of any score value (the score column was dropped in m113).
+        parsed = _make_job(title="b")
+        upsert_job(conn, parsed)
         assert _read_provider(conn, "testco|b") == "heuristic"
 
 
 class TestUpdateLeavesProviderAlone:
     def test_reinsert_preserves_llm_tag(self, conn: sqlite3.Connection):
         # First insert: heuristic tag lands.
-        parsed, score = _make_job(title="c")
-        upsert_job(conn, parsed, score=score)
+        parsed = _make_job(title="c")
+        upsert_job(conn, parsed)
         # Simulate LLM persist_job_assessment marking the row. The real writer
         # co-writes sub_scores_json + classification alongside the model tag
         # (m078 I-04/I-05 require them when scoring_model is set).
@@ -95,8 +98,8 @@ class TestUpdateLeavesProviderAlone:
         )
         conn.commit()
         # Re-upsert (simulates re-ingestion of the same job).
-        parsed2, score2 = _make_job(title="c")
-        upsert_job(conn, parsed2, score=score2)
+        parsed2 = _make_job(title="c")
+        upsert_job(conn, parsed2)
         # LLM tag must survive — the UPDATE path does NOT touch
         # scoring_provider.
         assert _read_provider(conn, "testco|c") == "ollama"

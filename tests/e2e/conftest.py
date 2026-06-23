@@ -46,9 +46,9 @@ def _populate_sample_data(db_path: str) -> None:
         """INSERT INTO jobs
             (dedup_key, title, company, location, sources, source_urls,
              source_id, salary_min, salary_max, description,
-             first_seen, last_seen, score, score_breakdown, user_interest,
+             first_seen, last_seen, score_breakdown, user_interest,
              pipeline_status)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         [
             # Active jobs — visible by default
             (
@@ -64,7 +64,6 @@ def _populate_sample_data(db_path: str) -> None:
                 "Build data products at Stripe. Looking for ML expertise.",
                 week_ago,
                 now,
-                8.5,
                 '{"skills": 0.9}',
                 "interested",
                 "reviewing",
@@ -82,7 +81,6 @@ def _populate_sample_data(db_path: str) -> None:
                 "Design and maintain data pipelines.",
                 week_ago,
                 now,
-                7.0,
                 '{"skills": 0.7}',
                 "unreviewed",
                 "discovered",
@@ -100,7 +98,6 @@ def _populate_sample_data(db_path: str) -> None:
                 "Lead machine learning team at WidgetCo.",
                 week_ago,
                 now,
-                9.1,
                 '{"skills": 0.95}',
                 "interested",
                 "applied",
@@ -119,7 +116,6 @@ def _populate_sample_data(db_path: str) -> None:
                 "Brand new posting from today.",
                 today,
                 now,
-                7.5,
                 "{}",
                 "unreviewed",
                 "discovered",
@@ -138,7 +134,6 @@ def _populate_sample_data(db_path: str) -> None:
                 "Entry-level internship position.",
                 month_ago,
                 now,
-                3.0,
                 "{}",
                 "unreviewed",
                 "dismissed",
@@ -156,7 +151,6 @@ def _populate_sample_data(db_path: str) -> None:
                 "Data analysis role.",
                 month_ago,
                 now,
-                4.0,
                 "{}",
                 "unreviewed",
                 "rejected",

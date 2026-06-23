@@ -3460,8 +3460,8 @@ class TestAtsJdFullStorage:
         dedup_key = Job.normalized_dedup_key("Acme", "Staff Engineer")
         conn.execute(
             """INSERT INTO jobs (dedup_key, title, company, location, sources, source_urls,
-               first_seen, last_seen, score, score_breakdown, user_interest, jd_full)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               first_seen, last_seen, score_breakdown, user_interest, jd_full)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 dedup_key,
                 "Staff Engineer",
@@ -3471,7 +3471,6 @@ class TestAtsJdFullStorage:
                 '["https://jobs.lever.co/acme/xyz"]',
                 "2026-01-01",
                 "2026-01-01",
-                0,
                 "{}",
                 "unreviewed",
                 existing_jd,

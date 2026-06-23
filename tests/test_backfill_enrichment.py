@@ -29,7 +29,6 @@ def insert_job(conn: sqlite3.Connection, dedup_key: str, **kwargs) -> None:
         "description": "Build ML models.",
         "first_seen": "2026-01-01T00:00:00",
         "last_seen": "2026-03-01T00:00:00",
-        "score": 0.0,
         "score_breakdown": "{}",
         "user_interest": "unreviewed",
         "classification": None,
@@ -47,13 +46,13 @@ def insert_job(conn: sqlite3.Connection, dedup_key: str, **kwargs) -> None:
     conn.execute(
         """INSERT OR REPLACE INTO jobs
         (dedup_key, title, company, location, sources, source_urls, source_id,
-         salary_min, salary_max, description, first_seen, last_seen, score,
+         salary_min, salary_max, description, first_seen, last_seen,
          score_breakdown, user_interest, classification, sub_scores_json,
          fit_analysis, jd_full, enrichment_tier,
          pipeline_status)
         VALUES
         (:dedup_key, :title, :company, :location, :sources, :source_urls, :source_id,
-         :salary_min, :salary_max, :description, :first_seen, :last_seen, :score,
+         :salary_min, :salary_max, :description, :first_seen, :last_seen,
          :score_breakdown, :user_interest, :classification, :sub_scores_json,
          :fit_analysis, :jd_full, :enrichment_tier,
          :pipeline_status)""",

@@ -32,8 +32,8 @@ def tmp_db_with_job():
     conn.execute(
         """INSERT INTO jobs
                (dedup_key, title, company, location, sources, source_urls,
-                salary_min, salary_max, first_seen, last_seen, score, pipeline_status)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'), ?, ?)""",
+                salary_min, salary_max, first_seen, last_seen, pipeline_status)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'), ?)""",
         (
             "test-job-key-01",
             "Staff Data Scientist",
@@ -43,7 +43,6 @@ def tmp_db_with_job():
             '["https://linkedin.com/jobs/1"]',
             180000,
             240000,
-            8.5,
             "discovered",
         ),
     )
@@ -226,29 +225,30 @@ class TestPipelineMove:
 class TestKanbanReadsCompositeNotLegacyScore:
     """Regression coverage for issue #214 (vestigial `jobs.score` column).
 
-    Under v3.0 scoring, `jobs.score` is only populated by the ingestion-time
-    heuristic. Jobs that reach scoring via enrichment-backfill or re-sighting
-    keep score=0.0 forever, even though they have a full v3.0 assessment in
-    `sub_scores_json`. The Kanban board must render and sort by the live 6-30
-    composite derived from `sub_scores_json` — never by the dead `score`.
+    Under v3.0 scoring the legacy `jobs.score` column carried no usable signal
+    (rows scored via enrichment-backfill / re-sighting kept score=0.0 even with
+    a full assessment in `sub_scores_json`). The Kanban board renders and sorts
+    by the live 6-30 composite derived from `sub_scores_json`. m113 has since
+    dropped the column outright; these tests keep the composite-only contract
+    honest.
     """
 
     def test_kanban_card_shows_composite_when_score_is_zero(self, client, tmp_db_with_job):
-        """A v3.0-scored row with score=0.0 surfaces its non-zero composite, not '0.0'.
+        """A v3.0-scored row surfaces its non-zero composite badge.
 
-        Seed shape mirrors the production "enrichment-backfilled" cohort:
-        score=0.0 (heuristic never ran) + a populated sub_scores_json that sums
-        to a non-zero composite. The card MUST display the composite badge, not
-        a 0.0 from the legacy column.
+        Seed shape mirrors the production "enrichment-backfilled" cohort: a
+        populated sub_scores_json that sums to a non-zero composite (the legacy
+        ``score`` column was dropped in m113). The card MUST display the
+        composite badge.
         """
         conn = sqlite3.connect(tmp_db_with_job)
         conn.execute(
             """INSERT INTO jobs
                    (dedup_key, title, company, location, sources, source_urls,
-                    salary_min, salary_max, first_seen, last_seen, score,
+                    salary_min, salary_max, first_seen, last_seen,
                     classification, sub_scores_json, pipeline_status)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?,
-                       datetime('now'), datetime('now'), ?, ?, ?, ?)""",
+                       datetime('now'), datetime('now'), ?, ?, ?)""",
             (
                 "v3only|ml-engineer|nyc",
                 "ML Engineer",
@@ -258,7 +258,6 @@ class TestKanbanReadsCompositeNotLegacyScore:
                 '["https://boards.greenhouse.io/v3only/jobs/9"]',
                 190000,
                 250000,
-                0.0,  # vestigial heuristic column — never populated by v3.0
                 "apply",
                 # composite = 5+5+4+5+5+4 = 28 (great bucket >=24)
                 '{"title_fit": 5, "location_fit": 5, "comp_fit": 4, '
@@ -335,12 +334,12 @@ class TestKanbanReadsCompositeNotLegacyScore:
         )
 
     def test_get_jobs_by_status_orders_by_composite_not_score(self, tmp_db_with_job):
-        """Sort order on the Kanban must reflect the composite, NOT jobs.score.
+        """Sort order on the Kanban must reflect the composite.
 
-        Two rows in 'reviewing': row A has high `score` (legacy heuristic) but
-        no sub_scores_json (composite=0); row B has score=0 but a high
-        composite (28). If the query still ordered by `score`, A would lead.
-        With composite ordering, B leads.
+        Two rows in 'reviewing': row A has no sub_scores_json (composite=0);
+        row B has a high composite (28). With composite ordering, B leads.
+        (This guarded against the legacy `jobs.score` column ordering, which
+        was dropped in m113.)
         """
         from job_finder.db._dashboard_queries import get_jobs_by_status
 
@@ -349,10 +348,10 @@ class TestKanbanReadsCompositeNotLegacyScore:
         conn.execute(
             """INSERT INTO jobs
                    (dedup_key, title, company, location, sources, source_urls,
-                    salary_min, salary_max, first_seen, last_seen, score,
+                    salary_min, salary_max, first_seen, last_seen,
                     classification, sub_scores_json, pipeline_status)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?,
-                       datetime('now'), datetime('now'), ?, ?, ?, ?)""",
+                       datetime('now'), datetime('now'), ?, ?, ?)""",
             (
                 "legacy-high-score|x|y",
                 "Legacy High Score",
@@ -362,7 +361,6 @@ class TestKanbanReadsCompositeNotLegacyScore:
                 "[]",
                 100000,
                 150000,
-                93.0,  # legacy heuristic top of range — would win if score ordered
                 "reject",
                 None,  # no v3.0 assessment -> composite=0
                 "reviewing",
@@ -371,10 +369,10 @@ class TestKanbanReadsCompositeNotLegacyScore:
         conn.execute(
             """INSERT INTO jobs
                    (dedup_key, title, company, location, sources, source_urls,
-                    salary_min, salary_max, first_seen, last_seen, score,
+                    salary_min, salary_max, first_seen, last_seen,
                     classification, sub_scores_json, pipeline_status)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?,
-                       datetime('now'), datetime('now'), ?, ?, ?, ?)""",
+                       datetime('now'), datetime('now'), ?, ?, ?)""",
             (
                 "v3-high-composite|x|y",
                 "V3 High Composite",
@@ -384,7 +382,6 @@ class TestKanbanReadsCompositeNotLegacyScore:
                 "[]",
                 100000,
                 150000,
-                0.0,  # v3.0-only — heuristic never ran
                 "apply",
                 '{"title_fit": 5, "location_fit": 5, "comp_fit": 4, '
                 '"domain_match": 5, "seniority_match": 5, "skills_match": 4}',
@@ -399,11 +396,10 @@ class TestKanbanReadsCompositeNotLegacyScore:
 
         reviewing = result.get("reviewing", [])
         keys = [j["dedup_key"] for j in reviewing]
-        # The v3-only row (composite=28) MUST sort before the legacy row
-        # (score=93, composite=0). If it doesn't, ORDER BY is still using
-        # the vestigial score column.
+        # The v3-only row (composite=28) MUST sort before the no-assessment row
+        # (composite=0). If it doesn't, ORDER BY is not using the composite.
         v3_idx = keys.index("v3-high-composite|x|y")
         legacy_idx = keys.index("legacy-high-score|x|y")
         assert v3_idx < legacy_idx, (
-            f"Kanban sort still favors legacy score=93 over v3 composite=28. keys order: {keys}"
+            f"Kanban sort does not favor v3 composite=28 over composite=0. keys order: {keys}"
         )

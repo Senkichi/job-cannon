@@ -100,7 +100,7 @@ def merge_primary_posting_fields(
 
     row = conn.execute(
         "SELECT title, company, company_id, location, salary_min, salary_max, "
-        "posted_date, source_id, score, score_breakdown, unresolved_reasons "
+        "posted_date, source_id, score_breakdown, unresolved_reasons "
         "FROM jobs WHERE dedup_key = ?",
         (dedup_key,),
     ).fetchone()
@@ -180,7 +180,6 @@ def merge_primary_posting_fields(
             conn,
             parsed,
             company_id=row["company_id"],
-            score=row["score"] or 0.0,
             score_breakdown=_safe_json_dict(row["score_breakdown"]),
         )
     except Exception as exc:

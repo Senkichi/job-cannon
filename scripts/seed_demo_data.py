@@ -1044,7 +1044,7 @@ def _insert_jobs(conn: sqlite3.Connection) -> None:
                 dedup_key, title, company, location, sources, source_urls,
                 source_id, salary_min, salary_max, salary_currency, salary_period,
                 description, jd_full,
-                first_seen, last_seen, score, score_breakdown,
+                first_seen, last_seen, score_breakdown,
                 pipeline_status, posted_date, posted_date_precision, notes,
                 fit_analysis, classification, sub_scores_json, scoring_model,
                 scoring_provider,
@@ -1054,7 +1054,7 @@ def _insert_jobs(conn: sqlite3.Connection) -> None:
                 ?, ?, ?, ?, ?, ?,
                 ?, ?, ?, ?, ?,
                 ?, NULL,
-                ?, ?, ?, ?,
+                ?, ?, ?,
                 ?, ?, ?, ?,
                 ?, ?, ?, ?,
                 ?,
@@ -1078,7 +1078,6 @@ def _insert_jobs(conn: sqlite3.Connection) -> None:
                 # jd_full intentionally omitted from VALUES (NULL literal above)
                 first_seen,
                 last_seen,
-                0.0,  # score (v3 uses sub_scores; score column is legacy)
                 json.dumps({}),  # score_breakdown
                 pipeline_status,
                 posted_date_str,

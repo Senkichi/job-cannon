@@ -6,7 +6,7 @@ from datetime import UTC, datetime, timedelta
 
 from job_finder.config import load_config
 
-# High-quality job threshold (user definition)
+# High-quality job threshold (user definition), on the 6-30 composite scale below.
 MIN_HQ_SCORE = 20
 
 # Time windows: (days, label)
@@ -20,6 +20,20 @@ WINDOWS: list[tuple[int, str]] = [
 # Match jobs.sources values case-insensitively (SQLite LOWER)
 _ATS_SQL = "lower(je.value) IN ('ashby','greenhouse','lever','smartrecruiters','workday')"
 _CAREERS_SQL = "je.value IN ('careers_crawl','careers_page')"
+
+# v3.0 "high-quality" signal. The legacy jobs.score column was vestigial under
+# v3.0 (never written by the scoring path — always 0) and dropped in m113, so the
+# old COALESCE(j.score, 0) gate silently matched nothing. The real quality signal
+# is the composite sum of the six 1-5 sub-scores (range 6-30). Mirrors
+# job_finder.db._queries._SUB_SCORE_SUM_SQL, qualified to the ``j`` (jobs) alias.
+_HQ_COMPOSITE_SQL = (
+    "(COALESCE(json_extract(j.sub_scores_json, '$.title_fit'), 0) + "
+    "COALESCE(json_extract(j.sub_scores_json, '$.location_fit'), 0) + "
+    "COALESCE(json_extract(j.sub_scores_json, '$.comp_fit'), 0) + "
+    "COALESCE(json_extract(j.sub_scores_json, '$.domain_match'), 0) + "
+    "COALESCE(json_extract(j.sub_scores_json, '$.seniority_match'), 0) + "
+    "COALESCE(json_extract(j.sub_scores_json, '$.skills_match'), 0))"
+)
 
 
 def _since_iso(days: int) -> str:
@@ -36,7 +50,7 @@ def run_window_metrics(
 ) -> None:
     print(f"\n{'=' * 60}", flush=True)
     print(f"Window: {label} ({days} days) — since {since}", flush=True)
-    print(f"High-quality jobs: COALESCE(score,0) >= {MIN_HQ_SCORE}", flush=True)
+    print(f"High-quality jobs: sub-score sum (of 30) >= {MIN_HQ_SCORE}", flush=True)
     print("=" * 60, flush=True)
 
     ats_ing = conn.execute(
@@ -48,7 +62,7 @@ def run_window_metrics(
         WHERE c.scan_enabled = 1
           AND c.ats_probe_status = 'hit'
           AND COALESCE(j.last_seen, j.first_seen) >= ?
-          AND COALESCE(j.score, 0) >= ?
+          AND {_HQ_COMPOSITE_SQL} >= ?
           AND {_ATS_SQL}
         """,
         (since, MIN_HQ_SCORE),
@@ -64,7 +78,7 @@ def run_window_metrics(
         JOIN json_each(j.sources) je
         WHERE c.scan_enabled = 1
           AND COALESCE(j.last_seen, j.first_seen) >= ?
-          AND COALESCE(j.score, 0) >= ?
+          AND {_HQ_COMPOSITE_SQL} >= ?
           AND {_ATS_SQL}
         """,
         (since, MIN_HQ_SCORE),
@@ -79,7 +93,7 @@ def run_window_metrics(
         WHERE c.scan_enabled = 1
           AND c.ats_probe_status = 'hit'
           AND COALESCE(j.last_seen, j.first_seen) >= ?
-          AND COALESCE(j.score, 0) >= ?
+          AND {_HQ_COMPOSITE_SQL} >= ?
           AND {_ATS_SQL}
         """,
         (since, MIN_HQ_SCORE),
@@ -110,7 +124,7 @@ def run_window_metrics(
           AND c.careers_url IS NOT NULL AND c.careers_url <> ''
           AND (c.ats_probe_status IS NULL OR c.ats_probe_status != 'hit')
           AND COALESCE(j.last_seen, j.first_seen) >= ?
-          AND COALESCE(j.score, 0) >= ?
+          AND {_HQ_COMPOSITE_SQL} >= ?
           AND {_CAREERS_SQL}
         """,
         (since, MIN_HQ_SCORE),
@@ -139,7 +153,7 @@ def run_window_metrics(
             JOIN jobs j ON j.company_id = c.id
             JOIN json_each(j.sources) je
             WHERE c.scan_enabled = 1 AND c.ats_probe_status = 'hit'
-              AND COALESCE(j.score, 0) >= ?
+              AND {_HQ_COMPOSITE_SQL} >= ?
               AND {_ATS_SQL}
               AND COALESCE(j.last_seen, j.first_seen) >= ?
             GROUP BY c.id, c.name_raw
@@ -148,7 +162,7 @@ def run_window_metrics(
             """,
             (MIN_HQ_SCORE, since),
         ).fetchall()
-        print("\nSpot check (7d, ATS-hit, score>=20, ATS-sourced):", flush=True)
+        print(f"\nSpot check (7d, ATS-hit, sub-score>={MIN_HQ_SCORE}, ATS-sourced):", flush=True)
         for r in ats_spot:
             print(
                 f"  - {r['company_id']} {r['name_raw']} "
@@ -167,7 +181,7 @@ def run_window_metrics(
             WHERE c.scan_enabled = 1
               AND c.careers_url IS NOT NULL AND c.careers_url <> ''
               AND (c.ats_probe_status IS NULL OR c.ats_probe_status != 'hit')
-              AND COALESCE(j.score, 0) >= ?
+              AND {_HQ_COMPOSITE_SQL} >= ?
               AND {_CAREERS_SQL}
               AND COALESCE(j.last_seen, j.first_seen) >= ?
             GROUP BY c.id, c.name_raw
@@ -176,7 +190,10 @@ def run_window_metrics(
             """,
             (MIN_HQ_SCORE, since),
         ).fetchall()
-        print("\nSpot check (7d, careers-eligible, score>=20, careers-sourced):", flush=True)
+        print(
+            f"\nSpot check (7d, careers-eligible, sub-score>={MIN_HQ_SCORE}, careers-sourced):",
+            flush=True,
+        )
         for r in spot:
             print(
                 f"  - {r['company_id']} {r['name_raw']} "
@@ -203,7 +220,7 @@ def main() -> None:
     windows = [(args.days, f"{args.days} days")] if args.days is not None else WINDOWS
 
     print(f"DB: {db_path}", flush=True)
-    print(f"High-quality jobs: COALESCE(score,0) >= {MIN_HQ_SCORE}", flush=True)
+    print(f"High-quality jobs: sub-score sum (of 30) >= {MIN_HQ_SCORE}", flush=True)
 
     ats_dist = conn.execute(
         """

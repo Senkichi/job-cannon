@@ -42,7 +42,7 @@ if TYPE_CHECKING:
 # templates and callers. Single source of truth for the projection contract.
 JOBS_ALL_COLUMNS = (
     "dedup_key, title, company, location, sources, source_urls, source_id, "
-    "salary_min, salary_max, salary_currency, salary_period, description, first_seen, last_seen, score, "
+    "salary_min, salary_max, salary_currency, salary_period, description, first_seen, last_seen, "
     "score_breakdown, user_interest, pipeline_status, posted_date, posted_date_precision, notes, "
     "fit_analysis, classification, sub_scores_json, scoring_model, "
     "jd_full, is_stale, "
@@ -404,7 +404,6 @@ def upsert_job(
     parsed: ParsedJob | UnresolvedParsedJob,
     *,
     company_id: int | None = None,
-    score: float = 0.0,
     score_breakdown: dict | None = None,
 ) -> UpsertResult:
     """Insert or update a job. Returns UpsertResult with kind in {"inserted","updated","unchanged"}.
@@ -414,11 +413,12 @@ def upsert_job(
     ``ParsedJob.from_job(job, source_meta=...)`` before calling. Passing
     any other type raises ``TypeError``.
 
-    ``score`` / ``score_breakdown`` are persistence-only decorations applied
-    to the row write — they are not part of the parser contract. Callers
-    that score before persist (e.g. the ingestion runner's heuristic JobScorer)
-    pass them; everyone else gets the default 0.0 / {} written on INSERT and
-    the UPDATE-branch overwrite that has always existed.
+    ``score_breakdown`` is a persistence-only decoration applied to the row
+    write — it is not part of the parser contract. Callers that score before
+    persist (e.g. the ingestion runner's heuristic JobScorer) pass it; everyone
+    else gets the default {} written on INSERT and the UPDATE-branch overwrite
+    that has always existed. (The legacy ``score`` column was dropped in m113 —
+    the v3.0 "Plan 4" single-tier migration tail.)
 
     Merges sources, locations (Remote/Hybrid first), and descriptions
     (keep longer; append divergent content with separator). Keeps first_seen
@@ -449,7 +449,6 @@ def upsert_job(
             "Construct one via ParsedJob.from_job(job, source_meta=...) first."
         )
 
-    _score: float = score
     _score_breakdown: dict = score_breakdown if score_breakdown is not None else {}
 
     # Resolve structured locations:
@@ -672,7 +671,7 @@ def upsert_job(
             conn.execute(
                 f"""UPDATE jobs SET
                     sources = ?, source_urls = ?, last_seen = ?,
-                    score = ?, score_breakdown = ?{salary_clause},
+                    score_breakdown = ?{salary_clause},
                     description = ?,
                     locations_raw = ?,
                     location = ?,
@@ -687,7 +686,6 @@ def upsert_job(
                     json.dumps(sources),
                     json.dumps(urls),
                     now,
-                    _score,
                     json.dumps(_score_breakdown),
                     *salary_params,
                     merged_description,
@@ -780,11 +778,11 @@ def upsert_job(
                      source_id, salary_min, salary_max, salary_currency, salary_period,
                      salary_provenance, salary_observations,
                      description,
-                     first_seen, last_seen, score, score_breakdown, locations_raw,
+                     first_seen, last_seen, score_breakdown, locations_raw,
                      jd_full, scoring_provider,
                      locations_structured, workplace_type, primary_country_code,
                      company_id, posted_date, posted_date_precision, unresolved_reasons)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     parsed.dedup_key,
                     parsed.title,
@@ -802,7 +800,6 @@ def upsert_job(
                     parsed.description,
                     first_seen,
                     now,
-                    _score,
                     json.dumps(_score_breakdown),
                     json.dumps(_incoming_locs_raw),
                     None,  # jd_full — written via set_jd_full() after INSERT

@@ -41,10 +41,11 @@ class TestMigrationOnEmptyDB:
             "description",
             "first_seen",
             "last_seen",
-            "score",
             "score_breakdown",
             "user_interest",
         }
+        # NOTE: the original 0-100 ``score`` column was dropped by m113 (v3.0
+        # Plan 4 tail) — it is intentionally absent from this HEAD-schema check.
         assert original_columns.issubset(cols), (
             f"Missing original columns: {original_columns - cols}"
         )
@@ -103,8 +104,8 @@ class TestMigrationOnEmptyDB:
         }
         assert expected_indexes.issubset(indexes), f"Missing indexes: {expected_indexes - indexes}"
 
-    def test_score_and_last_seen_indexes_exist(self, tmp_db_path):
-        """Indexes on score and last_seen exist (may be from original schema or migration)."""
+    def test_last_seen_index_exists_and_score_index_dropped(self, tmp_db_path):
+        """idx_jobs_last_seen survives; idx_jobs_score was dropped by m113."""
         run_migrations(tmp_db_path)
         conn = sqlite3.connect(tmp_db_path)
         indexes = {
@@ -114,9 +115,9 @@ class TestMigrationOnEmptyDB:
             ).fetchall()
         }
         conn.close()
-        # At minimum these query-critical indexes must exist
-        assert "idx_jobs_score" in indexes, "Missing idx_jobs_score"
         assert "idx_jobs_last_seen" in indexes, "Missing idx_jobs_last_seen"
+        # m113 dropped the vestigial jobs.score column and its index.
+        assert "idx_jobs_score" not in indexes, "idx_jobs_score should be dropped by m113"
 
     def test_new_column_defaults(self, tmp_db_path):
         """New columns have correct defaults (pipeline_status='discovered', notes='')."""
@@ -202,7 +203,7 @@ class TestMigrationPreservesData:
         assert row["location"] == "United States"
         assert row["salary_min"] == 180000
         assert row["salary_max"] == 240000
-        assert row["score"] == 8.5
+        # jobs.score was dropped in m113 (v3.0 Plan 4 tail) — no longer asserted.
         assert row["user_interest"] == "reviewing"
 
     def test_new_columns_have_defaults_on_existing_rows(self, sample_db_with_jobs):
@@ -1025,13 +1026,13 @@ class TestMigration41DestructiveShape:
         cols = {row[1] for row in conn.execute("PRAGMA table_info(jobs)").fetchall()}
         conn.close()
         # NOTE: eval_blocks / opus_score / job_archetype were preserved by m41 but
-        # later dropped by m083 (Phase 49.06), so they are absent after the full
-        # chain and intentionally excluded from this preservation check.
+        # later dropped by m083 (Phase 49.06); ``score`` was preserved by m41 but
+        # dropped by m113 (v3.0 Plan 4 tail). All are absent after the full chain
+        # and intentionally excluded from this preservation check.
         for preserved in (
             "fit_analysis",
             "scoring_provider",
             "scoring_model",
-            "score",
             "legitimacy_note",
             "classification",
             "sub_scores_json",

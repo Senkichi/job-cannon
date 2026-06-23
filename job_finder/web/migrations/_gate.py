@@ -37,8 +37,12 @@ class MigrationBlockedError(Exception):
 def _check_backup_recent(
     user_data_root: str | None = None,
     initial_version: int = 0,
+    migration_label: str = "Migration 41",
 ) -> None:
-    """Preflight gate for Migration 41: require a recent backup OR explicit override.
+    """Preflight gate for a destructive migration: require a recent backup OR explicit override.
+
+    ``migration_label`` names the calling migration in the blocked-error message
+    (defaults to "Migration 41", the original caller; m113 passes its own label).
 
     Looks for backup_userdata_*.tar.gz files under `user_data_root` (defaults
     to CWD when None). Raises MigrationBlockedError when:
@@ -64,7 +68,7 @@ def _check_backup_recent(
     backups = sorted(glob.glob(pattern), reverse=True)
     if not backups:
         raise MigrationBlockedError(
-            "Migration 41 blocked: no backup_userdata_*.tar.gz found in the user-data directory.\n"
+            f"{migration_label} blocked: no backup_userdata_*.tar.gz found in the user-data directory.\n"
             "Job Cannon normally takes an automatic backup before any destructive migration, "
             "but this gate requires a legacy tarball backup as an additional safeguard.\n"
             "Set GSD_BACKUP_CONFIRMED=1 to proceed if you have confirmed a recent backup exists "
@@ -73,7 +77,7 @@ def _check_backup_recent(
     age_h = (time.time() - os.path.getmtime(backups[0])) / 3600.0
     if age_h > 24.0:
         raise MigrationBlockedError(
-            f"Migration 41 blocked: most recent backup ({backups[0]}) is "
+            f"{migration_label} blocked: most recent backup ({backups[0]}) is "
             f"{age_h:.1f}h old (>24h).\n"
             f"Set GSD_BACKUP_CONFIRMED=1 to proceed if you have a recent automatic backup "
             f"in <user-data>/backups/ (jobs_before_migrate_*.db)."

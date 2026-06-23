@@ -19,18 +19,38 @@ import pytest
 
 from job_finder.web.migrations.m071_tag_heuristic_only_scores import MIGRATION, _tag
 from job_finder.web.migrations.types import MigrationContext
-from tests.helpers.contract_triggers import (
-    run_migrations_without_contract as run_migrations,
-)
 
 
 @pytest.fixture
 def migrated_db():
+    """A minimal pre-m113 ``jobs`` table (``score`` column present).
+
+    m071 is a score-era healer (``UPDATE ... WHERE score IS NOT NULL``); m113
+    later drops the ``score`` column, so this migration is exercised in isolation
+    against a snapshot that still has it rather than against HEAD. ``_tag`` only
+    touches ``score`` / ``scoring_provider``, so a minimal hand-rolled table is
+    sufficient (and side-steps the m078 contract triggers the live schema adds).
+    """
     fd, path = tempfile.mkstemp(suffix=".db")
     os.close(fd)
-    run_migrations(path)
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
+    conn.execute(
+        """CREATE TABLE jobs (
+            dedup_key TEXT PRIMARY KEY,
+            title TEXT,
+            company TEXT,
+            location TEXT,
+            source_urls TEXT,
+            pipeline_status TEXT,
+            sources TEXT,
+            score REAL,
+            scoring_provider TEXT,
+            first_seen TEXT,
+            last_seen TEXT
+        )"""
+    )
+    conn.commit()
     yield path, conn
     conn.close()
     if os.path.exists(path):

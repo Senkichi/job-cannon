@@ -55,9 +55,9 @@ def _insert_job(conn: sqlite3.Connection, dedup_key: str) -> None:
     conn.execute(
         """INSERT INTO jobs
                (dedup_key, title, company, location, sources, source_urls,
-                first_seen, last_seen, score, score_breakdown, locations_raw,
+                first_seen, last_seen, score_breakdown, locations_raw,
                 unresolved_reasons)
-           VALUES (?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'), 0, '{}', '[]', '[]')""",
+           VALUES (?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'), '{}', '[]', '[]')""",
         (dedup_key, "Test Job", "TestCo", "", '["test"]', "[]"),
     )
     conn.commit()

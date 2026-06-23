@@ -65,12 +65,12 @@ def _seed_job(
         """INSERT OR REPLACE INTO jobs
            (dedup_key, title, company, location, sources, source_urls,
             jd_full, enrichment_tier, unresolved_reasons,
-            first_seen, last_seen, score, score_breakdown, user_interest)
+            first_seen, last_seen, score_breakdown, user_interest)
            VALUES
            (:dedup_key, 'Data Scientist', 'EY', :location, '["careers_crawl"]',
             '["https://careers.ey.com/jobs/1"]',
             :jd_full, :enrichment_tier, :unresolved_reasons,
-            '2026-01-01T00:00:00', '2026-06-01T00:00:00', 0.0, '{}', 'unreviewed')""",
+            '2026-01-01T00:00:00', '2026-06-01T00:00:00', '{}', 'unreviewed')""",
         {
             "dedup_key": dedup_key,
             "location": location,
