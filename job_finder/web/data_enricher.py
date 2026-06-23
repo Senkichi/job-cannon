@@ -209,6 +209,7 @@ def enrich_job(
                         job_row["dedup_key"],
                         job_row["description"][:JD_STORAGE_MAX_CHARS],
                         source="data_enricher",
+                        title=job_row.get("title"),
                     )
                 except Exception as e:
                     logger.debug("Description promotion DB write failed: %s", e)
@@ -1117,7 +1118,11 @@ def _persist(conn: Any, job_row: dict, enriched: dict, tier_name: str) -> None:
     if jd_full_value is not None:
         try:
             wrote_jd = _set_jd_full(
-                conn, dedup_key, jd_full_value, source="data_enricher._persist"
+                conn,
+                dedup_key,
+                jd_full_value,
+                source="data_enricher._persist",
+                title=job_row.get("title"),
             )
         except Exception as e:
             logger.warning("_persist: jd_full write failed for '%s': %s", dedup_key, e)

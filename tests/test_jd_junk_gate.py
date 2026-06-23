@@ -164,3 +164,62 @@ def test_none_text_rejected(db):
 
     assert result is False
     assert _read_jd(conn, dedup_key) is None
+
+
+# ---------------------------------------------------------------------------
+# Title cross-field reject (I-17), wired at the storage chokepoint.
+#
+# A substantial body that shares ZERO of the title's content stems is a
+# wrong-page capture. Previously set_jd_full was title-blind, so this only
+# fired later in the adjudicator re-sweep; the enrichment write path now passes
+# the title so the reject happens before the bad body is ever stored + scored.
+# ---------------------------------------------------------------------------
+
+# ≥300 chars, passes every content-only signal (no block/listing/404/expired
+# prefix), and mentions none of the "Pediatric Dental Hygienist" stems.
+_OFFTOPIC_BODY = (
+    "Our distribution center is hiring a warehouse associate to operate "
+    "forklifts and pallet jacks across the overnight shift. You will load and "
+    "unload trucks, stage outbound freight, scan inventory into the warehouse "
+    "system, and keep the loading dock organized and safe. Prior warehouse "
+    "experience and a clean safety record are strongly preferred for this role."
+)
+
+
+def test_title_zero_overlap_rejected_when_title_supplied(db):
+    """A title-mismatched body is rejected at write time when title is passed."""
+    _, conn = db
+    dedup_key = "test|title_mismatch"
+    _insert_job(conn, dedup_key)
+    assert len(_OFFTOPIC_BODY) >= 300, "test setup: body must clear the x-field floor"
+
+    result = set_jd_full(
+        conn, dedup_key, _OFFTOPIC_BODY, source="test", title="Pediatric Dental Hygienist"
+    )
+
+    assert result is False, "title zero-overlap body must be rejected when title supplied"
+    assert _read_jd(conn, dedup_key) is None
+
+
+def test_same_body_stored_when_title_omitted(db):
+    """Back-compat: with no title, the gate degrades to content-only and stores."""
+    _, conn = db
+    dedup_key = "test|no_title"
+    _insert_job(conn, dedup_key)
+
+    result = set_jd_full(conn, dedup_key, _OFFTOPIC_BODY, source="test")
+
+    assert result is True, "content-only gate (no title) must still store the body"
+    assert _read_jd(conn, dedup_key) == _OFFTOPIC_BODY
+
+
+def test_grounded_title_stored(db):
+    """A body grounded in its own title passes the cross-field check and stores."""
+    _, conn = db
+    dedup_key = "test|grounded"
+    _insert_job(conn, dedup_key)
+
+    result = set_jd_full(conn, dedup_key, _OFFTOPIC_BODY, source="test", title="Forklift Operator")
+
+    assert result is True, "title-grounded body must store"
+    assert _read_jd(conn, dedup_key) == _OFFTOPIC_BODY

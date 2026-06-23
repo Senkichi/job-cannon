@@ -42,6 +42,11 @@ def strip_html_to_text(text: str) -> str:
 
     Converts block-level closing tags to newlines and <li> to bullet prefixes
     so the plain-text structured renderer can detect headers and bullets.
+    Remaining (inline) tags are replaced with a space rather than removed, so
+    two adjacent inline elements keep their word boundary
+    (``<b>Foo</b><i>Bar</i>`` → ``"Foo Bar"``, not ``"FooBar"``) — the property
+    the portal-search ``_strip_html`` previously got from BeautifulSoup's
+    ``get_text(separator=" ")`` and now inherits by delegating here.
     """
     # Convert <br> variants to newlines
     text = re.sub(r"<br\s*/?>", "\n", text, flags=re.IGNORECASE)
@@ -55,10 +60,16 @@ def strip_html_to_text(text: str) -> str:
         text,
         flags=re.IGNORECASE,
     )
-    # Strip all remaining HTML tags
-    text = re.sub(r"<[^>]+>", "", text)
+    # Strip remaining (inline) tags, leaving a space so adjacent inline elements
+    # do not fuse into one token.
+    text = re.sub(r"<[^>]+>", " ", text)
     # Decode any remaining entities (e.g. &amp; &nbsp;)
     text = _html.unescape(text)
+    # Collapse runs of spaces/tabs introduced by tag removal (newlines preserved
+    # so the structured renderer still sees paragraph/bullet breaks), then trim
+    # whitespace hugging the newlines.
+    text = re.sub(r"[^\S\n]{2,}", " ", text)
+    text = re.sub(r"[^\S\n]*\n[^\S\n]*", "\n", text)
     # Collapse 3+ newlines to 2
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip()

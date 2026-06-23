@@ -24,10 +24,12 @@ build_jd_junk_trigger_sql(col) -> str
     the canonical constants. Imported by ``m078_contract_invariants`` so the
     trigger definition stays in sync with the Python gate.
 
-set_jd_full(conn, dedup_key, text, *, source) -> bool
+set_jd_full(conn, dedup_key, text, *, source, title=None) -> bool
     Gated jd_full DB writer — the ONLY sanctioned UPDATE path for
     ``jobs.jd_full`` outside of the INSERT branch in ``upsert_job``.
-    All direct writers in ``job_finder/web/`` must route through here.
+    All direct writers in ``job_finder/web/`` must route through here. Pass
+    ``title`` when available so the title cross-field reject (I-17) fires at the
+    write chokepoint, not only in the later adjudicator re-sweep.
 """
 
 from __future__ import annotations
@@ -132,12 +134,21 @@ def set_jd_full(
     text: str | None,
     *,
     source: str,
+    title: str | None = None,
 ) -> bool:
     """Write ``jd_full`` to the DB after normalizing and passing the content-density gate.
 
     Applies ``normalize_jd`` first (lossless HTML → plain-text conversion) so
     that HTML-bloated text is cleaned before the junk gate and the DB write.
     Already-plain text passes through unchanged (idempotent).
+
+    ``title`` is optional: when the caller has the job's title (the enrichment
+    write path always does), it is passed to ``jd_content_reject`` so the
+    title cross-field signal (I-17 ``title_zero_overlap`` — a substantial body
+    that shares ZERO of the title's content stems is a wrong-page capture) fires
+    at this single storage chokepoint, not only later in the adjudicator
+    re-sweep. When ``title`` is None the gate degrades to the content-only
+    signals exactly as before (back-compatible).
 
     Returns True if ``jd_full`` was written; False if junk-gated (no write).
     On gate hit, logs at WARN level with the source tag and first 60 chars.
@@ -167,13 +178,14 @@ def set_jd_full(
         )
         return False
     # jd-content contract (fail-closed): refuse to store a body that is provably
-    # not a job posting (Wikipedia / bot wall / listing index / 404 / expired).
-    # Content-only signals are applied here (the storage chokepoint has no title);
-    # the title cross-field signal is added at the ParsedJob.from_job ingest gate
-    # and the versioned re-sweep, which both hold the title. Rejecting here means a
-    # bad enrichment capture is never persisted, so the fetcher falls through to
-    # the next tier instead of poisoning the score.
-    _content_rej = jd_content_reject(text)
+    # not a job posting (Wikipedia / bot wall / listing index / 404 / expired, or
+    # — when ``title`` is supplied — a substantial body with ZERO title-stem
+    # overlap, the wired I-17 ``title_zero_overlap``). Rejecting here means a bad
+    # capture is never persisted, so the fetcher falls through to the next tier
+    # instead of poisoning the score. CLEAN and AMBIGUOUS bodies both pass this
+    # gate (jd_content_reject returns None for them); AMBIGUOUS is resolved later
+    # by the background adjudicator, never on this hot write path.
+    _content_rej = jd_content_reject(text, title)
     if _content_rej is not None:
         logger.warning(
             "set_jd_full: content-gated [source=%s] reason=%s signal=%s prefix=%r",
