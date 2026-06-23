@@ -3,6 +3,19 @@
 {% block title %}Settings — Job Cannon{% endblock %}
 
 {% block content %}
+{#- Source status dot: emerald = enabled & ready, amber = enabled but needs setup
+    (missing key / failing auth), slate = disabled. `healthy` is whatever evidence
+    of readiness the caller has (auth probe result for Gmail/IMAP, secret presence
+    for key-based sources, the master switch for the keyless portals). -#}
+{% macro source_dot(enabled, healthy) %}
+  {%- if not enabled -%}
+    <span class="w-2 h-2 rounded-full bg-slate-500 inline-block" title="Disabled"></span>
+  {%- elif healthy -%}
+    <span class="w-2 h-2 rounded-full bg-emerald-400 inline-block" title="Enabled — ready"></span>
+  {%- else -%}
+    <span class="w-2 h-2 rounded-full bg-amber-400 inline-block" title="Enabled — needs setup"></span>
+  {%- endif -%}
+{% endmacro %}
 <div class="max-w-4xl mx-auto space-y-6">
 
   <!-- Page header -->
@@ -100,7 +113,10 @@
         <!-- Gmail -->
         <div>
           <h3 class="text-sm font-semibold text-slate-200 mb-3 flex items-center gap-2">
-            <span class="w-2 h-2 rounded-full bg-red-400 inline-block"></span>
+            {{ source_dot(
+                 config.get('sources', {}).get('gmail', {}).get('enabled', False),
+                 inbox_status and inbox_status.gmail_auth and inbox_status.gmail_auth.ok
+               ) }}
             Gmail
           </h3>
           <div class="grid grid-cols-2 gap-4">
@@ -146,7 +162,10 @@
         {% set imap_cfg = config.get('sources', {}).get('imap', {}) %}
         <div>
           <h3 class="text-sm font-semibold text-slate-200 mb-3 flex items-center gap-2">
-            <span class="w-2 h-2 rounded-full bg-red-400 inline-block"></span>
+            {{ source_dot(
+                 imap_cfg.get('enabled', False),
+                 inbox_status and inbox_status.imap_auth and inbox_status.imap_auth.ok
+               ) }}
             Gmail (IMAP)
           </h3>
           <p class="text-xs text-slate-400 mb-3">
@@ -206,7 +225,8 @@
         <!-- Stage 7: Job Portals (free) — visible by default, no signup required for keyless portals -->
         <div>
           <h3 class="text-sm font-semibold text-slate-200 mb-3 flex items-center gap-2">
-            <span class="w-2 h-2 rounded-full bg-emerald-400 inline-block"></span>
+            {% set _ps_enabled = config.get('sources', {}).get('portal_search', {}).get('enabled', False) %}
+            {{ source_dot(_ps_enabled, _ps_enabled) }}
             Job Portals (free)
           </h3>
           <p class="text-xs text-slate-500 mb-3">
@@ -385,7 +405,10 @@
         <!-- SerpAPI -->
         <div>
           <h3 class="text-sm font-semibold text-slate-200 mb-3 flex items-center gap-2">
-            <span class="w-2 h-2 rounded-full bg-green-400 inline-block"></span>
+            {{ source_dot(
+                 config.get('sources', {}).get('serpapi', {}).get('enabled', False),
+                 (secret_set or {}).get('sources.serpapi.api_key')
+               ) }}
             SerpAPI (Google Jobs)
           </h3>
           <div class="grid grid-cols-2 gap-4 mb-3">
@@ -438,7 +461,10 @@
         <!-- DataForSEO -->
         <div>
           <h3 class="text-sm font-semibold text-slate-200 mb-3 flex items-center gap-2">
-            <span class="w-2 h-2 rounded-full bg-amber-400 inline-block"></span>
+            {{ source_dot(
+                 config.get('sources', {}).get('dataforseo', {}).get('enabled', False),
+                 (secret_set or {}).get('sources.dataforseo.api_key')
+               ) }}
             DataForSEO (Google Jobs SERP)
           </h3>
           <p class="text-xs text-slate-500 mb-3">
@@ -520,7 +546,10 @@
         <!-- Google CSE -->
         <div>
           <h3 class="text-sm font-semibold text-slate-200 mb-3 flex items-center gap-2">
-            <span class="w-2 h-2 rounded-full bg-blue-400 inline-block"></span>
+            {{ source_dot(
+                 config.get('sources', {}).get('google_cse', {}).get('enabled', False),
+                 (secret_set or {}).get('sources.google_cse.api_key') and (secret_set or {}).get('sources.google_cse.cse_id')
+               ) }}
             Google Programmable Search (CSE)
           </h3>
           <p class="text-xs text-slate-500 mb-3">
