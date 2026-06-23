@@ -9,16 +9,15 @@ pipeline failed. Uses a multi-step agentic loop:
 4. Ollama validates whether fetched content is the right job posting
 5. Extracts and persists jd_full on success
 
-Designed for batch backfill, not real-time pipeline use (Playwright is heavy).
-Requires: Ollama running locally, Playwright + Chromium installed.
+Batch-only by design (Playwright is heavy): ONE Chromium is launched and reused
+across every row in a run. There is deliberately no per-row entry point — the
+former ``enrich_one_job`` was removed because the synchronous enrich_job cascade
+called it per row and spawned a fresh browser each time. Requires: Ollama running
+locally, Playwright + Chromium installed.
 
 Usage:
     from job_finder.web.agentic_enricher import run_agentic_backfill
     count = run_agentic_backfill("jobs.db", config, limit=50)
-
-    # Single-job entry point (used by data_enricher.enrich_job's agentic tier):
-    from job_finder.web.agentic_enricher import enrich_one_job
-    result = enrich_one_job(job_row, conn, config)  # -> {"jd_full": "..."} or {}
 """
 
 import logging
@@ -205,10 +204,9 @@ def _create_browser(playwright):
 def _fetch_page_text(page, url: str, timeout_ms: int = 15000) -> str | None:
     """Fetch a URL with Playwright and return cleaned text content.
 
-    Uses extract_content_from_html() from enrichment_tiers, which strips
-    noise tags (script, style, nav, etc.) via BeautifulSoup and returns
-    cleaned text. Auth-wall detection via is_short_auth_page() and
-    is_chrome_or_login_page().
+    Routes the rendered HTML through ``platform_extractor.extract_clean_jd``
+    (platform-scoped container + page-chrome strip; the single chokepoint).
+    Auth-wall detection via is_short_auth_page() and is_chrome_or_login_page().
 
     LinkedIn URLs are tried with the lightweight fetch_linkedin_jd() extractor
     first (no Playwright needed). Falls through to Playwright if that fails.
@@ -232,12 +230,15 @@ def _fetch_page_text(page, url: str, timeout_ms: int = 15000) -> str | None:
         html = page.content()
 
         from job_finder.web.enrichment_tiers import (
-            extract_content_from_html,
             is_chrome_or_login_page,
             is_short_auth_page,
         )
+        from job_finder.web.platform_extractor import extract_clean_jd
 
-        text = extract_content_from_html(html)
+        # Single chokepoint: platform-scoped + chrome-stripped extraction. Passing
+        # the URL lets a Playwright-rendered LinkedIn page be scoped to its JD
+        # container instead of stored whole (JD + similar-jobs + footer chrome).
+        text = extract_clean_jd(url, html)
         if not text:
             return None
 
@@ -518,63 +519,12 @@ def enrich_single_job(
     return None
 
 
-# ---------------------------------------------------------------------------
-# Single-job entry point (used by data_enricher.enrich_job's agentic tier)
-# ---------------------------------------------------------------------------
-
-
-def enrich_one_job(
-    job_row: dict,
-    conn: Any,
-    config: dict,
-) -> dict:
-    """Single-job entry point for the agentic enricher.
-
-    Spins up Playwright on each call, runs the agentic loop for
-    one job, returns a dict suitable for splatting into a jobs-table UPDATE.
-    Caller is responsible for persisting (atomically with enrichment_tier).
-
-    Costs: Playwright launches a Chromium instance. This is significantly
-    more expensive per-row than the batch path (run_agentic_backfill), so
-    the synchronous cascade in data_enricher.enrich_job() should only invoke
-    this for jobs that have truly exhausted cheaper tiers (free → ddg → serpapi).
-
-    Args:
-        job_row: Job dict — must have 'title' and 'company'.
-        conn: SQLite connection for cost recording.
-        config: Application config dict for provider routing.
-
-    Returns:
-        Dict with 'jd_full' on success, empty dict on any failure
-        (Playwright unavailable, no URLs found, no high-confidence match).
-        Never raises.
-    """
-    title = job_row.get("title")
-    company = job_row.get("company")
-    if not title or not company:
-        return {}
-
-    # Lazy imports for Playwright
-    try:
-        from playwright.sync_api import sync_playwright
-    except ImportError as exc:
-        logger.warning("enrich_one_job: Playwright unavailable: %s", exc)
-        return {}
-
-    try:
-        with sync_playwright() as pw:
-            browser, page = _create_browser(pw)
-            try:
-                jd = enrich_single_job(job_row, page, conn=conn, config=config)
-            finally:
-                browser.close()
-    except Exception as exc:
-        logger.warning("enrich_one_job: agentic loop failed: %s", exc)
-        return {}
-
-    if jd:
-        return {"jd_full": jd}
-    return {}
+# NOTE: the former per-row ``enrich_one_job`` entry point was removed
+# (2026-06-22). It launched a fresh Chromium on every call, and the synchronous
+# enrich_job cascade invoked it per row inside the uncapped run_enrichment_backfill
+# loop — a process-spawn storm. The agentic tier now runs ONLY via the batched
+# ``run_agentic_backfill`` below (one browser reused across all rows), driven both
+# inline at the tail of run_enrichment_backfill and nightly by the scheduler.
 
 
 # ---------------------------------------------------------------------------
@@ -642,7 +592,8 @@ def run_agentic_backfill(
                     COALESCE(json_extract(sub_scores_json, '$.comp_fit'), 0) +
                     COALESCE(json_extract(sub_scores_json, '$.domain_match'), 0) +
                     COALESCE(json_extract(sub_scores_json, '$.seniority_match'), 0) +
-                    COALESCE(json_extract(sub_scores_json, '$.skills_match'), 0)) DESC
+                    COALESCE(json_extract(sub_scores_json, '$.skills_match'), 0)) DESC,
+                   first_seen DESC
                LIMIT ?""",
             (limit,),
         ).fetchall()
