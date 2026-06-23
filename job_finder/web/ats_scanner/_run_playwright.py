@@ -31,22 +31,19 @@ import sqlite3
 import time
 
 from job_finder.json_utils import utc_now_iso
-from job_finder.web.ats_platforms._platforms_icims import SCANNER as _ICIMS_SCANNER
 from job_finder.web.ats_platforms._platforms_icims import PlaywrightPlatformScanner
 from job_finder.web.ats_prober import _handle_scan_error, _is_transient_error
+from job_finder.web.ats_registry import PLAYWRIGHT_PLATFORMS
+from job_finder.web.ats_registry import PLAYWRIGHT_SCANNERS as _PLAYWRIGHT_SCANNERS
 from job_finder.web.db_helpers import standalone_connection
 
 logger = logging.getLogger(__name__)
 
-# Platforms handled by the Playwright-class path rather than the requests
-# registry. Phase A excludes these so ``_scan_one_company_via_ats_api`` never
-# sees them and logs "Unknown ATS platform"; this phase owns them instead.
-_PLAYWRIGHT_SCANNERS: dict[str, PlaywrightPlatformScanner] = {
-    "icims": _ICIMS_SCANNER,
-}
-
-PLAYWRIGHT_PLATFORMS: frozenset[str] = frozenset(_PLAYWRIGHT_SCANNERS)
-"""Platform keys routed to the Playwright phase (consumed by ``_run.py``)."""
+# The Playwright-class fetch registry (``_PLAYWRIGHT_SCANNERS``) and its platform
+# set (``PLAYWRIGHT_PLATFORMS``) are now derived in ``job_finder.web.ats_registry``
+# — the single source of truth — and imported above. Phase A excludes
+# ``PLAYWRIGHT_PLATFORMS`` so ``_scan_one_company_via_ats_api`` never sees these
+# platforms and logs "Unknown ATS platform"; this phase owns them instead.
 
 # Default load-more click budget when ``config.ats.icims_max_load_more_clicks``
 # is unset. Matches the scanner module's own default.
