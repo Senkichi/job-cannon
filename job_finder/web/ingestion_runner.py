@@ -404,22 +404,38 @@ def _fetch_serpapi(config: dict, summary: dict, db_path: str = "") -> list[Job]:
 
 
 def _fetch_imap(config: dict, summary: dict, db_path: str = "") -> list[Job]:
-    """Fetch IMAP jobs and drain extraction_records into the health monitor.
+    """Fetch IMAP jobs, drain extraction_records, and log run-level activity.
 
     db_path is passed explicitly to avoid the config-path divergence hazard —
     standalone_connection here uses the same db_path as the pipeline caller,
     not whatever the config's db section says.
+
+    A run-level row is written to email_parse_log (sender='imap') mirroring the
+    Gmail path so the inbox-health check (onboarding.inbox_check) registers IMAP
+    activity — without it, IMAP-only installs always read RED ("no job alerts").
+    No-DB callers (benchmarks, unit tests) pass no db_path and skip the write.
     """
-    if db_path:
+    if not db_path:
+        return _run_simple_source(_IMAP_SPEC, config, summary)
 
-        def _drain(source):
-            with standalone_connection(db_path) as c:
-                _record_email_extractions(source, c, config)
+    def _drain(source):
+        with standalone_connection(db_path) as c:
+            _record_email_extractions(source, c, config)
 
-        return _run_simple_source(
-            _IMAP_SPEC, config, summary, post_extract=_drain, db_path=db_path
-        )
-    return _run_simple_source(_IMAP_SPEC, config, summary)
+    run_id = f"imap_run_{utc_now_iso()}"
+    errors_before = len(summary.get("imap_errors", []))
+    jobs = _run_simple_source(_IMAP_SPEC, config, summary, post_extract=_drain, db_path=db_path)
+
+    # Mirror the Gmail run-level email_parse_log write so inbox_check sees IMAP
+    # activity. Skip when the source is disabled (no run actually happened).
+    imap_enabled = bool(config.get("sources", {}).get("imap", {}).get("enabled", False))
+    if imap_enabled:
+        new_errors = summary.get("imap_errors", [])[errors_before:]
+        with standalone_connection(db_path) as c:
+            _log_to_email_parse_log(
+                c, run_id, "imap", len(jobs), new_errors[-1] if new_errors else None
+            )
+    return jobs
 
 
 def _fetch_portal_search(

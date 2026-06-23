@@ -4,7 +4,7 @@ Ties together the auth probe (`gmail_test.check_oauth` / `imap_test.check_imap`)
 and an `email_parse_log` activity query into a single GREEN/YELLOW/RED status
 the Settings page can render and the dashboard can banner.
 
-Status semantics (per `.planning/no-key-compensation/FOLLOWUPS.md`):
+Status semantics:
 
 - ``green``  — auth OK + ≥1 job-bearing email parsed in the last 72 hours
 - ``yellow`` — auth OK + emails arrived but all failed to parse (or yielded 0 jobs)
@@ -15,10 +15,10 @@ The check is read-only — no DB writes, no network calls except the configured
 source's auth probe. Safe to call on demand from a Settings button without
 side-effects.
 
-IMAP scope (deliberate limitation): the auth probe runs end-to-end, but the
-activity half is gmail-only because `_fetch_imap` does not currently write to
-`email_parse_log`. When IMAP wiring is added, this module's activity query
-should grow an IMAP branch.
+Both Gmail and IMAP are covered: each ingestion path writes a run-level row to
+``email_parse_log`` (sender ``gmail`` / ``imap``) and the activity query below is
+sender-agnostic, so an IMAP-only install reaches ``green`` once it has parsed a
+job-bearing alert in the window.
 """
 
 from __future__ import annotations
@@ -148,7 +148,7 @@ def run_inbox_check(
             window_hours=window_hours,
         )
 
-    # ---- Activity query (Gmail-only — IMAP doesn't write email_parse_log) ----
+    # ---- Activity query (sender-agnostic: counts gmail + imap run rows) ----
     emails_in_window, jobs_in_window = _count_activity(conn, now, window_hours)
 
     if emails_in_window == 0:

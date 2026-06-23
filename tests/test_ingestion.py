@@ -2502,7 +2502,8 @@ class TestNonPortalIngestionTitleGate:
         conn.close()
 
     def test_imap_gate_drops_off_target(self, gated_config):
-        """`_fetch_imap`: same shape as gmail but no email_parse_log writes."""
+        """`_fetch_imap`: same gate shape as gmail; no email_parse_log write
+        when called without a db_path (benchmark / unit-test path)."""
         from job_finder.web.ingestion_runner import _fetch_imap
 
         with patch("job_finder.web.ingestion_runner.ImapSource") as MockImap:
@@ -2515,6 +2516,31 @@ class TestNonPortalIngestionTitleGate:
 
         assert [j.title for j in jobs] == ["Senior Data Scientist"]
         assert summary["imap_fetched"] == 1
+
+    def test_imap_writes_run_level_activity_log(self, gated_config, migrated_db_path):
+        """`_fetch_imap` with a db_path writes a run-level email_parse_log row
+        (sender='imap', jobs_found = post-gate count) so the inbox-health check
+        registers IMAP activity — without it IMAP-only installs always read RED."""
+        import sqlite3
+
+        from job_finder.web.ingestion_runner import _fetch_imap
+
+        with patch("job_finder.web.ingestion_runner.ImapSource") as MockImap:
+            MockImap.return_value.fetch_jobs.return_value = (self._mixed_jobs("imap"), {})
+            MockImap.return_value.extraction_records = []
+            summary: dict = {"imap_errors": []}
+            _fetch_imap(gated_config, summary, db_path=migrated_db_path)
+
+        assert summary["imap_fetched"] == 1  # post-gate
+        conn = sqlite3.connect(migrated_db_path)
+        row = conn.execute(
+            "SELECT sender, jobs_found, error FROM email_parse_log WHERE sender = 'imap'"
+        ).fetchone()
+        conn.close()
+        assert row is not None, "no run-level imap row written to email_parse_log"
+        assert row[0] == "imap"
+        assert row[1] == 1  # matches post-gate imap_fetched
+        assert row[2] is None
 
     def test_imap_missing_email_surfaces_error(self, gated_config):
         """`_fetch_imap`: empty `sources.imap.email` must NOT fail silently.

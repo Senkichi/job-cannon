@@ -206,6 +206,28 @@ def test_imap_only_missing_credentials_returns_red(conn):
     imap_fn.assert_not_called()
 
 
+def test_imap_only_green_with_activity(conn):
+    """IMAP-only install with healthy auth + an 'imap' run row in the window
+    reaches GREEN. Regression guard: _fetch_imap now writes email_parse_log, so
+    IMAP-only installs are no longer permanently RED."""
+    now = datetime(2026, 5, 22, 12, 0, 0)
+    recent = (now - timedelta(hours=3)).isoformat()
+    _insert_row(conn, "imap_run_x", "imap", recent, jobs_found=7)
+
+    config = {"sources": {"imap": {"enabled": True, "email": "u@x.com"}}}
+    imap_ok = ImapTestResult(ok=True, error_kind=None, message="ok")
+
+    with (
+        patch("job_finder.web.onboarding.inbox_check.check_imap", return_value=imap_ok),
+        patch("job_finder.web.onboarding.inbox_check.get_secret", return_value="pw"),
+    ):
+        result = run_inbox_check(config, conn, window_hours=72, now=now)
+
+    assert result.status == "green"
+    assert result.source_kind == "imap"
+    assert result.jobs_in_window == 7
+
+
 def test_db_error_in_activity_query_degrades_quietly(conn):
     """If the activity query raises, treat as 0 emails (RED) rather than crashing."""
     config = {"sources": {"gmail": {"enabled": True}}}
