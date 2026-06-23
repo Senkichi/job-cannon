@@ -20,6 +20,7 @@ import requests
 from jsonschema import ValidationError, validate
 
 # DEFAULT_MODEL_* imports removed in Phase 39 (replaced by _PROVIDER_DEFAULTS)
+from job_finder.constants import SUB_SCORE_KEYS
 from job_finder.json_utils import local_day_utc_window
 from job_finder.web.claude_client import (  # noqa: F401 — record_cost + BudgetExceededError re-exported for callers/tests
     FREE_PROVIDERS,
@@ -29,6 +30,7 @@ from job_finder.web.claude_client import (  # noqa: F401 — record_cost + Budge
     is_anthropic_available,
     record_cost,
 )
+from job_finder.web.provider_catalog import PROVIDER_DEFAULTS, SUPPORTED_PROVIDERS
 
 logger = logging.getLogger(__name__)
 
@@ -41,25 +43,12 @@ _VALID_WORKLOADS: frozenset[str] = frozenset({"quick", "score", "triage"})
 # - score:  full ordinal-rubric job scoring.
 # - triage: pre-scoring gate; uses the `quick` model with a triage-specific prompt.
 #
-# Triage entries are absent here (resolved as identical to `quick` at lookup time).
-#
-# NOTE: `openrouter` is intentionally absent from this dict. It is registered in
-# _SUPPORTED_PROVIDERS (so _make_adapter can dispatch it) but is eval-judge only —
-# it is not part of the production scoring cascade. Adding an openrouter entry here
-# would silently enable it as a cascade fallback. See providers/openrouter_provider.py.
-_PROVIDER_DEFAULTS: dict[str, dict[str, str]] = {
-    "claude_code_cli": {"quick": "claude-haiku-4-5", "score": "claude-sonnet-4-6"},
-    "anthropic": {"quick": "claude-haiku-4-5", "score": "claude-sonnet-4-6"},
-    # Issue 303: "anthropic_api" = API-key transport (billed per token).
-    # Same model defaults as "anthropic"; cost_gate applies to this name.
-    "anthropic_api": {"quick": "claude-haiku-4-5", "score": "claude-sonnet-4-6"},
-    "gemini": {"quick": "gemini-2.5-flash", "score": "gemini-2.5-pro"},
-    "gemini_cli": {"quick": "gemini-2.5-flash", "score": "gemini-2.5-pro"},
-    "ollama": {"quick": "qwen2.5:14b", "score": "qwen2.5:14b"},
-    "local_bundled": {"quick": "Qwen2.5-3B-Instruct-Q4_K_M", "score": None},
-    "groq": {"quick": "llama-3.1-8b-instant", "score": "llama-3.3-70b-versatile"},
-    "cerebras": {"quick": "llama3.1-8b", "score": "llama-3.3-70b"},
-}
+# Triage entries are absent (resolved as identical to `quick` at lookup time).
+# Single source of truth: job_finder.web.provider_catalog.PROVIDER_DEFAULTS,
+# derived from the one ProviderSpec roster. `openrouter` is absent there
+# (defaults=None) — dispatchable for the eval judge but intentionally NOT a
+# production scoring-cascade fallback; adding a defaults row would enable it.
+_PROVIDER_DEFAULTS: dict[str, dict[str, str | None]] = PROVIDER_DEFAULTS
 
 
 def resolve_workload_routing(workload: str, config: dict) -> dict:
@@ -262,23 +251,12 @@ def resolve_provider_config(tier: str, config: dict) -> dict:
 # call_model() dispatcher — Phase 26
 # ---------------------------------------------------------------------------
 
-# Single source of truth for all registered provider names.
-# _make_adapter() derives its validation from this set — adding a new provider
-# requires updating both _SUPPORTED_PROVIDERS and the dispatch chain in _make_adapter().
-_SUPPORTED_PROVIDERS: frozenset[str] = frozenset(
-    {
-        "anthropic",  # subscription OAuth transport ($0, FREE_PROVIDERS)
-        "anthropic_api",  # Issue 303: API-key transport (billed per token)
-        "cerebras",
-        "claude_code_cli",
-        "gemini",
-        "gemini_cli",
-        "groq",
-        "local_bundled",
-        "ollama",
-        "openrouter",
-    }
-)
+# Registered adapter-dispatchable provider names. Single source of truth is
+# job_finder.web.provider_catalog.SUPPORTED_PROVIDERS (the ProviderSpec roster).
+# _make_adapter() validates against this set and must carry a construction branch
+# for each member — pinned by
+# test_model_provider.test_supported_providers_all_wired_in_make_adapter.
+_SUPPORTED_PROVIDERS: frozenset[str] = SUPPORTED_PROVIDERS
 
 
 class ProviderCascadeExhaustedError(RuntimeError):
@@ -480,16 +458,9 @@ def _sanitized_result(result: ModelResult, schema: dict | None, provider_name: s
 # Issue #227 quality floor: the six ordinal axis keys that define a scoring
 # result. The degenerate predicate only fires when ALL six are present (i.e.
 # this is a scoring-tier result, not a quick/triage/extraction payload).
-_SCORING_AXIS_KEYS: frozenset[str] = frozenset(
-    {
-        "title_fit",
-        "location_fit",
-        "comp_fit",
-        "domain_match",
-        "seniority_match",
-        "skills_match",
-    }
-)
+# Derived from the canonical job_finder.constants.SUB_SCORE_KEYS (membership
+# test only — order is irrelevant here, so a frozenset view is taken).
+_SCORING_AXIS_KEYS: frozenset[str] = frozenset(SUB_SCORE_KEYS)
 
 # The four rationale arrays a genuine scoring result populates. A degenerate
 # result leaves every one of them empty (post-_sanitize_output backfill).

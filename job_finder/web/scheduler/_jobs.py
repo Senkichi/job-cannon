@@ -34,6 +34,8 @@ from job_finder.web.scheduler._schedule import (
     HEAVY_MISFIRE_GRACE_S,
     LIGHT_MISFIRE_GRACE_S,
     assert_no_heavy_writer_collisions,
+    assert_schedule_matches_registered,
+    cron_kwargs,
     enrichment_hour_expr,
     ingestion_hour_expr,
 )
@@ -223,7 +225,7 @@ def register_staleness(scheduler, app, *, on_complete=None) -> None:
             ),
             publish_events=(JOBS_CHANGED, PIPELINE_CHANGED),
         ),
-        trigger=CronTrigger(hour=2, minute=0),
+        trigger=CronTrigger(**cron_kwargs("staleness_check")),
         id="staleness_check",
         replace_existing=True,
         max_instances=1,
@@ -305,7 +307,7 @@ def register_ats_scan(scheduler, app) -> None:
             guard=lambda config: config.get("ats", {}).get("scan_enabled", True),
             publish_events=(JOBS_CHANGED, COMPANIES_CHANGED),
         ),
-        trigger=CronTrigger(hour=7, minute=0),
+        trigger=CronTrigger(**cron_kwargs("ats_scan")),
         id="ats_scan",
         replace_existing=True,
         max_instances=1,
@@ -330,7 +332,7 @@ def register_ats_slug_probe(scheduler, app) -> None:
         _make_simple_job(
             app, "ATS slug probe", _import_slug_probe, publish_events=(COMPANIES_CHANGED,)
         ),
-        trigger=CronTrigger(hour=7, minute=30),
+        trigger=CronTrigger(**cron_kwargs("ats_slug_probe")),
         id="ats_slug_probe",
         replace_existing=True,
         max_instances=1,
@@ -365,7 +367,7 @@ def register_ats_reprobe(scheduler, app) -> None:
             _import_ats_reprobe,
             publish_events=(COMPANIES_CHANGED,),
         ),
-        trigger=CronTrigger(day_of_week="sun", hour=8, minute=0),
+        trigger=CronTrigger(**cron_kwargs("ats_reprobe")),
         id="ats_reprobe",
         replace_existing=True,
         max_instances=1,
@@ -393,7 +395,7 @@ def register_ats_promote(scheduler, app) -> None:
             _import_ats_promote,
             publish_events=(COMPANIES_CHANGED, JOBS_CHANGED),
         ),
-        trigger=CronTrigger(hour=4, minute=45),
+        trigger=CronTrigger(**cron_kwargs("ats_source_url_promote")),
         id="ats_source_url_promote",
         replace_existing=True,
         max_instances=1,
@@ -441,7 +443,7 @@ def register_careers_crawl(scheduler, app, *, on_complete=None) -> None:
             guard=lambda config: config.get("careers_crawl", {}).get("enabled", True),
             publish_events=(JOBS_CHANGED, COMPANIES_CHANGED),
         ),
-        trigger=CronTrigger(hour=5, minute=0),
+        trigger=CronTrigger(**cron_kwargs("careers_crawl")),
         id="careers_crawl",
         replace_existing=True,
         max_instances=1,
@@ -519,7 +521,7 @@ def register_primary_source_resolution(scheduler, app) -> None:
             ),
             publish_events=(JOBS_CHANGED,),
         ),
-        trigger=CronTrigger(hour=5, minute=45),
+        trigger=CronTrigger(**cron_kwargs("primary_source_resolution")),
         id="primary_source_resolution",
         replace_existing=True,
         max_instances=1,
@@ -544,7 +546,7 @@ def register_orphan_cleanup(scheduler, app) -> None:
         _make_simple_job(
             app, "Orphan cleanup", _import_orphan_cleanup, publish_events=(COMPANIES_CHANGED,)
         ),
-        trigger=CronTrigger(day=1, hour=3, minute=0),
+        trigger=CronTrigger(**cron_kwargs("orphan_cleanup")),
         id="orphan_cleanup",
         replace_existing=True,
         max_instances=1,
@@ -572,7 +574,7 @@ def register_homepage_discovery(scheduler, app) -> None:
             _import_homepage_discovery,
             publish_events=(JOBS_CHANGED, COMPANIES_CHANGED),
         ),
-        trigger=CronTrigger(hour=6, minute=30),
+        trigger=CronTrigger(**cron_kwargs("homepage_discovery")),
         id="homepage_discovery",
         replace_existing=True,
         max_instances=1,
@@ -599,7 +601,7 @@ def register_registry_hygiene(scheduler, app) -> None:
         _make_simple_job(
             app, "Registry hygiene", _import_registry_hygiene, publish_events=(COMPANIES_CHANGED,)
         ),
-        trigger=CronTrigger(day=1, hour=3, minute=30),
+        trigger=CronTrigger(**cron_kwargs("registry_hygiene")),
         id="registry_hygiene",
         replace_existing=True,
         max_instances=1,
@@ -701,7 +703,7 @@ def register_jd_adjudication(scheduler, app) -> None:
             },
             publish_events=(JOBS_CHANGED, COSTS_CHANGED),
         ),
-        trigger=CronTrigger(hour=12, minute=0),
+        trigger=CronTrigger(**cron_kwargs("jd_adjudication")),
         id="jd_adjudication",
         replace_existing=True,
         max_instances=1,
@@ -770,7 +772,7 @@ def register_health_heartbeat(scheduler, app) -> None:
 
     scheduler.add_job(
         lambda: run_health_check(app),
-        trigger=CronTrigger(hour=6, minute=0),
+        trigger=CronTrigger(**cron_kwargs("health_heartbeat")),
         id="health_heartbeat",
         replace_existing=True,
         max_instances=1,
@@ -862,3 +864,8 @@ def register_all_jobs(scheduler, app) -> None:
     register_jd_adjudication(scheduler, app)
     register_health_heartbeat(scheduler, app)
     register_heartbeat(scheduler, app)
+
+    # Fail fast if a registrar was added without a SCHEDULE entry (or vice
+    # versa) — the drift that left jd_adjudication / heartbeat invisible to the
+    # collision guard and cadence docs. Runs at boot, before scheduler.start().
+    assert_schedule_matches_registered(scheduler)

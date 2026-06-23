@@ -35,6 +35,7 @@ from job_finder.web.autoheal.health_monitor import sources_needing_attention
 from job_finder.web.db_helpers import get_db, refresh_jf_config
 from job_finder.web.model_provider import is_supported_provider_name
 from job_finder.web.onboarding.inbox_check import run_inbox_check
+from job_finder.web.provider_catalog import PROVIDER_KEY_FIELDS
 
 logger = logging.getLogger(__name__)
 
@@ -84,13 +85,9 @@ _SELECTABLE_PROVIDERS: tuple[tuple[str, str], ...] = (
 # BYO-key providers whose API key the Settings form can set / rotate. Each maps to
 # the canonical SECRET_ENV_VARS name providers.api_keys.<name> and is routed to the
 # OS keyring in save() (mirrors the source-secret pattern). (key, label).
-_PROVIDER_KEY_FIELDS: tuple[tuple[str, str], ...] = (
-    ("anthropic", "Anthropic API key"),
-    ("gemini", "Gemini API key"),
-    ("groq", "Groq API key"),
-    ("cerebras", "Cerebras API key"),
-    ("openrouter", "OpenRouter API key"),
-)
+# Single source of truth: job_finder.web.provider_catalog (ProviderSpec.key_label) —
+# derived in roster order so a new BYO-key provider is one catalog row.
+_PROVIDER_KEY_FIELDS: tuple[tuple[str, str], ...] = PROVIDER_KEY_FIELDS
 
 
 @settings_bp.route("/", strict_slashes=False)

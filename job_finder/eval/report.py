@@ -25,16 +25,12 @@ from contextlib import closing
 from datetime import UTC, datetime
 from pathlib import Path
 
+from job_finder.constants import SUB_SCORE_KEYS
 from job_finder.json_utils import utc_now_iso
 
-AXES: tuple[str, ...] = (
-    "title_fit",
-    "location_fit",
-    "comp_fit",
-    "domain_match",
-    "seniority_match",
-    "skills_match",
-)
+# Canonical scoring axes (job_finder.constants). Kept as a module-level name
+# because the report tables key on report.AXES.
+AXES: tuple[str, ...] = SUB_SCORE_KEYS
 
 
 def _safe_fmt(value, fmt: str = ".3f") -> str:

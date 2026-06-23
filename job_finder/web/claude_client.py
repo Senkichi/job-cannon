@@ -32,6 +32,7 @@ from datetime import UTC, datetime, timedelta
 
 from job_finder.config import DEFAULT_DAILY_BUDGET_USD
 from job_finder.json_utils import local_day_utc_window, utc_now_iso
+from job_finder.web.provider_catalog import FREE_PROVIDER_NAMES
 
 try:
     from jsonschema import ValidationError as _ValidationError
@@ -74,31 +75,24 @@ MODEL_PRICING: dict[str, dict[str, float]] = {
 # ANTHROPIC_API_KEY / JF_ANTHROPIC_API_KEY is present — i.e., per-token billed
 # transport.  Fix: API-key transport → provider="anthropic_api" (paid);
 # subscription-only OAuth transport → provider="anthropic" (free, still here).
-FREE_PROVIDERS: frozenset[str] = frozenset(
-    {
-        "gemini",
-        "ollama",
-        "anthropic",  # subscription-only OAuth transport ($0 per call)
-        "claude_cli",  # existing — internal call_claude() path (back-compat)
-        "claude_code_cli",  # NEW — ClaudeCodeCLIProvider (Plan 02)
-        "gemini_cli",  # NEW — GeminiCLIProvider (Plan 03)
-        "local_bundled",  # NEW — LocalBundledProvider (Plan 04)
-        "google_cse",  # Stage 3 — Google Programmable Search Engine ($0 up to 100/day quota)
-        # NOTE: "anthropic_api" is intentionally absent — API-key transport is paid.
-        #
-        # Under-reported-spend window audit (Issue 303 / 2026-06-10):
-        # Between migration m057 (2026-05-26, F2 moved "anthropic" into FREE_PROVIDERS)
-        # and this fix, every AnthropicProvider call wrote provider='anthropic' regardless
-        # of whether the CLI was OAuth-subscription ($0) or per-token API-key (paid).
-        # Those rows have cost_usd=0 but real token counts. To estimate missing spend:
-        #   SELECT * FROM scoring_costs
-        #   WHERE provider = 'anthropic'
-        #     AND timestamp >= '2026-05-26T00:00:00Z'
-        #     AND timestamp < '<date you deployed Issue 303 fix>';
-        # Multiply input_tokens/1e6 * MODEL_PRICING[model]['input']
-        #       + output_tokens/1e6 * MODEL_PRICING[model]['output'].
-    }
-)
+# Single source of truth: job_finder.web.provider_catalog (one ProviderSpec per
+# provider, is_free flag) + the non-adapter free labels claude_cli / google_cse.
+# Re-exported here under the historical name so existing imports
+# (`from job_finder.web.claude_client import FREE_PROVIDERS`) keep resolving.
+# "anthropic_api" is intentionally NOT free — API-key transport is paid.
+#
+# Under-reported-spend window audit (Issue 303 / 2026-06-10):
+# Between migration m057 (2026-05-26, F2 moved "anthropic" into FREE_PROVIDERS)
+# and this fix, every AnthropicProvider call wrote provider='anthropic' regardless
+# of whether the CLI was OAuth-subscription ($0) or per-token API-key (paid).
+# Those rows have cost_usd=0 but real token counts. To estimate missing spend:
+#   SELECT * FROM scoring_costs
+#   WHERE provider = 'anthropic'
+#     AND timestamp >= '2026-05-26T00:00:00Z'
+#     AND timestamp < '<date you deployed Issue 303 fix>';
+# Multiply input_tokens/1e6 * MODEL_PRICING[model]['input']
+#       + output_tokens/1e6 * MODEL_PRICING[model]['output'].
+FREE_PROVIDERS: frozenset[str] = FREE_PROVIDER_NAMES
 
 
 def is_anthropic_api_key_transport() -> bool:

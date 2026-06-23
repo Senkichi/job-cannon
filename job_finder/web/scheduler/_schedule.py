@@ -63,6 +63,13 @@ class JobSlot:
             one-shot when the predecessor finishes (completion-chaining) instead
             of on its own cron slot.
         misfire_grace_time: seconds; see module constants.
+        day: CronTrigger day-of-month for monthly jobs (e.g. 1), else None.
+        day_of_week: CronTrigger day-of-week for weekly jobs (e.g. "sun"), else
+            None.
+        interval: True for interval-triggered jobs (pipeline_detection,
+            heartbeat). They carry no fixed cron slot — the actual
+            IntervalTrigger is built in the registrar — but appear here so the
+            registration-completeness guard sees every job id.
     """
 
     hour: int | str | None
@@ -70,6 +77,9 @@ class JobSlot:
     heavy_writer: bool = False
     depends_on: str | None = None
     misfire_grace_time: int = HEAVY_MISFIRE_GRACE_S
+    day: int | None = None
+    day_of_week: str | None = None
+    interval: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -94,7 +104,9 @@ class JobSlot:
 #   07:00  ats_scan               (heavy)
 #   07:30  ats_slug_probe
 #   08:00  ats_reprobe            (heavy, weekly Sun) — drains the custom-miss cohort
+#   12:00  jd_adjudication        (heavy)  — clear of the nightly heavy writers
 #   --:--  pipeline_detection     (every 30 min interval)
+#   --:--  heartbeat              (every 60s interval, liveness; not a heavy writer)
 #   company_linkage              (heavy, chained off careers_crawl)
 # ---------------------------------------------------------------------------
 
@@ -119,13 +131,20 @@ SCHEDULE: dict[str, JobSlot] = {
     "ats_slug_probe": JobSlot(hour=7, minute=30),
     # Weekly (Sun): static reprobe of the frozen custom-miss cohort. Promotes
     # companies whose careers page embeds a now-supported ATS board.
-    "ats_reprobe": JobSlot(hour=8, minute=0, heavy_writer=True),
+    "ats_reprobe": JobSlot(hour=8, minute=0, heavy_writer=True, day_of_week="sun"),
+    # Midday LLM jd-content adjudication backfill — noon slot keeps it clear of
+    # the nightly heavy writers (staleness + agentic) it would otherwise
+    # DB-contend with.
+    "jd_adjudication": JobSlot(hour=12, minute=0, heavy_writer=True),
     # Monthly hygiene (day=1).
-    "orphan_cleanup": JobSlot(hour=3, minute=0),
-    "registry_hygiene": JobSlot(hour=3, minute=30),
-    # Frequent interval job.
+    "orphan_cleanup": JobSlot(hour=3, minute=0, day=1),
+    "registry_hygiene": JobSlot(hour=3, minute=30, day=1),
+    # Frequent interval jobs (no fixed cron slot; trigger built in the registrar).
     "pipeline_detection": JobSlot(
-        hour=None, minute=None, misfire_grace_time=LIGHT_MISFIRE_GRACE_S
+        hour=None, minute=None, misfire_grace_time=LIGHT_MISFIRE_GRACE_S, interval=True
+    ),
+    "heartbeat": JobSlot(
+        hour=None, minute=None, misfire_grace_time=LIGHT_MISFIRE_GRACE_S, interval=True
     ),
 }
 
@@ -197,3 +216,71 @@ def assert_no_heavy_writer_collisions(schedule: dict[str, JobSlot] | None = None
                 f"Space them or express one as depends_on the other."
             )
         seen[key] = job_id
+
+
+def cron_kwargs(job_id: str) -> dict[str, int | str]:
+    """Return the CronTrigger keyword args for a fixed-slot job, from SCHEDULE.
+
+    This is how the registrars (``_jobs.py``) get their hour/minute/day/
+    day_of_week — so the slot lives in exactly one place (the descriptor table)
+    instead of being re-hardcoded at each ``add_job`` call. Only valid for
+    fixed-slot cron jobs: cadence-derived (``ingestion_poll`` /
+    ``enrichment_backfill``, hour computed from the preset), interval
+    (``pipeline_detection`` / ``heartbeat``), and chained (``depends_on``) jobs
+    build their own trigger and must NOT call this.
+
+    Raises:
+        KeyError: if ``job_id`` is absent from SCHEDULE.
+        ValueError: if the slot is cadence/interval/chained (no fixed slot), so
+            a miswire fails loudly rather than silently scheduling at hour=None.
+    """
+    slot = SCHEDULE[job_id]
+    if slot.depends_on is not None or slot.interval or not isinstance(slot.hour, int):
+        raise ValueError(
+            f"cron_kwargs({job_id!r}) is only valid for fixed-slot cron jobs; "
+            f"this slot is cadence/interval/chained. Build its trigger directly."
+        )
+    kwargs: dict[str, int | str] = {}
+    if slot.day is not None:
+        kwargs["day"] = slot.day
+    if slot.day_of_week is not None:
+        kwargs["day_of_week"] = slot.day_of_week
+    kwargs["hour"] = slot.hour
+    kwargs["minute"] = slot.minute if slot.minute is not None else 0
+    return kwargs
+
+
+def assert_schedule_matches_registered(scheduler) -> None:
+    """Fail fast if the registered job set and SCHEDULE disagree.
+
+    Called once at the end of ``register_all_jobs`` (boot), the same fail-fast
+    posture as ``assert_no_heavy_writer_collisions``. Catches the drift class
+    that left ``jd_adjudication`` and ``heartbeat`` registered but ABSENT from
+    the "single source of truth" — invisible to the collision guard and the
+    cadence docs. Every ``add_job(id=...)`` must have a SCHEDULE entry, and
+    every SCHEDULE entry a registrar.
+
+    Chained successors (``depends_on`` set) are registered lazily by their
+    predecessor's on_complete hook, not at boot, so they are excluded from the
+    "registered at boot" expectation.
+    """
+    registered = {job.id for job in scheduler.get_jobs()}
+    if not registered:
+        # An empty job set means an uninspectable test double — a MagicMock
+        # scheduler (used by the add_job-call-inspecting unit tests) yields an
+        # empty iterator from get_jobs(). The guard is meaningful only against a
+        # real scheduler (production boot + the dedicated live-registration
+        # test), so skip rather than fire a false positive on those mocks. A
+        # real boot always registers ≥1 job (heartbeat/ingestion), so this can
+        # never silently pass over a genuinely-empty production schedule.
+        return
+    expected = {jid for jid, slot in SCHEDULE.items() if slot.depends_on is None}
+    extra = registered - expected  # registered but not described
+    missing = expected - registered  # described but never registered
+    if extra or missing:
+        raise AssertionError(
+            "scheduler registration drifted from SCHEDULE: "
+            f"registered-but-not-in-SCHEDULE={sorted(extra)}; "
+            f"in-SCHEDULE-but-not-registered={sorted(missing)}. "
+            "Add a SCHEDULE entry for every add_job(id=...) and vice versa."
+        )

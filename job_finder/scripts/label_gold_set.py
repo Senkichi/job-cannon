@@ -18,25 +18,10 @@ import sqlite3
 from contextlib import closing
 from pathlib import Path
 
+from job_finder.constants import CLASSIFICATIONS as VALID_CLASSIFICATIONS
+from job_finder.constants import SUB_SCORE_KEYS as SUB_SCORE_AXES
 from job_finder.json_utils import utc_now_iso
 from job_finder.web.scoring_types import format_salary_range
-
-VALID_CLASSIFICATIONS: tuple[str, ...] = (
-    "apply",
-    "consider",
-    "skip",
-    "reject",
-    "low_signal",
-)
-
-SUB_SCORE_AXES: tuple[str, ...] = (
-    "title_fit",
-    "location_fit",
-    "comp_fit",
-    "domain_match",
-    "seniority_match",
-    "skills_match",
-)
 
 
 def _prompt_classification() -> str:
