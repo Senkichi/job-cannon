@@ -19,11 +19,13 @@ plus an indirected ``_home()`` isolate every filesystem write under ``tmp_path``
 from __future__ import annotations
 
 import argparse
+import json
 
 import pytest
 
 from job_finder import __main__ as main_mod
 from job_finder.web import supervisor
+from job_finder.web._pidfile import claim_paths
 
 # ---------------------------------------------------------------------------
 # Parser wiring
@@ -218,11 +220,15 @@ def test_unsupported_platform_returns_nonzero(captured_run, isolated_paths, caps
 class _FakeProcess:
     """Minimal psutil.Process stand-in recording terminate/kill/wait."""
 
-    def __init__(self, pid, cmdline, *, parent=None, children=(), registry=None):
+    def __init__(
+        self, pid, cmdline, *, parent=None, children=(), registry=None, create_time=0.0, name=""
+    ):
         self.pid = pid
         self._cmdline = cmdline
         self._parent = parent
         self._children = list(children)
+        self._create_time = create_time
+        self._name = name
         self.terminated = False
         self.killed = False
         if registry is not None:
@@ -230,6 +236,12 @@ class _FakeProcess:
 
     def cmdline(self):
         return self._cmdline
+
+    def create_time(self):
+        return self._create_time
+
+    def name(self):
+        return self._name
 
     def parent(self):
         return self._parent
@@ -303,3 +315,84 @@ def test_collect_tree_filters_non_jc_children(monkeypatch):
     assert 100 in pids
     assert 101 not in pids  # ollama filtered out
     assert worker in collected
+
+
+# ---------------------------------------------------------------------------
+# Recorded owned-orphan reap (PR4) — the metadata backstop that DOES reap a
+# spawned Ollama, scoped to children we recorded and guarded by create_time.
+# ---------------------------------------------------------------------------
+
+
+def _write_owned_sidecar(tmp_path, host, port, owned):
+    """Write a (host,port)-keyed metadata sidecar carrying ``owned_pids``."""
+    logs_dir = tmp_path / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    _lock, meta = claim_paths(logs_dir, host, port)
+    meta.write_text(json.dumps({"pid": 1, "owned_pids": owned}), encoding="utf-8")
+    return meta
+
+
+def test_reap_owned_orphan_terminates_validated_pid(monkeypatch, tmp_path):
+    """A recorded owned child whose live create_time matches is terminated even
+    when the port is already free (the reparented-orphan-across-restart case)."""
+    _write_owned_sidecar(
+        tmp_path, "127.0.0.1", 5000, [{"pid": 101, "name": "ollama.exe", "create_time": 555.0}]
+    )
+    registry: dict[int, _FakeProcess] = {}
+    ollama = _FakeProcess(101, ["ollama", "serve"], registry=registry, create_time=555.0)
+
+    monkeypatch.setattr(supervisor, "user_data_root", lambda: tmp_path)
+    monkeypatch.setattr(main_mod, "_port_is_listening", lambda h, p: False)  # port already free
+    monkeypatch.setattr(supervisor.psutil, "Process", lambda pid: registry[pid])
+
+    assert supervisor.free_jc_port("127.0.0.1", 5000, grace_sec=0.01) is True
+    assert ollama.terminated is True
+
+
+def test_reap_skips_pid_reuse_mismatch(monkeypatch, tmp_path):
+    """A recycled PID (create_time differs) must NOT be killed."""
+    _write_owned_sidecar(
+        tmp_path, "127.0.0.1", 5000, [{"pid": 101, "name": "ollama.exe", "create_time": 555.0}]
+    )
+    registry: dict[int, _FakeProcess] = {}
+    # Same PID, but a much later create_time → an unrelated process reused 101.
+    impostor = _FakeProcess(101, ["something", "else"], registry=registry, create_time=999999.0)
+
+    monkeypatch.setattr(supervisor, "user_data_root", lambda: tmp_path)
+    monkeypatch.setattr(main_mod, "_port_is_listening", lambda h, p: False)
+    monkeypatch.setattr(supervisor.psutil, "Process", lambda pid: registry[pid])
+
+    assert supervisor.free_jc_port("127.0.0.1", 5000, grace_sec=0.01) is True
+    assert impostor.terminated is False
+
+
+def test_reap_skips_entry_without_create_time(monkeypatch, tmp_path):
+    """No recorded create_time ⇒ no PID-reuse guard ⇒ never kill blindly."""
+    _write_owned_sidecar(
+        tmp_path, "127.0.0.1", 5000, [{"pid": 101, "name": "ollama.exe", "create_time": None}]
+    )
+    registry: dict[int, _FakeProcess] = {}
+    proc = _FakeProcess(101, ["ollama", "serve"], registry=registry, create_time=555.0)
+
+    monkeypatch.setattr(supervisor, "user_data_root", lambda: tmp_path)
+    monkeypatch.setattr(main_mod, "_port_is_listening", lambda h, p: False)
+    monkeypatch.setattr(supervisor.psutil, "Process", lambda pid: registry[pid])
+
+    assert supervisor.free_jc_port("127.0.0.1", 5000, grace_sec=0.01) is True
+    assert proc.terminated is False
+
+
+def test_reap_skips_dead_pid(monkeypatch, tmp_path):
+    """A recorded PID that no longer exists is silently skipped (no crash)."""
+    _write_owned_sidecar(
+        tmp_path, "127.0.0.1", 5000, [{"pid": 101, "name": "ollama.exe", "create_time": 555.0}]
+    )
+
+    def _gone(pid):
+        raise supervisor.psutil.NoSuchProcess(pid)
+
+    monkeypatch.setattr(supervisor, "user_data_root", lambda: tmp_path)
+    monkeypatch.setattr(main_mod, "_port_is_listening", lambda h, p: False)
+    monkeypatch.setattr(supervisor.psutil, "Process", _gone)
+
+    assert supervisor.free_jc_port("127.0.0.1", 5000, grace_sec=0.01) is True

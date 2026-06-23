@@ -66,8 +66,27 @@ def install_kill_on_exit() -> None:
 
 
 def register_owned_process(proc) -> None:
-    """Track *proc* (a ``subprocess.Popen`` handle) for cleanup on exit."""
+    """Track *proc* (a ``subprocess.Popen`` handle) for cleanup on exit.
+
+    Also records the child's PID + identity in this instance's metadata sidecar
+    (best-effort) so a later launch's port reclaim can terminate a reparented
+    orphan — the same backstop the Windows path uses. No-ops the metadata write
+    unless this process holds the claim.
+    """
     _owned_procs.append(proc)
+    try:
+        import psutil
+
+        from job_finder.web._pidfile import record_owned_pid
+
+        try:
+            ps = psutil.Process(proc.pid)
+            name, create_time = ps.name(), ps.create_time()
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            name, create_time = "", None
+        record_owned_pid(proc.pid, name=name, create_time=create_time)
+    except Exception:  # pragma: no cover - PID bookkeeping must never break spawn
+        logger.debug("register_owned_process bookkeeping failed", exc_info=True)
 
 
 def make_pdeathsig_preexec_fn():

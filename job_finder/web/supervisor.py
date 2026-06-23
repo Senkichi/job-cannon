@@ -98,6 +98,9 @@ def free_jc_port(host: str, port: int, *, grace_sec: float = 5.0) -> bool:
     from job_finder.__main__ import _listener_looks_like_jc, _port_is_listening
 
     if not _port_is_listening(host, port):
+        # Port already free, but a prior instance's owned child (e.g. an Ollama
+        # reparented by an unclean death) may still be alive — reap it by record.
+        _reap_recorded_owned_orphans(host, port, grace_sec=grace_sec)
         return True  # nothing bound — port is already free
 
     looks_like_jc, _cmdline, pid = _listener_looks_like_jc(host, port)
@@ -119,7 +122,43 @@ def free_jc_port(host: str, port: int, *, grace_sec: float = 5.0) -> bool:
 
     targets = _collect_jc_process_tree(pid)
     _terminate_procs(targets, grace_sec=grace_sec)
+    # Killing the job owner reaps job-member children transitively (KILL_ON_JOB_
+    # CLOSE); this additionally sweeps any owned child the metadata recorded —
+    # the case where the Job Object had degraded and the child was reparented.
+    _reap_recorded_owned_orphans(host, port, grace_sec=grace_sec)
     return True
+
+
+def _reap_recorded_owned_orphans(host: str, port: int, *, grace_sec: float = 5.0) -> None:
+    """Terminate recorded owned children (e.g. a spawned Ollama) that outlived
+    their launcher, identified from the ``(host, port)`` metadata sidecar.
+
+    The whole reason ``free_jc_port`` does NOT kill ``ollama.exe`` from the
+    process tree (it cannot tell *our* spawned Ollama from a user's own) is
+    resolved here: ``owned_pids`` lists only children *this app* spawned, and
+    each is re-validated by ``create_time`` before termination, so a recycled
+    PID is never mistaken for our child. Entries without a recorded
+    ``create_time`` are skipped — we never kill without a reuse guard.
+    """
+    from job_finder.web._pidfile import claim_paths, read_owned_pids
+
+    logs_dir = user_data_root() / "logs"
+    _lock_path, meta_path = claim_paths(logs_dir, host, port)
+    victims: list[psutil.Process] = []
+    for entry in read_owned_pids(meta_path):
+        recorded_ct = entry.get("create_time")
+        if recorded_ct is None:
+            continue  # no PID-reuse guard recorded — refuse to kill blindly
+        try:
+            proc = psutil.Process(entry["pid"])
+            if abs(proc.create_time() - recorded_ct) > 1.0:
+                continue  # PID was recycled by an unrelated process
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+        victims.append(proc)
+    if victims:
+        _terminate_procs(victims, grace_sec=grace_sec)
+        logger.info("Reaped %d recorded owned orphan(s) for %s:%d", len(victims), host, port)
 
 
 def _collect_jc_process_tree(pid: int) -> list[psutil.Process]:

@@ -8,10 +8,12 @@ exactly so existing callers (scheduler/_ollama.py, etc.) need no changes:
     make_pdeathsig_preexec_fn() -> callable | None
 
 Windows
-    Job Object with ``KILL_ON_JOB_CLOSE | SILENT_BREAKAWAY_OK`` assigned to
-    the current process.  Per-Popen tracking is unnecessary — Job Object
-    inheritance reaps all descendants transitively — so
-    ``register_owned_process`` and ``make_pdeathsig_preexec_fn`` are no-ops.
+    Job Object with ``KILL_ON_JOB_CLOSE`` (NOT ``SILENT_BREAKAWAY_OK``) assigned
+    to the current process, so children inherit job membership and are reaped
+    transitively when the owner dies.  ``register_owned_process`` additionally
+    records each owned child's PID in the metadata sidecar — the backstop for
+    the degraded (ACCESS_DENIED) path where no Job Object is held.
+    ``make_pdeathsig_preexec_fn`` remains a no-op (POSIX-only mechanism).
 
 POSIX (Linux / macOS)
     atexit + SIGTERM/SIGINT/SIGHUP handlers that terminate every tracked
@@ -32,12 +34,12 @@ import sys
 logger = logging.getLogger(__name__)
 
 if sys.platform == "win32":
-    from ._process_lifecycle_win32 import install_kill_on_exit
+    from ._process_lifecycle_win32 import (
+        install_kill_on_exit,
+        register_owned_process,
+    )
 
-    # Windows: Job Object inheritance handles subprocess reap transitively.
-    # Keep Commit-A no-op stubs so importers do not break.
-    def register_owned_process(proc) -> None: ...
-
+    # pdeathsig is a Linux prctl mechanism; no Windows equivalent.
     def make_pdeathsig_preexec_fn():
         return None
 
