@@ -921,7 +921,9 @@ class TestBatchScoreStatus:
         conn.close()
 
         client = app_with_unscored_jobs.test_client()
-        response = client.get(f"/dashboard/batch-score/status/{session_id}")
+        response = client.get(
+            f"/dashboard/batch-score/status/{session_id}", headers={"HX-Request": "true"}
+        )
         assert response.status_code == 200
         data = response.data.decode()
         # Running fragment must have hx-trigger to continue polling
@@ -942,7 +944,9 @@ class TestBatchScoreStatus:
         conn.close()
 
         client = app_with_unscored_jobs.test_client()
-        response = client.get(f"/dashboard/batch-score/status/{session_id}")
+        response = client.get(
+            f"/dashboard/batch-score/status/{session_id}", headers={"HX-Request": "true"}
+        )
         assert response.status_code == 200
         data = response.data.decode()
         # Done fragment must NOT have hx-trigger (stops polling)
@@ -963,7 +967,9 @@ class TestBatchScoreStatus:
         conn.close()
 
         client = app_with_unscored_jobs.test_client()
-        response = client.get(f"/dashboard/batch-score/status/{session_id}")
+        response = client.get(
+            f"/dashboard/batch-score/status/{session_id}", headers={"HX-Request": "true"}
+        )
         assert response.status_code == 200
         data = response.data.decode()
         assert "hx-trigger" not in data
@@ -1258,7 +1264,7 @@ class TestCompaniesPage:
         conn.close()
 
         client = app_with_companies.test_client()
-        response = client.get(f"/companies/{company_id}/expand")
+        response = client.get(f"/companies/{company_id}/expand", headers={"HX-Request": "true"})
         assert response.status_code == 200
         data = response.data.decode()
         assert "Stripe" in data
@@ -1490,7 +1496,7 @@ class TestDashboardAtsStat:
 class TestDashboardRefreshFragments:
     def test_stats_fragment_returns_200_and_renders_stat_cards(self, client):
         """GET /dashboard/stats returns the stats partial body."""
-        response = client.get("/dashboard/stats")
+        response = client.get("/dashboard/stats", headers={"HX-Request": "true"})
         assert response.status_code == 200
         data = response.data.decode()
         # Stat-card labels rendered by _stats_cards.html
@@ -1501,7 +1507,7 @@ class TestDashboardRefreshFragments:
 
     def test_quick_actions_fragment_returns_200_and_renders_action_buttons(self, client):
         """GET /dashboard/quick-actions returns the quick-actions partial body."""
-        response = client.get("/dashboard/quick-actions")
+        response = client.get("/dashboard/quick-actions", headers={"HX-Request": "true"})
         assert response.status_code == 200
         data = response.data.decode()
         # Either Sync Now button or sync-progress markup is rendered
@@ -2427,14 +2433,18 @@ class TestUXPolish:
 
     def test_score_cell_route_returns_td(self, jd_full_client):
         """GET /jobs/{dedup_key}/score-cell returns 200 with score <td> element."""
-        response = jd_full_client.get("/jobs/test%7Cjd-full-job%7Cremote/score-cell")
+        response = jd_full_client.get(
+            "/jobs/test%7Cjd-full-job%7Cremote/score-cell", headers={"HX-Request": "true"}
+        )
         assert response.status_code == 200
         data = response.data.decode()
         assert '<td id="score-' in data
 
     def test_score_cell_route_404(self, jd_full_client):
         """GET /jobs/nonexistent/score-cell returns 404."""
-        response = jd_full_client.get("/jobs/no%7Csuch%7Cjob/score-cell")
+        response = jd_full_client.get(
+            "/jobs/no%7Csuch%7Cjob/score-cell", headers={"HX-Request": "true"}
+        )
         assert response.status_code == 404
 
     def test_expand_no_load_trigger(self, jd_full_client):
@@ -2568,17 +2578,23 @@ class TestSaveJD:
         assert b"Not scored yet" in response.data
 
     def test_jd_edit_form_returns_200(self, jd_full_client):
-        response = jd_full_client.get("/jobs/test%7Cjd-full-job%7Cremote/jd-edit-form")
+        response = jd_full_client.get(
+            "/jobs/test%7Cjd-full-job%7Cremote/jd-edit-form", headers={"HX-Request": "true"}
+        )
         assert response.status_code == 200
 
     def test_jd_edit_form_contains_prefilled_textarea(self, jd_full_client):
-        response = jd_full_client.get("/jobs/test%7Cjd-full-job%7Cremote/jd-edit-form")
+        response = jd_full_client.get(
+            "/jobs/test%7Cjd-full-job%7Cremote/jd-edit-form", headers={"HX-Request": "true"}
+        )
         data = response.data.decode()
         assert "<textarea" in data
         assert "full job description for testing" in data
 
     def test_jd_edit_form_nonexistent_key_returns_404(self, jd_full_client):
-        response = jd_full_client.get("/jobs/nonexistent-key/jd-edit-form")
+        response = jd_full_client.get(
+            "/jobs/nonexistent-key/jd-edit-form", headers={"HX-Request": "true"}
+        )
         assert response.status_code == 404
 
     def test_save_jd_button_is_type_button(self, jobs_client):
@@ -2792,7 +2808,9 @@ class TestAsyncScanFlow:
         conn.close()
 
         client = app_with_companies.test_client()
-        response = client.get(f"/companies/scan/status/{session_id}")
+        response = client.get(
+            f"/companies/scan/status/{session_id}", headers={"HX-Request": "true"}
+        )
         assert response.status_code == 200
         data = response.data.decode()
         assert 'hx-trigger="every 2s"' in data
@@ -2829,7 +2847,9 @@ class TestAsyncScanFlow:
         conn.close()
 
         client = app_with_companies.test_client()
-        response = client.get(f"/companies/scan/status/{session_id}")
+        response = client.get(
+            f"/companies/scan/status/{session_id}", headers={"HX-Request": "true"}
+        )
         assert response.status_code == 200
         data = response.data.decode()
         # Done fragment has NO hx-trigger so HTMX stops polling
@@ -2863,7 +2883,9 @@ class TestAsyncScanFlow:
         conn.close()
 
         client = app_with_companies.test_client()
-        response = client.get(f"/companies/scan/status/{session_id}")
+        response = client.get(
+            f"/companies/scan/status/{session_id}", headers={"HX-Request": "true"}
+        )
         assert response.status_code == 200
         data = response.data.decode()
         assert "ATS scan failed" in data
