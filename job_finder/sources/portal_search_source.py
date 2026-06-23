@@ -12,8 +12,9 @@ from __future__ import annotations
 
 import logging
 import time
+from collections.abc import Callable
 from datetime import UTC, datetime
-from typing import Protocol
+from typing import NamedTuple, Protocol
 
 import requests
 from ftfy import fix_text
@@ -729,6 +730,57 @@ def fetch_serp_portals(
 # ---------------------------------------------------------------------------
 
 
+class PortalFetcher(NamedTuple):
+    """One Tier-1 portal fetcher and how to gate / configure it.
+
+    Attributes:
+        config_key: ``sources.portal_search.<config_key>`` section that gates
+            this portal. None for the always-on keyless portals (Tier 1a).
+        fetch: ``(keywords, **kwargs) -> list[Job]`` fetcher callable.
+        kwargs_from_cfg: builds the per-fetcher credential kwargs from this
+            portal's config section, or None when the fetcher takes only
+            ``keywords``. (Every fetcher returns [] on missing creds, so the
+            gate only avoids a wasted network call.)
+    """
+
+    config_key: str | None
+    fetch: Callable[..., list[Job]]
+    kwargs_from_cfg: Callable[[dict], dict] | None = None
+
+
+# THE Tier-1 portal roster — single source of truth. Order preserved from the
+# historical hand-dispatch: always-on free portals first, then the config-gated
+# Stage-2 portals. Adding a portal is one row here (plus its _fetch_* function);
+# test_portal_fetcher_registry pins that no _fetch_* is left unwired ("dark").
+# Tier 2 (SERP via DataForSEO / Google CSE) is a different shape and stays
+# dispatched separately inside fetch_all_portals.
+_PORTAL_FETCHERS: tuple[PortalFetcher, ...] = (
+    PortalFetcher(None, _fetch_remoteok),
+    PortalFetcher(None, _fetch_remotive),
+    PortalFetcher(None, _fetch_himalayas),
+    PortalFetcher("jobicy", _fetch_jobicy),
+    PortalFetcher("yc_workatastartup", _fetch_yc_workatastartup),
+    PortalFetcher(
+        "usajobs",
+        _fetch_usajobs,
+        lambda c: {
+            "user_agent_email": c.get("user_agent_email", "") or "",
+            "authorization_key": c.get("authorization_key", "") or "",
+        },
+    ),
+    PortalFetcher(
+        "adzuna",
+        _fetch_adzuna,
+        lambda c: {
+            "app_id": c.get("app_id", "") or "",
+            "app_key": c.get("app_key", "") or "",
+            "country": c.get("country", "us") or "us",
+        },
+    ),
+    PortalFetcher("jooble", _fetch_jooble, lambda c: {"api_key": c.get("api_key", "") or ""}),
+)
+
+
 def fetch_all_portals(
     keywords: list[str],
     dataforseo_source: _SerpBackend | None = None,
@@ -779,47 +831,26 @@ def fetch_all_portals(
                 seen_urls.add(job.source_url)
             all_jobs.append(job)
 
-    # Tier 1a: Always-on free API portals (zero cost, no keys)
-    _dedup_extend(_fetch_remoteok(keywords))
-    _dedup_extend(_fetch_remotive(keywords))
-    _dedup_extend(_fetch_himalayas(keywords))
-
-    # Tier 1b: Stage-2 free portals (some keyless, some free with key registration).
-    # Each fetcher already returns [] when its credentials are missing, so the
-    # config-gated dispatch here only controls whether the fetcher RUNS at all
-    # (avoids wasted network calls for opt-out portals).
+    # Tier 1: free API portals, dispatched from the _PORTAL_FETCHERS roster.
+    # Always-on (keyless) portals run unconditionally; Stage-2 portals run only
+    # when enabled in config. Each fetcher returns [] on missing creds, so the
+    # gate only avoids a wasted network call. Order is the roster order.
     cfg = portal_config or {}
-    if cfg.get("jobicy", {}).get("enabled", False):
-        _dedup_extend(_fetch_jobicy(keywords))
-    if cfg.get("yc_workatastartup", {}).get("enabled", False):
-        _dedup_extend(_fetch_yc_workatastartup(keywords))
-    usajobs_cfg = cfg.get("usajobs", {})
-    if usajobs_cfg.get("enabled", False):
-        _dedup_extend(
-            _fetch_usajobs(
-                keywords,
-                user_agent_email=usajobs_cfg.get("user_agent_email", "") or "",
-                authorization_key=usajobs_cfg.get("authorization_key", "") or "",
-            )
-        )
-    adzuna_cfg = cfg.get("adzuna", {})
-    if adzuna_cfg.get("enabled", False):
-        _dedup_extend(
-            _fetch_adzuna(
-                keywords,
-                app_id=adzuna_cfg.get("app_id", "") or "",
-                app_key=adzuna_cfg.get("app_key", "") or "",
-                country=adzuna_cfg.get("country", "us") or "us",
-            )
-        )
-    jooble_cfg = cfg.get("jooble", {})
-    if jooble_cfg.get("enabled", False):
-        _dedup_extend(
-            _fetch_jooble(
-                keywords,
-                api_key=jooble_cfg.get("api_key", "") or "",
-            )
-        )
+    for pf in _PORTAL_FETCHERS:
+        # Resolve the fetcher from the module namespace at call time so a test
+        # patch of the module-level _fetch_* attribute takes effect — the table
+        # captured the reference at import time, and calling it directly would
+        # bypass @patch (the pitfall documented in
+        # ats_scanner._probe._verify_fastpath_live).
+        fetch = globals()[pf.fetch.__name__]
+        if pf.config_key is None:
+            _dedup_extend(fetch(keywords))
+            continue
+        section = cfg.get(pf.config_key, {})
+        if not section.get("enabled", False):
+            continue
+        extra = pf.kwargs_from_cfg(section) if pf.kwargs_from_cfg else {}
+        _dedup_extend(fetch(keywords, **extra))
 
     # Tier 2: SERP portals — DataForSEO (paid, batched) preferred, Google CSE
     # (free, 95/day quota) as fallback when only CSE is configured.
