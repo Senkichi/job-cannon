@@ -604,6 +604,119 @@ class TestCleanTitle:
 
 
 # ---------------------------------------------------------------------------
+# _clean_title — title-NODE isolation (Phenom/iCIMS/Workday sibling glue).
+#
+# A listing tile renders the role name, location, and posting-date as adjacent
+# inline children of one <a>; tag.get_text(strip=True) concatenates them with no
+# separator ("Senior Data ScientistUnited States, Multiple LocationsPosted 15
+# days ago"). The fix isolates the title node's own text so the location/date
+# are never glued on — for BOTH the trailing-posted-date shape (which the
+# downstream contract could repair) and the no-posted-date dept/location glue
+# (which it could not, leaving a clean-LOOKING but wrong title on the board).
+# Surfaced on Microsoft company_id=217. The clean Phenom JSON adapter is
+# unaffected; this is purely the DOM-scrape fallback.
+# ---------------------------------------------------------------------------
+
+
+class TestCleanTitleNodeIsolation:
+    def _make_tag(self, html):
+        return BeautifulSoup(html, "html.parser").find("a")
+
+    def _clean(self, html):
+        tag = self._make_tag(html)
+        assert tag is not None
+        return _clean_title(tag, tag.get_text(strip=True))
+
+    def test_phenom_marked_tile_with_posted_date(self):
+        """The Microsoft/Phenom shape from the bug report: title + location +
+        relative posting-age glued inside one <a>, title in a class/data-marked
+        span."""
+        html = (
+            '<a href="/j"><div class="info">'
+            '<span class="job-title" data-ph-at-id="job-title-text">Senior Data Scientist</span>'
+            "<span>United States, Multiple Locations, Multiple Locations</span>"
+            "<span>Posted 15 days ago</span>"
+            "</div></a>"
+        )
+        assert self._clean(html) == "Senior Data Scientist"
+
+    def test_phenom_marked_tile_without_posted_date(self):
+        """The no-posted-date variant: department/location glued with no trailing
+        relative date — the contract's repair could not salvage this, so the
+        title node must be isolated at the source."""
+        html = (
+            '<a href="/j"><div class="info">'
+            '<span class="job-title">Senior Data Scientist</span>'
+            "<span>United States, Multiple Locations</span>"
+            "</div></a>"
+        )
+        assert self._clean(html) == "Senior Data Scientist"
+
+    def test_unmarked_wrapper_takes_first_child_leaf_not_siblings(self):
+        """Even without a title marker, a wrapper div holding title + location +
+        date siblings must yield only the first child leaf (the role name), never
+        the glued subtree text."""
+        html = (
+            '<a href="/j"><div class="info">'
+            "<span>Senior Data Scientist</span>"
+            "<span>United States, Multiple Locations</span>"
+            "<span>Posted 15 days ago</span>"
+            "</div></a>"
+        )
+        assert self._clean(html) == "Senior Data Scientist"
+
+    def test_camelcase_data_attribute_marker(self):
+        """Workday-style data-automation-id="jobTitle" (camelCase) marks the
+        title node."""
+        html = (
+            '<a href="/j"><div>'
+            '<p data-automation-id="jobTitle">Principal Data Scientist</p>'
+            "<p>Remote</p></div></a>"
+        )
+        assert self._clean(html) == "Principal Data Scientist"
+
+    def test_itemprop_title_marker(self):
+        """schema.org microdata itemprop="title" marks the title node."""
+        html = (
+            '<a href="/j"><div>'
+            '<span itemprop="title">Lead Analyst</span>'
+            "<span>New York, NY</span></div></a>"
+        )
+        assert self._clean(html) == "Lead Analyst"
+
+    def test_single_title_wrapper_with_sibling_location_div(self):
+        """Non-regression: a single-title wrapper followed by a sibling location
+        div must descend into the wrapper, not glue the location on."""
+        html = (
+            '<a href="/j">'
+            "<div><span>Senior Data Scientist</span></div>"
+            "<div>San Francisco, CA</div></a>"
+        )
+        assert self._clean(html) == "Senior Data Scientist"
+
+    def test_leading_short_badge_is_skipped(self):
+        """A leading sub-5-char badge ("New") is skipped in favor of the real
+        title leaf."""
+        html = (
+            '<a href="/j"><div>'
+            '<span class="badge">New</span>'
+            "<span>Staff Data Scientist</span>"
+            "<span>Remote</span></div></a>"
+        )
+        assert self._clean(html) == "Staff Data Scientist"
+
+    def test_subtitle_class_does_not_false_match_title_token(self):
+        """'subtitle' (no delimiter before 'title') must NOT be treated as a
+        title marker, so the first child leaf wins instead."""
+        html = (
+            '<a href="/j"><div>'
+            "<span>Data Engineer</span>"
+            '<span class="subtitle">Posting details</span></div></a>'
+        )
+        assert self._clean(html) == "Data Engineer"
+
+
+# ---------------------------------------------------------------------------
 # _is_metadata_blob — careers_crawl title-bleed guard
 # ---------------------------------------------------------------------------
 

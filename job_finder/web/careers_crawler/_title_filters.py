@@ -310,20 +310,143 @@ def _is_metadata_blob(title: str) -> bool:
     return bool(_REQ_ID_PIPE_RE.search(title))
 
 
+# ---------------------------------------------------------------------------
+# Title-NODE isolation (the structural fix for sibling glue).
+#
+# A careers listing tile renders the role name, location, and posting-date as
+# adjacent inline children of one <a>. ``tag.get_text(strip=True)`` concatenates
+# them with NO separator, so the greedy text run is a glued blob:
+#   "Senior Data ScientistUnited States, Multiple LocationsPosted 15 days ago"
+# (seen on Microsoft company_id=217 and other Phenom/iCIMS/Workday tiles).
+#
+# Rather than repair that blob downstream with a growing set of strip regexes
+# (the whack-a-mole the title contract warns against), we isolate the title
+# NODE and take ONLY its own text — the location/date are never glued on. Every
+# major ATS marks its title element (Phenom ``data-ph-at-id="job-title-text"``,
+# iCIMS/Workday ``class="...title..."``, schema.org ``itemprop="title"``); when
+# no marker exists we descend wrappers to the first text-bearing child leaf,
+# which is the role name (siblings render after it). Regex repair stays as the
+# fallback for bare-text links with an appended dash/pipe location.
+# ---------------------------------------------------------------------------
+
+#: Minimum length for an extracted title-node text to be accepted (mirrors the
+#: pre-split heading/first-child >= 5 guard).
+_MIN_TITLE_NODE_CHARS = 5
+
+#: Element tags that can carry a tile's title text (descended in DOM order).
+_TITLE_NODE_TAGS = ["h1", "h2", "h3", "h4", "h5", "h6", "span", "div", "p"]
+
+#: 'title' as a delimited component — anchored on start/whitespace/-/_ so
+#: "job-title" / "posting_title" match while "subtitle" / "untitled" (no
+#: delimiter before 'title') do not. camelCase is pre-split to a hyphen by
+#: ``_has_title_token`` so "jobTitle" also matches.
+_TITLE_TOKEN_RE = re.compile(r"(?:^|[\s_\-])title(?:[\s_\-]|$)", re.IGNORECASE)
+_CAMEL_BOUNDARY_RE = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
+
+
+def _has_title_token(value: str) -> bool:
+    """True if *value* carries 'title' as a delimited component (camelCase-aware)."""
+    return bool(_TITLE_TOKEN_RE.search(_CAMEL_BOUNDARY_RE.sub("-", value)))
+
+
+def _is_title_marked(el) -> bool:
+    """Predicate: does *el* explicitly flag itself as the job-title node?
+
+    Matches a ``title`` ``itemprop`` (schema.org microdata), any ``class`` token
+    containing 'title', or any ``data-*`` attribute whose value contains 'title'
+    (Phenom ``data-ph-at-id="job-title-text"``). Passed to ``BeautifulSoup.find``
+    so only Tags reach it.
+    """
+    if (el.get("itemprop") or "").strip().lower() == "title":
+        return True
+    if any(_has_title_token(c) for c in el.get("class") or []):
+        return True
+    return any(
+        name.startswith("data-") and isinstance(value, str) and _has_title_token(value)
+        for name, value in el.attrs.items()
+    )
+
+
+def _looks_glued(text: str) -> bool:
+    """True if *text* still carries card-chrome / metadata glue (not a clean title).
+
+    Guards the wrapper-text fallback in ``_leaf_title_text``: a mislabeled
+    container is rejected rather than trusted as the title node.
+    """
+    return _strip_trailing_card_junk(text) != text or _is_metadata_blob(text)
+
+
+def _leaf_title_text(el) -> str:
+    """Return the title text of the single title-bearing leaf within *el*.
+
+    Descends wrapper elements to the FIRST usable child leaf so a sibling
+    location / posting-date field rendered in the same container is never glued
+    onto the role name. Falls back to the element's own text only when it has no
+    block/inline child leaf AND that text is not itself a glued multi-field blob
+    (e.g. ``<h3>Senior <em>Data</em> Scientist</h3>``). Returns '' when nothing
+    yields >= ``_MIN_TITLE_NODE_CHARS``.
+    """
+    if el.find(True) is None:
+        # Leaf element: its text is one text node — safe to take whole.
+        text = el.get_text(strip=True)
+    else:
+        text = ""
+        for child in el.find_all(_TITLE_NODE_TAGS, recursive=False):
+            text = _leaf_title_text(child)
+            if text:
+                break
+        if not text:
+            own = el.get_text(strip=True)
+            if not _looks_glued(own):
+                text = own
+    return text if len(text) >= _MIN_TITLE_NODE_CHARS else ""
+
+
+def _title_node_text(tag) -> str:
+    """Isolate the title NODE's own text from a link tag (no sibling glue).
+
+    Priority: (1) a real heading (h1-h6) anywhere inside, (2) an element
+    explicitly flagged as the title (class / data-* / itemprop), (3) the first
+    text-bearing child leaf, descending one wrapper level. Each takes ONLY that
+    node's text. Returns '' when the link has no element children (its raw text
+    must go to the regex strippers for separator-based location removal) or no
+    usable node is found.
+    """
+    heading = tag.find(["h1", "h2", "h3", "h4", "h5", "h6"])
+    if heading is not None:
+        text = _leaf_title_text(heading)
+        if text:
+            return text
+
+    marked = tag.find(_is_title_marked)
+    if marked is not None:
+        text = _leaf_title_text(marked)
+        if text:
+            return text
+
+    if tag.find(True) is not None:
+        for child in tag.find_all(_TITLE_NODE_TAGS, recursive=False):
+            text = _leaf_title_text(child)
+            if text:
+                return text
+    return ""
+
+
 def _clean_title(tag, raw_text: str) -> str:
     """Extract clean job title from a link tag, stripping appended location.
 
     Strategy:
-    1. A real heading tag (h1-h6) anywhere inside the link wins — careers
-       pages with structured markup (e.g. Blue State, Greenhouse-style
-       wrappers) put the title in a heading and the location in a sibling
-       span, which get_text(strip=True) would otherwise concatenate without
-       whitespace.
-    2. First direct child element (existing behavior for span/div-only
-       markup).
-    3. Regex stripping on the raw text — handles dash/pipe-separated
-       location suffixes, no-separator state lists, and leading logo
-       placeholder letters.
+    1. Isolate the title NODE's own text via ``_title_node_text`` — a heading,
+       an element explicitly flagged as the title, or the first child leaf.
+       This is the STRUCTURAL fix for sibling glue: a wrapper <a> renders title
+       + location + posting-date as adjacent inline children, so
+       ``tag.get_text(strip=True)`` concatenates them with no separator. Taking
+       only the title node's text means the location/date are never glued on in
+       the first place (Microsoft company_id=217 + other Phenom tiles).
+    2. Regex stripping on the raw text — the fallback for links whose title is a
+       bare text node (no element children) with a dash/pipe-separated location
+       suffix, a no-separator state list, a Workday-style req-id, a trailing
+       date/CTA card-chrome tail, or leading logo placeholder letters.
 
     Args:
         tag: BeautifulSoup <a> tag.
@@ -332,24 +455,12 @@ def _clean_title(tag, raw_text: str) -> str:
     Returns:
         Cleaned title string.
     """
-    # Strategy 1: a heading anywhere inside (recursive). Many careers pages
-    # nest the heading inside a wrapper div which would otherwise hide it
-    # from recursive=False.
-    heading = tag.find(["h1", "h2", "h3", "h4", "h5", "h6"])
-    if heading is not None:
-        heading_text = heading.get_text(strip=True)
-        if heading_text and len(heading_text) >= 5:
-            return _strip_leading_logo_letters(heading_text)
+    # Strategy 1: isolate the title node's own text (never the greedy subtree).
+    node_text = _title_node_text(tag)
+    if node_text:
+        return _strip_leading_logo_letters(node_text)
 
-    # Strategy 2: direct text-bearing child (existing behavior, preserved
-    # so structured markup without a heading tag still works).
-    title_children = tag.find_all(["span", "div", "h2", "h3", "h4", "p"], recursive=False)
-    if title_children:
-        first_text = title_children[0].get_text(strip=True)
-        if first_text and len(first_text) >= 5:
-            return _strip_leading_logo_letters(first_text)
-
-    # Strategy 3: regex strip on the raw text. Order matters — strip the
+    # Strategy 2: regex strip on the raw text. Order matters — strip the
     # trailing date/CTA card-chrome tail FIRST (so the real title is exposed
     # for the location/req-id strippers below), then separator-based location
     # patterns, then the Workday-style req-id glob (which also absorbs trailing
