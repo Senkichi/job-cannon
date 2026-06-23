@@ -164,20 +164,20 @@ class TestExpandRoute:
         """GET /companies/<id>/expand returns 200 for existing company."""
         client, db_path, conn = companies_client
         company_id = _insert_company(conn)
-        response = client.get(f"/companies/{company_id}/expand")
+        response = client.get(f"/companies/{company_id}/expand", headers={"HX-Request": "true"})
         assert response.status_code == 200
 
     def test_expand_missing_returns_404(self, companies_client):
         """GET /companies/99999/expand returns 404 for non-existent company."""
         client, db_path, conn = companies_client
-        response = client.get("/companies/99999/expand")
+        response = client.get("/companies/99999/expand", headers={"HX-Request": "true"})
         assert response.status_code == 404
 
     def test_expand_contains_company_name(self, companies_client):
         """Expanded row fragment contains the company name."""
         client, db_path, conn = companies_client
         company_id = _insert_company(conn, name="ExpandCorp")
-        response = client.get(f"/companies/{company_id}/expand")
+        response = client.get(f"/companies/{company_id}/expand", headers={"HX-Request": "true"})
         assert response.status_code == 200
         assert b"ExpandCorp" in response.data
 
@@ -192,13 +192,13 @@ class TestCollapseRoute:
         """GET /companies/<id>/collapse returns 200 for existing company."""
         client, db_path, conn = companies_client
         company_id = _insert_company(conn)
-        response = client.get(f"/companies/{company_id}/collapse")
+        response = client.get(f"/companies/{company_id}/collapse", headers={"HX-Request": "true"})
         assert response.status_code == 200
 
     def test_collapse_missing_returns_404(self, companies_client):
         """GET /companies/99999/collapse returns 404 for non-existent company."""
         client, db_path, conn = companies_client
-        response = client.get("/companies/99999/collapse")
+        response = client.get("/companies/99999/collapse", headers={"HX-Request": "true"})
         assert response.status_code == 404
 
 
@@ -770,7 +770,10 @@ class TestCompanyResearchRoutes:
         conn.commit()
         research_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
 
-        resp = client.get(f"/companies/{company_id}/research/status/{research_id}")
+        resp = client.get(
+            f"/companies/{company_id}/research/status/{research_id}",
+            headers={"HX-Request": "true"},
+        )
         assert resp.status_code == 200
         body = resp.data.decode()
         assert "Research result text" in body
@@ -790,7 +793,10 @@ class TestCompanyResearchRoutes:
         conn.commit()
         research_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
 
-        resp = client.get(f"/companies/{company_id}/research/status/{research_id}")
+        resp = client.get(
+            f"/companies/{company_id}/research/status/{research_id}",
+            headers={"HX-Request": "true"},
+        )
         assert resp.status_code == 200
         body = resp.data.decode()
         assert "timed out" in body.lower() or "error" in body.lower()
@@ -814,7 +820,7 @@ class TestNonScannableBadge:
         """Expanding a jobvite company shows amber badge text, not 'No ATS'."""
         client, db_path, conn = companies_client
         company_id = _insert_company(conn, ats_platform="jobvite", ats_slug="victaulic")
-        resp = client.get(f"/companies/{company_id}/expand")
+        resp = client.get(f"/companies/{company_id}/expand", headers={"HX-Request": "true"})
         assert resp.status_code == 200
         body = resp.data.decode()
         assert "no public API" in body
@@ -824,7 +830,7 @@ class TestNonScannableBadge:
         """Expanded jobvite row shows the 'no public API — 0 is expected' note."""
         client, db_path, conn = companies_client
         company_id = _insert_company(conn, ats_platform="jobvite", ats_slug="victaulic")
-        resp = client.get(f"/companies/{company_id}/expand")
+        resp = client.get(f"/companies/{company_id}/expand", headers={"HX-Request": "true"})
         assert resp.status_code == 200
         body = resp.data.decode()
         assert "0 is expected" in body
@@ -833,7 +839,7 @@ class TestNonScannableBadge:
         """A greenhouse company with zero jobs still renders 'Greenhouse', not 'No ATS'."""
         client, db_path, conn = companies_client
         company_id = _insert_company(conn, ats_platform="greenhouse", ats_slug="stripe")
-        resp = client.get(f"/companies/{company_id}/expand")
+        resp = client.get(f"/companies/{company_id}/expand", headers={"HX-Request": "true"})
         assert resp.status_code == 200
         body = resp.data.decode()
         assert "Greenhouse" in body
@@ -844,7 +850,7 @@ class TestNonScannableBadge:
         """A company with no ATS still renders the 'No ATS' badge."""
         client, db_path, conn = companies_client
         company_id = _insert_company(conn, ats_platform=None)
-        resp = client.get(f"/companies/{company_id}/expand")
+        resp = client.get(f"/companies/{company_id}/expand", headers={"HX-Request": "true"})
         assert resp.status_code == 200
         body = resp.data.decode()
         assert "No ATS" in body

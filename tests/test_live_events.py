@@ -90,17 +90,17 @@ class TestLiveFragmentRoutes:
     """The fragment routes the SSE triggers GET must return 200 + their markup."""
 
     def test_review_queue_fragment(self, client):
-        resp = client.get("/dashboard/review-queue")
+        resp = client.get("/dashboard/review-queue", headers={"HX-Request": "true"})
         assert resp.status_code == 200
         # OOB header badge is part of the response so the count stays in sync.
         assert 'id="pipeline-review-header"' in resp.data.decode()
 
     def test_companies_health_fragment(self, client):
-        resp = client.get("/companies/health")
+        resp = client.get("/companies/health", headers={"HX-Request": "true"})
         assert resp.status_code == 200
 
     def test_pipeline_board_fragment(self, client):
-        resp = client.get("/pipeline/board")
+        resp = client.get("/pipeline/board", headers={"HX-Request": "true"})
         assert resp.status_code == 200
         # Column bodies must carry the SortableJS hook class so re-init works.
         assert "kanban-column-body" in resp.data.decode()

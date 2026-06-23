@@ -7,6 +7,7 @@ import threading
 from flask import Blueprint, current_app, render_template, url_for
 
 from job_finder.json_utils import utc_now_iso
+from job_finder.web._htmx import htmx_fragment
 from job_finder.web.activity_tracker import ACTION_SYNC, log_activity
 from job_finder.web.db_helpers import (
     PollingSessionConfig,
@@ -102,6 +103,7 @@ def _sync_progress_ctx(session) -> dict:
 
 
 @sync_bp.route("/sync/status/<int:session_id>", strict_slashes=False)
+@htmx_fragment("dashboard.index")
 def sync_status(session_id):
     """Poll route for sync progress (delegates to ``render_polling_status``).
 

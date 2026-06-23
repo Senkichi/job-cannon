@@ -29,6 +29,7 @@ from job_finder.config import (
     load_config,
 )
 from job_finder.web import user_data_dirs
+from job_finder.web._htmx import htmx_fragment
 from job_finder.web.autoheal.health_monitor import sources_needing_attention
 from job_finder.web.db_helpers import get_db, refresh_jf_config
 from job_finder.web.onboarding.inbox_check import run_inbox_check
@@ -127,6 +128,7 @@ def index():
 
 
 @settings_bp.route("/inbox-check", strict_slashes=False)
+@htmx_fragment("settings.index")
 def inbox_check_fragment():
     """HTMX fragment — re-run the inbox-wiring check on demand.
 
@@ -144,14 +146,13 @@ def inbox_check_fragment():
 
 
 @settings_bp.route("/source-health", strict_slashes=False)
+@htmx_fragment("settings.index")
 def source_health_fragment():
     """HTMX fragment — the source credential/degraded banner, swapped in place.
 
     Non-HTMX direct hits redirect to the Settings index so the banner is never
     rendered as a bare standalone page (mirrors dashboard.degraded_sources_fragment).
     """
-    if not request.headers.get("HX-Request"):
-        return redirect(url_for("settings.index"))
     return render_template(
         "settings/_source_health_banner.html",
         source_attention=_safe_source_attention(),

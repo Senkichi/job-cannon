@@ -58,7 +58,9 @@ class TestDashboardBanner:
             "job_finder.web.blueprints.dashboard.cached_tier_available",
             return_value=False,
         ):
-            resp = app_with_unscored.test_client().get("/dashboard/quick-actions")
+            resp = app_with_unscored.test_client().get(
+                "/dashboard/quick-actions", headers={"HX-Request": "true"}
+            )
         assert resp.status_code == 200
         assert BANNER_TEXT in resp.get_data(as_text=True)
 

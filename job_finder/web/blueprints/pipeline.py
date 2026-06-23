@@ -7,6 +7,7 @@ from flask import (
 )
 
 from job_finder.db import get_jobs_by_status, update_pipeline_status
+from job_finder.web._htmx import htmx_fragment
 from job_finder.web.blueprints import PIPELINE_STATUSES
 from job_finder.web.db_helpers import get_db
 
@@ -65,6 +66,7 @@ def index():
 
 
 @pipeline_bp.route("/board", strict_slashes=False)
+@htmx_fragment("pipeline.index")
 def board_fragment():
     """HTMX fragment — the inner Kanban columns.
 

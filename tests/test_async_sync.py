@@ -118,7 +118,9 @@ class TestAsyncSync:
         conn.close()
 
         with app.test_client() as client:
-            resp = client.get(f"/dashboard/sync/status/{session_id}")
+            resp = client.get(
+                f"/dashboard/sync/status/{session_id}", headers={"HX-Request": "true"}
+            )
         assert resp.status_code == 200
         body = resp.data.decode()
         assert "hx-trigger" in body
@@ -139,7 +141,9 @@ class TestAsyncSync:
         conn.close()
 
         with app.test_client() as client:
-            resp = client.get(f"/dashboard/sync/status/{session_id}")
+            resp = client.get(
+                f"/dashboard/sync/status/{session_id}", headers={"HX-Request": "true"}
+            )
         assert resp.status_code == 200
         body = resp.data.decode()
         # Done fragment should have success styling
@@ -162,7 +166,9 @@ class TestAsyncSync:
         conn.close()
 
         with app.test_client() as client:
-            resp = client.get(f"/dashboard/sync/status/{session_id}")
+            resp = client.get(
+                f"/dashboard/sync/status/{session_id}", headers={"HX-Request": "true"}
+            )
         assert resp.status_code == 200
         body = resp.data.decode()
         assert "text-red-400" in body
@@ -188,7 +194,9 @@ class TestAsyncSync:
         conn.close()
 
         with app.test_client() as client:
-            resp = client.get(f"/dashboard/sync/status/{session_id}")
+            resp = client.get(
+                f"/dashboard/sync/status/{session_id}", headers={"HX-Request": "true"}
+            )
         assert resp.status_code == 200
         body = resp.data.decode()
         # Should return error fragment
@@ -207,7 +215,7 @@ class TestAsyncSync:
         """GET /dashboard/sync/status/{id} for nonexistent session returns error fragment."""
         app, db_path = app_with_db
         with app.test_client() as client:
-            resp = client.get("/dashboard/sync/status/99999")
+            resp = client.get("/dashboard/sync/status/99999", headers={"HX-Request": "true"})
         assert resp.status_code == 200
         body = resp.data.decode()
         assert "text-red-400" in body

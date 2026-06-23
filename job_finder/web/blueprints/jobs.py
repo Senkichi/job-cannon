@@ -36,6 +36,7 @@ from job_finder.db import (
 from job_finder.db._jd_full import set_jd_full as _set_jd_full
 from job_finder.models import Job
 from job_finder.secrets import get_secret
+from job_finder.web._htmx import htmx_fragment
 from job_finder.web._http_constants import _HEADERS, _TIMEOUT
 from job_finder.web.activity_tracker import (
     ACTION_EDIT_NOTES,
@@ -343,10 +344,9 @@ def index():
 
 
 @jobs_bp.route("/table", strict_slashes=False)
+@htmx_fragment("jobs.index")
 def table():
     """HTMX partial -- returns only the table body rows (no full page)."""
-    if not request.headers.get("HX-Request"):
-        return redirect(url_for("jobs.index"))
     conn = get_db()
 
     filters = _get_filter_kwargs()
@@ -362,10 +362,9 @@ def table():
 
 
 @jobs_bp.route("/archived-table", strict_slashes=False)
+@htmx_fragment("jobs.index")
 def archived_table():
     """HTMX partial -- archived job rows for the collapsible section."""
-    if not request.headers.get("HX-Request"):
-        return redirect(url_for("jobs.index"))
     conn = get_db()
     jobs = get_filtered_jobs(
         conn, status="archived", sort_by="first_seen", sort_dir="DESC", limit=200
@@ -630,10 +629,9 @@ def add_from_listing():
 
 
 @jobs_bp.route("/<path:dedup_key>/expand", strict_slashes=False)
+@htmx_fragment("jobs.index")
 def expand(dedup_key: str):
     """HTMX partial -- returns accordion expansion row for a job."""
-    if not request.headers.get("HX-Request"):
-        return redirect(url_for("jobs.index"))
     conn = get_db()
 
     ctx = load_job_context(conn, dedup_key)
@@ -664,6 +662,7 @@ def expand(dedup_key: str):
 
 
 @jobs_bp.route("/<path:dedup_key>/collapse", strict_slashes=False)
+@htmx_fragment("jobs.index")
 def collapse(dedup_key: str):
     """HTMX partial -- returns hidden placeholder <tr> to restore pre-expansion DOM state.
 
@@ -676,8 +675,6 @@ def collapse(dedup_key: str):
     an HX-Trigger-After-Settle event from the response side makes the
     behavior bulletproof.
     """
-    if not request.headers.get("HX-Request"):
-        return redirect(url_for("jobs.index"))
     conn = get_db()
     job = get_job(conn, dedup_key)
     if job is None:
@@ -759,10 +756,9 @@ def update_status(dedup_key: str):
 
 
 @jobs_bp.route("/<path:dedup_key>/detail-inline", strict_slashes=False)
+@htmx_fragment("jobs.index")
 def detail_inline(dedup_key: str):
     """HTMX partial -- returns full detail as inline table row."""
-    if not request.headers.get("HX-Request"):
-        return redirect(url_for("jobs.index"))
     conn = get_db()
     job = get_job(conn, dedup_key)
     if job is None:
@@ -980,6 +976,7 @@ def rescore(dedup_key: str):
 
 
 @jobs_bp.route("/<path:dedup_key>/score-cell", strict_slashes=False)
+@htmx_fragment("jobs.index")
 def score_cell(dedup_key: str):
     """HTMX partial -- returns just the score <td> for a single job."""
     conn = get_db()
@@ -1078,6 +1075,7 @@ def save_notes(dedup_key: str):
 
 
 @jobs_bp.route("/<path:dedup_key>/jd-edit-form", strict_slashes=False)
+@htmx_fragment("jobs.index")
 def jd_edit_form(dedup_key: str):
     """HTMX GET -- return the JD paste form pre-filled with existing jd_full."""
     conn = get_db()
