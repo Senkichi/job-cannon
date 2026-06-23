@@ -134,7 +134,6 @@ def run_batch(
     results: list[dict] = []
     start = time.time()
     failures = 0
-    model = (config.get("providers", {}).get("scoring") or {}).get("model")
 
     # candidate_context is a REQUIRED score_job arg (Phase 2a). Resolve it once
     # for the whole batch via the same orchestrator path the production scorer
@@ -188,6 +187,13 @@ def run_batch(
                 }
             )
             continue
+
+        # Attribute the model the cascade ACTUALLY used (carried on the score
+        # result) — mirrors the production path in scoring_orchestrator. The old
+        # `config["providers"]["scoring"]["model"]` read a key the resolver never
+        # consults (real schema is providers.overrides.<provider>.<workload>), so
+        # it always resolved to None and persisted a NULL model.
+        model = getattr(sr, "model", None)
 
         persist_job_assessment(
             conn, key, sr.data, provider=sr.provider, model=model, config=config

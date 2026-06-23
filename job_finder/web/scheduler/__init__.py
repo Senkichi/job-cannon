@@ -134,12 +134,18 @@ def init_scheduler(app) -> None:
             live_config = app.config.setdefault("JF_CONFIG", {})
             resolved_url = resolve_ollama_url(live_config)
 
-            # Determine target model from config (fall back to default)
+            # Determine target model from config, falling back to the canonical
+            # per-provider default rather than a duplicated literal. A stale literal
+            # here would drift from _PROVIDER_DEFAULTS and make the probe pre-pull /
+            # spawn a model the scorer never actually uses.
+            from job_finder.web.model_provider import _PROVIDER_DEFAULTS
+
             target_model = (
                 live_config.get("providers", {})
                 .get("overrides", {})
                 .get("ollama", {})
-                .get("score", "qwen2.5:14b")
+                .get("score")
+                or _PROVIDER_DEFAULTS["ollama"]["score"]
             )
 
             state = probe_ollama(target_model, resolved_url)

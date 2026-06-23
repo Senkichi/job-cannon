@@ -592,10 +592,9 @@ def mock_ensure_ollama_running():
 def cascade_config_low():
     """Config with Ollama primary + Anthropic CLI fallback for the low tier.
 
-    Mirrors backfill_enrichment._OFFLINE_PROVIDERS so call_model() takes the
-    cascade branch (non-empty fallback_chain) and raises
-    ProviderCascadeExhaustedError — not generic RuntimeError — when every
-    provider fails.
+    Supplies a non-empty fallback_chain so call_model() takes the cascade
+    branch and raises ProviderCascadeExhaustedError — not generic RuntimeError
+    — when every provider fails.
     """
     return {
         "providers": {
