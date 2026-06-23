@@ -821,53 +821,29 @@ def main() -> None:
             port = free_port
             url = f"http://{client_host}:{port}"
 
-    # --- Step 0 (serve only): reclaim the port from a crashed Job Cannon orphan.
-    # Bare `job-cannon` treats a live instance as "already running" (Steps 1-2
-    # focus it and exit). `serve` is the supervisor entry — it must TAKE OVER, so
-    # it kills a confirmed-JC listener (reloader parent + worker) here, before
-    # the focus-and-exit probes can see it. A foreign listener is never killed:
-    # free_jc_port returns False and we surface the existing port-occupied guidance.
-    if getattr(args, "command", None) == "serve":
-        from job_finder.web.supervisor import free_jc_port
+    # --- Steps 0-2 (unified): the single pre-bind authority. One mode-agnostic
+    # call answers "is a Job Cannon already serving here, and what do we do?":
+    #   * bare `job-cannon` — focus-and-exit on a live/pre-upgrade instance
+    #     (legacy Steps 1-2);
+    #   * `serve` (supervisor) — reclaim the port from a crashed JC orphan
+    #     (legacy Step 0 free_jc_port), then proceed.
+    # A foreign listener exits non-zero with port-occupied guidance. See
+    # job_finder.web._takeover for the behaviour-neutral PR1 split.
+    from job_finder.web._takeover import TakeoverAction, claim_or_takeover
 
-        if not free_jc_port(client_host, port):
-            print(
-                f"job-cannon serve: port {port} is occupied by a process that is "
-                f"not Job Cannon — refusing to kill it.\n"
-                f"  Use a different port:  job-cannon serve --port 5001\n"
-                f"  Or stop the other process.",
-                file=sys.stderr,
-            )
-            sys.exit(1)
-
-    # --- Step 1: HTTP probe — matches post-plan instances responding at /__jc_health.
-    if probe_existing_jc(url) is not None:
-        print(f"Job Cannon is already running at {url}")
-        if not os.environ.get("JOB_CANNON_NO_BROWSER"):
-            webbrowser.open(url, new=2)
+    _takeover_mode = "serve" if getattr(args, "command", None) == "serve" else "bare"
+    _takeover_action = claim_or_takeover(
+        client_host,
+        port,
+        url,
+        mode=_takeover_mode,
+        no_browser=bool(os.environ.get("JOB_CANNON_NO_BROWSER")),
+    )
+    if _takeover_action == TakeoverAction.EXIT_SUCCESS:
         sys.exit(0)
-
-    # --- Step 2: port-listening + psutil cmdline — matches pre-plan instances
-    # during the upgrade window (no /__jc_health endpoint yet).
-    if _port_is_listening(client_host, port):
-        looks_like_jc, cmdline, listener_pid = _listener_looks_like_jc(client_host, port)
-        if looks_like_jc:
-            print(f"Job Cannon (pre-upgrade instance, PID {listener_pid}) is running at {url}")
-            if not os.environ.get("JOB_CANNON_NO_BROWSER"):
-                webbrowser.open(url, new=2)
-            sys.exit(0)
-        listener_desc = (
-            cmdline if cmdline else (f"PID {listener_pid}" if listener_pid else "unknown process")
-        )
-        print(
-            f"Job Cannon: port {port} is occupied by `{listener_desc}`.\n"
-            f"  Use a different port:  job-cannon --port 5001\n"
-            f"  Or set env var:        JOB_CANNON_PORT=5001 job-cannon\n"
-            f"  Or edit config.yaml:   server.port: 5001\n"
-            f"  Or stop the other process.",
-            file=sys.stderr,
-        )
+    if _takeover_action == TakeoverAction.EXIT_FAILURE:
         sys.exit(1)
+    # TakeoverAction.PROCEED → fall through to Step 3 (acquire the lock + bind).
 
     # --- Step 3: acquire the split-file advisory lock.
     logs_dir = user_data_root() / "logs"
