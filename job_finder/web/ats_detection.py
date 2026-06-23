@@ -128,6 +128,15 @@ _RIPPLING_HUMAN_URL = re.compile(
     re.IGNORECASE,
 )
 
+# UKG Pro Recruiting (UltiPro). Board URL packs all three slug parts:
+# https://{host}/{tenant}/JobBoard/{boardGuid} (host = recruiting2.ultipro.com).
+# The scanner slug is "{host}/{tenant}/{board}"; tenant case is preserved (the
+# API path is case-sensitive on the customer code), host + GUID lowercased.
+_ULTIPRO_URL = re.compile(
+    r"https?://(recruiting\d*\.ultipro\.com)/([A-Za-z0-9]+)/JobBoard/([0-9a-fA-F-]{36})",
+    re.IGNORECASE,
+)
+
 # Oracle Recruiting Cloud (Fusion Candidate Experience). The board host is the
 # full Fusion pod ({pod}.fa.{region}.oraclecloud.com); the CE site number lives
 # in the page path (/sites/CX_1/) or the REST finder (siteNumber=CX_1). The
@@ -155,7 +164,8 @@ _ICIMS_URL = re.compile(
 # m049-v4: + workable / jobvite / paylocity / rippling URL patterns (round 6 audit).
 # m049-v5: + icims URL pattern (careers-/jobs- tenant host) (PR-A2).
 # m049-v6: + oracle_cloud URL pattern (Fusion CE pod host + site number).
-ATS_EXTRACTOR_VERSION = "m049-v6"
+# m049-v7: + ultipro URL pattern (UKG Pro Recruiting host/tenant/board GUID).
+ATS_EXTRACTOR_VERSION = "m049-v7"
 
 # Relative pattern strength within a URL: API/canonical traces win ties in reconciliation.
 _SPECIFICITY_API = 10
@@ -262,6 +272,14 @@ def extract_ats_from_url_best(url: str) -> tuple[str, str, int] | None:
     m = _RIPPLING_HUMAN_URL.search(url)
     if m:
         return "rippling", m.group(1).lower(), _SPECIFICITY_BOARD
+
+    # UKG Pro Recruiting (UltiPro). Board URL carries host + tenant + GUID.
+    m = _ULTIPRO_URL.search(url)
+    if m:
+        host = m.group(1).lower()
+        tenant = m.group(2)  # case-sensitive customer code — preserve
+        board = m.group(3).lower()
+        return "ultipro", f"{host}/{tenant}/{board}", _SPECIFICITY_BOARD
 
     # Oracle Recruiting Cloud (Fusion CE). Confident, canonical ATS host — the
     # full Fusion pod hostname is unmistakable. Slug packs "{host}|{site}".

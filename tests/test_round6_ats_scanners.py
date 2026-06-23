@@ -36,10 +36,10 @@ def test_extractor_version_bumped_for_round6_patterns():
     """Round-6 added 4 URL patterns -- the version string must be bumped.
 
     Tracks the current extractor version (bumped to m049-v5 when the iCIMS URL
-    pattern was added in PR-A2, then m049-v6 for the Oracle Recruiting Cloud
-    pattern); every material regex change bumps it.
+    pattern was added in PR-A2, m049-v6 for Oracle Recruiting Cloud, m049-v7 for
+    UKG Pro Recruiting / UltiPro); every material regex change bumps it.
     """
-    assert ATS_EXTRACTOR_VERSION == "m049-v6"
+    assert ATS_EXTRACTOR_VERSION == "m049-v7"
 
 
 # ---------------------------------------------------------------------------
