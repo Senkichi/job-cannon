@@ -37,52 +37,12 @@ ALLOWED_FK_TABLES: frozenset = frozenset(
 )
 
 # ---------------------------------------------------------------------------
-# Title abbreviation expansion
-# Each tuple is (compiled_pattern, replacement_string).
-# Order matters: sr. before sr (to handle period variant first).
+# Title abbreviation expansion + level-suffix stripping previously lived here as
+# module-level regexes feeding a local ``normalize_title`` copy. They were a
+# byte-for-byte duplicate of the foundation copy; ``normalize_title`` now
+# delegates to ``job_finder.normalizers`` (the single source of truth), so the
+# regexes moved out with it.
 # ---------------------------------------------------------------------------
-
-_TITLE_ABBREVS = [
-    # Seniority — match the abbreviation (with optional trailing period) surrounded
-    # by word boundaries or end of string. Using (?:...) to capture the optional period
-    # as part of the match so it does not remain in the output.
-    (re.compile(r"\bsr\.(?=\s|$)", re.IGNORECASE), "senior"),
-    (re.compile(r"\bjr\.(?=\s|$)", re.IGNORECASE), "junior"),
-    (re.compile(r"\bmgr\.(?=\s|$)", re.IGNORECASE), "manager"),
-    (re.compile(r"\beng\.(?=\s|$)", re.IGNORECASE), "engineering"),
-    (re.compile(r"\bdir\.(?=\s|$)", re.IGNORECASE), "director"),
-    (re.compile(r"\bvp\.(?=\s|$)", re.IGNORECASE), "vice president"),
-    (re.compile(r"\bswe\.(?=\s|$)", re.IGNORECASE), "software engineer"),
-    (re.compile(r"\bpm\.(?=\s|$)", re.IGNORECASE), "product manager"),
-    # Also match without period (word boundary)
-    (re.compile(r"\bsr\b(?!\.)", re.IGNORECASE), "senior"),
-    (re.compile(r"\bjr\b(?!\.)", re.IGNORECASE), "junior"),
-    (re.compile(r"\bmgr\b(?!\.)", re.IGNORECASE), "manager"),
-]
-
-# ---------------------------------------------------------------------------
-# Title level suffix stripping
-# Strip "(IC5)", "L5", "Level 3", "- Level III" etc. at end of title.
-# ---------------------------------------------------------------------------
-
-_TITLE_STRIP_SUFFIX = re.compile(
-    r"""
-    \s*
-    (?:
-        \(IC\d+\)                   # (IC5), (IC6)
-        | \bIC\d+\b                 # IC5, IC6 without parens
-        | \bL\d+\b                  # L5, L6, L7
-        | \bLevel\s+\d+\b           # Level 3, Level 4
-        | \bLvl\.?\s*\d+\b         # Lvl 3, Lvl. 4
-        | [-–]\s*Level\s+\d+        # - Level 3
-        | [-–]\s*L\d+               # - L5
-        | \bI{1,3}V?\b             # Roman numerals I, II, III, IV at word boundary
-        | \bVII?\b                  # VI, VII
-    )
-    \s*$
-    """,
-    re.IGNORECASE | re.VERBOSE,
-)
 
 # ---------------------------------------------------------------------------
 # Status precedence for merge conflict resolution (higher = more advanced stage)
@@ -135,8 +95,15 @@ def normalize_company(company: str) -> str:
 def normalize_title(title: str) -> str:
     """Normalize a job title for dedup key generation.
 
-    Expands common abbreviations (Sr. -> Senior) and strips level suffixes
-    (IC5, Level 3) to reduce formatting noise.
+    Thin delegating wrapper around ``job_finder.normalizers.normalize_title``,
+    the single source of truth for title normalization — mirroring
+    ``normalize_company`` above. Previously this was a byte-for-byte COPY of the
+    foundation implementation (guarded only by a parity test); delegating closes
+    the drift window where a future edit to one copy would silently change
+    dedup_key derivation in only one path. The foundation layer cannot import
+    web, but web CAN import foundation, so the merge engine
+    (``run_retroactive_dedup`` / ``derive_dedup_key``) computes the exact same
+    key as ``Job.dedup_key`` and the upsert path.
 
     Args:
         title: Raw job title string.
@@ -144,33 +111,18 @@ def normalize_title(title: str) -> str:
     Returns:
         Lowercased, normalized title.
     """
-    normalized = title.strip()
+    from job_finder.normalizers import normalize_title as _foundation_normalize_title
 
-    # Strip level suffixes first (e.g., "Staff Engineer (IC5)" -> "Staff Engineer")
-    normalized = _TITLE_STRIP_SUFFIX.sub("", normalized).strip()
-
-    # Expand abbreviations
-    for pattern, replacement in _TITLE_ABBREVS:
-        normalized = pattern.sub(replacement, normalized)
-
-    # Insert a separator at digit<->letter transitions so scraper artifacts like
-    # "84Data" and "84 Data" canonicalize identically. Mirrors the whitespace
-    # collapse below — both exist to neutralize separator noise in the dedup key.
-    normalized = re.sub(r"(?<=\d)(?=[A-Za-z])|(?<=[A-Za-z])(?=\d)", " ", normalized)
-
-    # Normalize whitespace and lowercase
-    normalized = " ".join(normalized.split()).lower()
-    return normalized
+    return _foundation_normalize_title(title)
 
 
 def derive_dedup_key(company: str, title: str) -> str:
     """Derive the current-version dedup_key using the web-layer normalizers.
 
-    Web-layer twin of ``job_finder.normalizers.derive_dedup_key``.
-    ``normalize_company`` delegates directly to the foundation copy;
-    ``normalize_title`` is a byte-for-byte duplicate guarded by a parity test
-    (foundation cannot depend on web). Either way the merge engine produces the
-    same key as ``Job.dedup_key`` and the upsert path. See D-8 and
+    Web-layer twin of ``job_finder.normalizers.derive_dedup_key``. Both
+    ``normalize_company`` and ``normalize_title`` now delegate directly to the
+    foundation copies (the single source of truth), so the merge engine produces
+    the same key as ``Job.dedup_key`` and the upsert path. See D-8 and
     ``NORMALIZER_VERSION`` in ``job_finder.normalizers``.
 
     Args:

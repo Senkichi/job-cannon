@@ -898,9 +898,9 @@ class TestNormalizerVersionCanary:
     # Single pinned hash for the AUTHORITATIVE dedup_key derivation path
     # (Job.dedup_key / derive_dedup_key both route through
     # job_finder.normalizers). The web/dedup_normalizer twin now produces the
-    # SAME hash: normalize_company delegates to the foundation copy and
-    # normalize_title is a byte-for-byte duplicate (parity-asserted), so the two
-    # copies agree over the full corpus. The former EXPECTED_WEB_HASH divergence
+    # SAME hash: both normalize_company and normalize_title delegate to the
+    # foundation copies (single source of truth), so the two copies agree over
+    # the full corpus. The former EXPECTED_WEB_HASH divergence
     # (web copy skipped HTML decode / tag strip / leading-numeric-junk strip)
     # was the architectural-debt-B canonical-field-ownership hole and is now
     # closed. Cross-copy parity is asserted directly by
@@ -943,8 +943,8 @@ class TestNormalizerVersionCanary:
     def test_web_copy_behavior_pinned(self):
         """The web-layer copy now hashes IDENTICALLY to the foundation copy.
 
-        normalize_company delegates to the foundation copy and normalize_title is
-        a byte-for-byte duplicate, so the web twin's corpus hash equals
+        normalize_company and normalize_title both delegate to the foundation
+        copies, so the web twin's corpus hash equals
         EXPECTED_HASH. If this drifts, either a web-only edit reintroduced
         divergence or the normalizer semantics changed -- in the latter case bump
         NORMALIZER_VERSION and the single pinned hash.
