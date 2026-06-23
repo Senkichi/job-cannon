@@ -8,8 +8,10 @@ import base64
 import logging
 import os
 import shutil
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import NamedTuple
 
 from googleapiclient.discovery import build
 
@@ -52,44 +54,61 @@ def _resolve_token_path() -> str:
     return str(canonical)
 
 
-# Map sender addresses to parser functions
-SENDER_PARSERS = {
-    "jobalerts-noreply@linkedin.com": parse_linkedin_alert,
-    "jobs-noreply@linkedin.com": parse_linkedin_alert,
-    "noreply@glassdoor.com": parse_glassdoor_alert,
-    "alert@indeed.com": parse_indeed_alert,
-    "donotreply@match.indeed.com": parse_indeed_match_alert,
-    "no-reply@ziprecruiter.com": parse_ziprecruiter_alert,
-    "no-reply@us.greenhouse-jobs.com": parse_greenhouse_alert,
-    "hello@trueup.io": parse_trueup_alert,
-    "monster@notifications.monster.com": parse_monster_alert,
-}
-
-# Canonical label per sender — health rows key on label (one-per-parser, not per-address).
-# Both LinkedIn addresses map to a single "linkedin" label. Every SENDER_PARSERS key
-# must appear here (enforced by tests/test_autoheal_email_capture.py).
-SENDER_LABEL: dict[str, str] = {
-    "jobalerts-noreply@linkedin.com": "linkedin",
-    "jobs-noreply@linkedin.com": "linkedin",
-    "noreply@glassdoor.com": "glassdoor",
-    "alert@indeed.com": "indeed",
-    "donotreply@match.indeed.com": "indeed",
-    "no-reply@ziprecruiter.com": "ziprecruiter",
-    "no-reply@us.greenhouse-jobs.com": "greenhouse",
-    "hello@trueup.io": "trueup",
-    "monster@notifications.monster.com": "monster",
-}
-
-# Sender keys whose FROM address users may override in Settings
-# (sources.gmail.senders.<key>). Maps each form key to its DEFAULT address —
-# the SENDER_PARSERS / SENDER_LABEL key that an override swaps out. Keys mirror
+# ---------------------------------------------------------------------------
+# Email-sender registry — THE single source of truth for the alert senders we
+# parse. One row per FROM address: its parser, its canonical health label, and
+# (optionally) the Settings form key the address may be overridden under.
+#
+# The three lookup maps below (address→parser, address→label, override-key→
+# address) are DERIVED from this table, so they can never drift out of sync the
+# way three hand-maintained dicts could. Adding a new alert source is a single
+# SenderSpec row — no separate edits to forget. test_autoheal_email_capture and
+# test_gmail_sender_overrides pin the derived shapes; form keys mirror
 # settings.py `_parse_form_to_config` and config.example.yaml's `senders:` block.
+# ---------------------------------------------------------------------------
+
+
+class SenderSpec(NamedTuple):
+    """One alert sender: FROM address → parser + canonical label + override key.
+
+    Attributes:
+        address: The exact FROM address matched on (historical SENDER_PARSERS /
+            SENDER_LABEL key).
+        parser: The parser callable for this sender's email body.
+        label: Canonical one-per-parser health label (both LinkedIn addresses
+            collapse to "linkedin").
+        override_key: Settings form key (sources.gmail.senders.<key>) the user
+            may override this FROM address under, or None if not overridable.
+    """
+
+    address: str
+    parser: Callable
+    label: str
+    override_key: str | None = None
+
+
+SENDERS: tuple[SenderSpec, ...] = (
+    SenderSpec(
+        "jobalerts-noreply@linkedin.com", parse_linkedin_alert, "linkedin", "linkedin_alerts"
+    ),
+    SenderSpec("jobs-noreply@linkedin.com", parse_linkedin_alert, "linkedin", "linkedin_jobs"),
+    SenderSpec("noreply@glassdoor.com", parse_glassdoor_alert, "glassdoor", "glassdoor"),
+    SenderSpec("alert@indeed.com", parse_indeed_alert, "indeed", "indeed"),
+    SenderSpec("donotreply@match.indeed.com", parse_indeed_match_alert, "indeed"),
+    SenderSpec(
+        "no-reply@ziprecruiter.com", parse_ziprecruiter_alert, "ziprecruiter", "ziprecruiter"
+    ),
+    SenderSpec("no-reply@us.greenhouse-jobs.com", parse_greenhouse_alert, "greenhouse"),
+    SenderSpec("hello@trueup.io", parse_trueup_alert, "trueup"),
+    SenderSpec("monster@notifications.monster.com", parse_monster_alert, "monster"),
+)
+
+# Derived lookup maps — insertion order preserved from SENDERS.
+SENDER_PARSERS: dict[str, Callable] = {s.address: s.parser for s in SENDERS}
+SENDER_LABEL: dict[str, str] = {s.address: s.label for s in SENDERS}
+# Settings-overridable senders: form key → DEFAULT address it swaps out.
 _OVERRIDABLE_SENDERS: dict[str, str] = {
-    "linkedin_alerts": "jobalerts-noreply@linkedin.com",
-    "linkedin_jobs": "jobs-noreply@linkedin.com",
-    "glassdoor": "noreply@glassdoor.com",
-    "indeed": "alert@indeed.com",
-    "ziprecruiter": "no-reply@ziprecruiter.com",
+    s.override_key: s.address for s in SENDERS if s.override_key is not None
 }
 
 
