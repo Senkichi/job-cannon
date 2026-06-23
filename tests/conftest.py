@@ -590,20 +590,22 @@ def mock_ensure_ollama_running():
 
 @pytest.fixture
 def cascade_config_low():
-    """Config with Ollama primary + Anthropic CLI fallback for the low tier.
+    """Phase-40 cascade config: Ollama primary + Anthropic fallback (quick tier).
 
-    Supplies a non-empty fallback_chain so call_model() takes the cascade
-    branch and raises ProviderCascadeExhaustedError — not generic RuntimeError
-    — when every provider fails.
+    Uses the live Phase-40 provider schema (`providers.primary` +
+    `providers.fallback_chain` of provider-NAME strings + `providers.overrides`)
+    read by ``model_provider.resolve_workload_routing``. A non-empty
+    fallback_chain ensures call_model() takes the cascade branch and raises
+    ProviderCascadeExhaustedError — not generic RuntimeError — when every
+    provider fails.
     """
     return {
         "providers": {
-            "low": {
-                "provider": "ollama",
-                "model": "qwen2.5:14b",
-                "fallback_chain": [
-                    {"provider": "anthropic", "model": "claude-haiku-4-5"},
-                ],
+            "primary": "ollama",
+            "fallback_chain": ["anthropic"],
+            "overrides": {
+                "ollama": {"quick": "qwen2.5:14b"},
+                "anthropic": {"quick": "claude-haiku-4-5"},
             },
         },
     }
@@ -611,15 +613,14 @@ def cascade_config_low():
 
 @pytest.fixture
 def cascade_config_mid():
-    """Config with Ollama primary + Anthropic CLI fallback for the mid tier."""
+    """Phase-40 cascade config: Ollama primary + Anthropic fallback (score tier)."""
     return {
         "providers": {
-            "mid": {
-                "provider": "ollama",
-                "model": "qwen2.5:14b",
-                "fallback_chain": [
-                    {"provider": "anthropic", "model": "claude-sonnet-4-6"},
-                ],
+            "primary": "ollama",
+            "fallback_chain": ["anthropic"],
+            "overrides": {
+                "ollama": {"score": "qwen2.5:14b"},
+                "anthropic": {"score": "claude-sonnet-4-6"},
             },
         },
     }
@@ -627,25 +628,22 @@ def cascade_config_mid():
 
 @pytest.fixture
 def cascade_config_scoring():
-    """Phase 34 Plan 2 — config with the v3.0 unified scoring tier.
+    """Phase-40 cascade config for the v3.0 unified scoring tier.
 
-    Mirrors providers.scoring in the live config.yaml. qwen2.5:14b is the
-    Phase 33 shootout winner (CONTEXT D-01). The fallback chain inherits
-    the full cascade per D-10. Tests that exercise the unified path should
-    declare this fixture AND set use_unified_scorer: True when constructing
-    their full config dict.
+    Uses the live Phase-40 provider schema (`providers.primary` +
+    `providers.fallback_chain` of provider-NAME strings + `providers.overrides`).
+    qwen2.5:14b is the Phase 33 shootout winner (CONTEXT D-01); the fallback
+    chain mirrors the full cascade per D-10. Tests that exercise the unified
+    path should declare this fixture AND set use_unified_scorer: True when
+    constructing their full config dict.
     """
     return {
         "providers": {
-            "scoring": {
-                "provider": "ollama",
-                "model": "qwen2.5:14b",
-                "fallback_chain": [
-                    {"provider": "groq", "model": "llama-3.3-70b-versatile"},
-                    {"provider": "cerebras", "model": "llama3.3-70b"},
-                    {"provider": "gemini", "model": "gemini-2.0-flash"},
-                    {"provider": "anthropic", "model": "claude-sonnet-4-6"},
-                ],
+            "primary": "ollama",
+            "fallback_chain": ["groq", "cerebras", "gemini", "anthropic"],
+            "overrides": {
+                "ollama": {"score": "qwen2.5:14b"},
+                "anthropic": {"score": "claude-sonnet-4-6"},
             },
         },
         "use_unified_scorer": True,
