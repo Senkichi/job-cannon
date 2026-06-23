@@ -1384,14 +1384,15 @@ class TestCascadeConfigScoringFixture:
     """Sanity tests for the cascade_config_scoring conftest fixture."""
 
     def test_cascade_config_scoring_shape(self, cascade_config_scoring):
-        """Fixture exposes providers.scoring with model qwen2.5:14b and
-        the full Phase 34 cascade fallback chain."""
+        """Fixture exposes the Phase-40 provider schema: ollama primary with a
+        score-tier override of qwen2.5:14b and anthropic in the fallback chain
+        (provider-NAME strings, not nested dicts)."""
         providers = cascade_config_scoring["providers"]
-        assert "scoring" in providers
-        scoring = providers["scoring"]
-        assert scoring["model"] == "qwen2.5:14b"
-        assert scoring["provider"] == "ollama"
-        assert any(link.get("provider") == "anthropic" for link in scoring["fallback_chain"])
+        assert providers["primary"] == "ollama"
+        assert providers["overrides"]["ollama"]["score"] == "qwen2.5:14b"
+        # fallback_chain is a list of provider-name strings per the live schema.
+        assert "anthropic" in providers["fallback_chain"]
+        assert all(isinstance(name, str) for name in providers["fallback_chain"])
 
 
 # ---------------------------------------------------------------------------
