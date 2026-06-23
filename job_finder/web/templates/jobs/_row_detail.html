@@ -13,6 +13,16 @@
    and the full source list. Content is the SAME as the original detail row; it is
    restyled and re-sectioned, nothing dropped.
 
+   DESIGN DECISION #2 (2026-06-22 layout rebalance): the LEFT column is now the
+   Job Description ALONE and is NO LONGER height-capped — it grows to its natural
+   height so the whole JD reads with page-scroll only (the old nested
+   max-h-96 / overflow-y-auto scrollbox is gone). Everything that used to stack
+   under the JD on the left — AI fit analysis (incl. resume priority skills),
+   fit breakdown, notes — MOVED into the right rail, beneath the pipeline
+   timeline. The short rail used to waste a column of vertical space; it now
+   carries that content so the two columns stay roughly balanced and the JD has
+   room to expand. No content was added or removed by this move.
+
    PRESERVED contracts:
      • Collapse back to triage -> hx-get jobs.expand, target closest tr, outerHTML.
      • Status select           -> jobs/_status_cell.html (unchanged hx-post).
@@ -110,28 +120,60 @@
         </div>
       </div>
 
-      {# ---- Body: 2-col grid (read | rail) ---- #}
-      <div class="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_320px] gap-x-8 gap-y-6">
+      {# ---- Body: JD (left, uncapped) · everything else (right rail) ----
+         The JD owns the left column ALONE and grows to full height; the rail
+         beneath the timeline carries the AI analysis, fit breakdown, and notes
+         that used to stack under the JD. See DESIGN DECISION #2 in the header. #}
+      <div class="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_360px] gap-x-8 gap-y-6">
 
-        {# ===== LEFT: JD · AI analysis · breakdown · notes ===== #}
-        <div class="space-y-5 min-w-0">
-
-          {# Full Job Description — KEPT. Render the longer of jd_full / description. #}
+        {# ===== LEFT: Job description only (uncapped, grows vertically) ===== #}
+        <div class="min-w-0">
+          {# Render the longer of jd_full / description. NO height cap — the row
+             grows so the whole JD is readable with page-scroll, not a nested box. #}
           {% set _jdf = job.jd_full or '' %}
           {% set _desc = job.description or '' %}
           {% set jd_display = _desc if (_desc | length) > (_jdf | length) else _jdf %}
           {% if jd_display %}
           <section>
             <h3 class="text-[11px] font-semibold uppercase tracking-wider text-slate-500 mb-2">Job description</h3>
-            <div class="rounded-lg border border-slate-700 bg-slate-950 p-4 max-h-96 overflow-y-auto">
+            <div class="rounded-lg border border-slate-700 bg-slate-950 p-4">
               <div class="text-[13px] text-slate-300 leading-relaxed whitespace-pre-line">{{ jd_display | format_description }}</div>
             </div>
           </section>
+          {% else %}
+          <p class="text-[13px] text-slate-500">No job description on file.</p>
           {% endif %}
+        </div>
 
-          {# AI fit analysis — FULL: strengths · gaps · talking points · resume skills.
-             DESIGN DECISION: talking points + resume skills live HERE (moved out of
-             triage). Resume skills render as indigo (accent) chips. #}
+        {# ===== RIGHT RAIL: timeline · AI analysis · breakdown · sources · dates · notes ===== #}
+        <aside class="space-y-5 min-w-0">
+
+          {# Pipeline timeline — KEPT (anchors the top of the rail). Dot colour by
+             whether it's a status change. #}
+          <section>
+            <h3 class="text-[11px] font-semibold uppercase tracking-wider text-slate-500 mb-2.5">Pipeline timeline</h3>
+            {% if events %}
+            <ol class="relative border-l border-slate-700 ml-1.5 space-y-3">
+              {% for event in events %}
+              <li class="ml-4">
+                <div class="absolute -left-1.5 mt-1 h-3 w-3 rounded-full border-2 border-slate-850 {{ 'bg-amber-400' if event.from_status else 'bg-indigo-500' }}"></div>
+                <div class="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[13px]">
+                  <span class="text-slate-200 font-medium">{{ event.to_status }}</span>
+                  {% if event.from_status %}<span class="text-slate-500 text-xs">from {{ event.from_status }}</span>{% endif %}
+                  {% if event.source and event.source != 'manual' %}<span class="text-slate-600 text-xs italic">via {{ event.source }}</span>{% endif %}
+                </div>
+                <span class="text-[11px] font-mono text-slate-500">{{ event.timestamp[:16] | replace("T", " ") }}</span>
+              </li>
+              {% endfor %}
+            </ol>
+            {% else %}
+            <p class="text-[13px] text-slate-500">No pipeline events yet.</p>
+            {% endif %}
+          </section>
+
+          {# AI fit analysis — MOVED from the left column (was under the JD).
+             FULL: strengths · gaps · talking points · resume skills. Resume skills
+             render as indigo (accent) chips. #}
           {% if job.fit_analysis %}
             {% set analysis = job.fit_analysis | from_json %}
             {% if analysis.strengths or analysis.gaps or analysis.talking_points or analysis.resume_priority_skills %}
@@ -169,7 +211,7 @@
             {% endif %}
           {% endif %}
 
-          {# Fit breakdown — repeat of the triage component, in a card. #}
+          {# Fit breakdown — MOVED from the left column. #}
           {% if sub_scores %}
           <section>
             <h3 class="text-[11px] font-semibold uppercase tracking-wider text-slate-500 mb-2">Fit breakdown</h3>
@@ -177,7 +219,7 @@
               {% for key, label in sub_score_dims %}
                 {% set v = sub_scores.get(key, 0) | int %}
                 {% set fill = 'bg-emerald-500' if v >= 4 else ('bg-amber-500' if v == 3 else 'bg-red-500') %}
-                <div class="grid grid-cols-[110px_1fr_16px] items-center gap-3">
+                <div class="grid grid-cols-[104px_1fr_16px] items-center gap-3">
                   <span class="text-xs text-slate-400">{{ label }}</span>
                   <span class="h-1.5 rounded-full bg-slate-950 overflow-hidden"><span class="block h-full rounded-full {{ fill }}" style="width: {{ (v / 5 * 100) }}%"></span></span>
                   <span class="text-xs text-slate-300 text-right tabular-nums">{{ v }}</span>
@@ -186,38 +228,6 @@
             </div>
           </section>
           {% endif %}
-
-          {# Notes — KEPT (shared partial, unchanged contract). #}
-          <section>
-            <h3 class="text-[11px] font-semibold uppercase tracking-wider text-slate-500 mb-2">Notes</h3>
-            {% include "jobs/_notes_panel.html" %}
-          </section>
-        </div>
-
-        {# ===== RIGHT RAIL: timeline · sources · dates ===== #}
-        <aside class="space-y-5 min-w-0">
-
-          {# Pipeline timeline — KEPT. Dot colour by whether it's a status change. #}
-          <section>
-            <h3 class="text-[11px] font-semibold uppercase tracking-wider text-slate-500 mb-2.5">Pipeline timeline</h3>
-            {% if events %}
-            <ol class="relative border-l border-slate-700 ml-1.5 space-y-3">
-              {% for event in events %}
-              <li class="ml-4">
-                <div class="absolute -left-1.5 mt-1 h-3 w-3 rounded-full border-2 border-slate-850 {{ 'bg-amber-400' if event.from_status else 'bg-indigo-500' }}"></div>
-                <div class="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[13px]">
-                  <span class="text-slate-200 font-medium">{{ event.to_status }}</span>
-                  {% if event.from_status %}<span class="text-slate-500 text-xs">from {{ event.from_status }}</span>{% endif %}
-                  {% if event.source and event.source != 'manual' %}<span class="text-slate-600 text-xs italic">via {{ event.source }}</span>{% endif %}
-                </div>
-                <span class="text-[11px] font-mono text-slate-500">{{ event.timestamp[:16] | replace("T", " ") }}</span>
-              </li>
-              {% endfor %}
-            </ol>
-            {% else %}
-            <p class="text-[13px] text-slate-500">No pipeline events yet.</p>
-            {% endif %}
-          </section>
 
           {# Sources — FULL list (moved out of triage). KEEP direct-link badge include. #}
           {% if sources_list %}
@@ -249,6 +259,12 @@
               <div class="flex items-baseline gap-3"><dt class="w-20 flex-none text-[11px] uppercase tracking-wider text-slate-500">First seen</dt><dd class="text-[11px] font-mono text-slate-400">{{ (job.first_seen | local_date) if job.first_seen else "—" }}</dd></div>
               <div class="flex items-baseline gap-3"><dt class="w-20 flex-none text-[11px] uppercase tracking-wider text-slate-500">Last seen</dt><dd class="text-[11px] font-mono {{ 'text-amber-400' if (job.is_stale or job.expiry_status == 'expired') else 'text-slate-400' }}">{{ (job.last_seen | local_date) if job.last_seen else "—" }}</dd></div>
             </dl>
+          </section>
+
+          {# Notes — MOVED from the left column (shared partial, unchanged contract). #}
+          <section>
+            <h3 class="text-[11px] font-semibold uppercase tracking-wider text-slate-500 mb-2">Notes</h3>
+            {% include "jobs/_notes_panel.html" %}
           </section>
         </aside>
       </div>
