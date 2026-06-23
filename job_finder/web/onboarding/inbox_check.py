@@ -30,6 +30,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Literal
 
 from job_finder.secrets import get_secret
+from job_finder.web import user_data_dirs
 from job_finder.web.onboarding.gmail_test import GmailTestResult, check_oauth
 from job_finder.web.onboarding.imap_test import ImapTestResult, check_imap
 
@@ -71,7 +72,7 @@ def run_inbox_check(
     config: dict,
     conn: sqlite3.Connection,
     *,
-    token_path: str = "token.json",  # noqa: S107 - file path, not a password
+    token_path: str | None = None,
     window_hours: int = _DEFAULT_WINDOW_HOURS,
     now: datetime | None = None,
 ) -> InboxCheckResult:
@@ -80,7 +81,13 @@ def run_inbox_check(
     Args:
         config: Loaded ``config.yaml`` dict.
         conn: Active SQLite connection (read-only usage; no writes).
-        token_path: Path to the Gmail OAuth token file. Default ``token.json``.
+        token_path: Path to the Gmail OAuth token file. ``None`` (the default)
+            resolves the canonical user-data-dir location
+            (``user_data_dirs.token_path()``) — the same file
+            ``gmail_auth.authenticate()`` writes and ``gmail_source`` reads.
+            A bare relative ``"token.json"`` would only match if the process
+            CWD happened to be the user-data dir, falsely reporting ``no_token``
+            for a perfectly-authenticated install.
         window_hours: Activity window in hours. Default 72.
         now: Injected "current time" for tests. Defaults to ``datetime.now()``.
 
@@ -117,7 +124,10 @@ def run_inbox_check(
     imap_auth: ImapTestResult | None = None
 
     if gmail_enabled:
-        gmail_auth = check_oauth(token_path)
+        # Resolve the canonical token location lazily so an IMAP-only or
+        # unconfigured install never touches user_data_dirs needlessly.
+        resolved_token = token_path or str(user_data_dirs.token_path())
+        gmail_auth = check_oauth(resolved_token)
 
     if imap_enabled:
         imap_cfg = sources.get("imap", {}) or {}
