@@ -215,19 +215,24 @@ def format_markdown_report(
 
     # Recorded for the post-impl comparison (open question Q6 from
     # NO-KEY-COMPENSATION-PLAN.md). Not enforced as a CLI gate; lives in the
-    # report so future stages know what target to read against.
+    # report only. The 80% target below is still an unvalidated placeholder —
+    # revisiting it is blocked on (a) free-portal ingestion being wired into
+    # the live pipeline and (b) a committed baseline report to diff against,
+    # neither of which exists yet. This is not a "just re-run it" follow-up.
     lines.append("## Comparison threshold (Q6)")
     lines.append("")
     lines.append(
-        "After Stage 2-5 land, re-run this benchmark and check that the sum of"
-        " free-source `novel` counts (gmail + imap + portal_*) is at least 80%"
-        " of the sum of paid-source `novel` counts (serpapi +"
-        " dataforseo) in this baseline."
+        "Target: the sum of free-source `novel` counts (gmail + imap +"
+        " portal_*) should reach at least 80% of the sum of paid-source"
+        " `novel` counts (serpapi + dataforseo), measured against a committed"
+        " baseline report."
     )
     lines.append(
-        " 80% is a placeholder agreed during planning (Q6, user invited"
-        " revision once baseline numbers landed) — revisit if the baseline"
-        " makes it look unreachable or trivial."
+        " 80% is an UNVALIDATED placeholder agreed during planning (Q6). It has"
+        " not been revisited because the data to do so does not exist yet:"
+        " free-portal ingestion is not wired into the live pipeline, and no"
+        " baseline report has been produced. Revisit once both land — the"
+        " target may prove unreachable or trivial against real numbers."
     )
     lines.append("")
     return "\n".join(lines)
