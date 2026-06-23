@@ -83,6 +83,28 @@ def _setup_file_logging() -> None:
 logger = logging.getLogger(__name__)
 
 
+def _is_dev_checkout() -> bool:
+    """True when Job Cannon is running from a source checkout, so dev-only
+    affordances (currently Jinja template auto-reload) can default themselves on
+    without the user remembering a flag.
+
+    Detection, in order:
+      1. ``JOB_CANNON_DEV=1`` -- explicit override, always wins.
+      2. ``sys.frozen`` -- a PyInstaller build is never a dev checkout.
+      3. A ``.git`` entry at the repo root above this package. Present in a clone
+         or worktree (a worktree's ``.git`` is a file, hence ``.exists()`` not
+         ``.is_dir()``); absent in a pipx/pip install under site-packages.
+    """
+    from pathlib import Path
+
+    if os.environ.get("JOB_CANNON_DEV") == "1":
+        return True
+    if getattr(sys, "frozen", False):
+        return False
+    # __file__ = <root>/job_finder/web/__init__.py -> parents[2] is <root>.
+    return (Path(__file__).resolve().parents[2] / ".git").exists()
+
+
 def create_app(config_path: str = "config.yaml", config: dict | None = None) -> Flask:
     """Create and configure the Flask application.
 
@@ -99,6 +121,14 @@ def create_app(config_path: str = "config.yaml", config: dict | None = None) -> 
         __name__,
         template_folder="templates",
     )
+
+    # Dev convenience: re-read Jinja templates from disk on every request so
+    # edits to .html/HTMX fragments show up without a server restart. Auto-on
+    # in a source checkout, off in shipped builds -- see _is_dev_checkout(). It
+    # is deliberately NOT coupled to `debug`, which would also arm the Werkzeug
+    # interactive debugger (an RCE footgun that test_config_bootstrap forbids).
+    if _is_dev_checkout():
+        app.config["TEMPLATES_AUTO_RELOAD"] = True
 
     # Single point of enforcement: the user-data root must exist before any
     # code path touches it (config_path / db_path / logs_path). Previously
