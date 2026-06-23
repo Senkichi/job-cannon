@@ -313,6 +313,87 @@ class TestSettingsProviderSection:
         assert '<option value="ollama" selected>' in body
 
 
+class TestSettingsParityAdditions:
+    """Config fields that were consumed/onboarding-only but had no Settings UI:
+    profile.home_country, scheduler.cadence_preset, and the apply-verdict tuning
+    keys (scoring.low_signal_jd_chars / apply_mean_floor / apply_min_strong_axes)."""
+
+    def test_save_home_country_uppercased(self, settings_client, settings_app):
+        resp = settings_client.post(
+            "/settings/save",
+            data={
+                "target_titles": "Staff Data Scientist\nSenior Data Scientist",
+                "profile_skills": "Python\nSQL\nSpark",
+                "home_country": "us",
+            },
+        )
+        assert resp.status_code == 302
+        with open(settings_app._test_config_path, encoding="utf-8") as f:
+            config = yaml.safe_load(f)
+        assert config["profile"]["home_country"] == "US"
+
+    def test_save_cadence_preset_valid(self, settings_client, settings_app):
+        resp = settings_client.post(
+            "/settings/save",
+            data={
+                "target_titles": "Staff Data Scientist\nSenior Data Scientist",
+                "profile_skills": "Python\nSQL\nSpark",
+                "cadence_preset": "heavy",
+            },
+        )
+        assert resp.status_code == 302
+        with open(settings_app._test_config_path, encoding="utf-8") as f:
+            config = yaml.safe_load(f)
+        assert config["scheduler"]["cadence_preset"] == "heavy"
+
+    def test_save_cadence_preset_invalid_ignored(self, settings_client, settings_app):
+        config_path = settings_app._test_config_path
+        with open(config_path, encoding="utf-8") as f:
+            existing = yaml.safe_load(f)
+        existing["scheduler"] = {"cadence_preset": "standard"}
+        with open(config_path, "w", encoding="utf-8") as f:
+            yaml.dump(existing, f, default_flow_style=False)
+
+        resp = settings_client.post(
+            "/settings/save",
+            data={
+                "target_titles": "Staff Data Scientist\nSenior Data Scientist",
+                "profile_skills": "Python\nSQL\nSpark",
+                "cadence_preset": "turbo",  # not a valid preset
+            },
+        )
+        assert resp.status_code == 302
+        with open(config_path, encoding="utf-8") as f:
+            config = yaml.safe_load(f)
+        assert config["scheduler"]["cadence_preset"] == "standard"
+
+    def test_save_classification_tuning_keys(self, settings_client, settings_app):
+        resp = settings_client.post(
+            "/settings/save",
+            data={
+                "target_titles": "Staff Data Scientist\nSenior Data Scientist",
+                "profile_skills": "Python\nSQL\nSpark",
+                "low_signal_jd_chars": "800",
+                "apply_mean_floor": "3.8",
+                "apply_min_strong_axes": "4",
+            },
+        )
+        assert resp.status_code == 302
+        with open(settings_app._test_config_path, encoding="utf-8") as f:
+            config = yaml.safe_load(f)
+        assert config["scoring"]["low_signal_jd_chars"] == 800
+        assert config["scoring"]["apply_mean_floor"] == 3.8
+        assert config["scoring"]["apply_min_strong_axes"] == 4
+
+    def test_settings_page_renders_parity_controls(self, settings_client):
+        resp = settings_client.get("/settings/")
+        assert resp.status_code == 200
+        body = resp.get_data(as_text=True)
+        assert 'name="home_country"' in body
+        assert 'name="cadence_preset"' in body
+        assert 'name="low_signal_jd_chars"' in body
+
+
 class TestSettingsNumericBlankGuard:
     """Blank numeric fields must NOT silently snap back to a non-empty default —
     the dangerous case is clearing the budget cap re-enabling paid spend. Blank

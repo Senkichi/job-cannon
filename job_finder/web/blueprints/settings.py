@@ -450,6 +450,11 @@ def _parse_form_to_config(form) -> dict:
         # Anything unexpected falls back to "remote" — the wizard's default.
         wa = form["work_arrangement"].strip().lower()
         profile["work_arrangement"] = wa if wa in ("remote", "hybrid", "on-site") else "remote"
+    if _has("home_country"):
+        # ISO 3166-1 alpha-2 country code, compared (case-insensitively) against
+        # each job's country_code by location_fit. Stored upper-cased; blank
+        # clears the preference (location_fit's †-rows fire only when present).
+        profile["home_country"] = form["home_country"].strip().upper()
     if _has_value("min_salary"):
         profile["min_salary"] = safe_int(form["min_salary"])
     if _has("industries"):
@@ -662,8 +667,26 @@ def _parse_form_to_config(form) -> dict:
         scoring["daily_budget_usd"] = safe_float(
             form["daily_budget_usd"], DEFAULT_DAILY_BUDGET_USD
         )
+    # Apply-verdict tuning (consumed by db._assessment_writer / _classification).
+    # Blank = preserve existing (same _has_value rationale as the thresholds above).
+    if _has_value("low_signal_jd_chars"):
+        scoring["low_signal_jd_chars"] = safe_int(form["low_signal_jd_chars"], 1500)
+    if _has_value("apply_mean_floor"):
+        scoring["apply_mean_floor"] = safe_float(form["apply_mean_floor"], 3.5)
+    if _has_value("apply_min_strong_axes"):
+        scoring["apply_min_strong_axes"] = safe_int(form["apply_min_strong_axes"], 3)
     if scoring:
         config["scoring"] = scoring
+
+    # --- Scheduler ---
+    # cadence_preset resizes ingestion + enrichment/backfill frequency. Cron jobs
+    # are registered at startup, so a change here only takes effect on the next app
+    # restart (refresh_jf_config updates the live dict but does not re-register
+    # jobs); the template hint says so.
+    if _has("cadence_preset"):
+        preset = form["cadence_preset"].strip().lower()
+        if preset in ("light", "standard", "heavy"):
+            config.setdefault("scheduler", {})["cadence_preset"] = preset
 
     # --- Database ---
     if _has("db_path"):
