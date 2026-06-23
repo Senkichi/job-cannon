@@ -41,6 +41,11 @@ _SHAPE_VIOLATIONS = [
     "Engineer 2026-06-15 role",  # embedded ISO date
     "Analyst Apply Now",  # CTA
     "Engineer →",  # trailing arrow glyph
+    # Relative "Posted N <unit> ago" posting-age chrome (Phenom/Workday tiles).
+    "Senior Data Scientist Posted 3 hours ago",
+    "Senior Data Scientist Posted 30+ days ago",
+    # Glued <Title><Location>Posted N ago (no-separator), the company_id=217 shape.
+    "Senior Data ScientistUnited States, Multiple Locations, Multiple LocationsPosted 15 days ago",
     "",  # empty
     "   ",  # whitespace-only
 ]
@@ -91,6 +96,10 @@ _LEGIT = [
     "Community Manager",  # "community" but NOT "talent community"
     "iOS Developer",
     "3D Artist",
+    # "Posted by <name>" recruiter tag is NOT posting-age chrome: no digit, no
+    # "ago", so _RELATIVE_POSTED_RE must not fire (the over-strip guard for the
+    # relative-posted rule). Real title seen in the live corpus (company_id=3288).
+    "Senior BI + Analytics Lead / Analytics Manager, Remote (Posted by SAM)",
 ]
 
 
@@ -107,6 +116,22 @@ _REPAIR_CASES = [
     ("Data Scientist / IA Engineer Jun 15, 2026 View Job →", "Data Scientist / IA Engineer"),
     ("Senior Data Scientist View Job →", "Senior Data Scientist"),
     ("Machine Learning Engineer Apply Now", "Machine Learning Engineer"),
+    # Bare relative posting-age tail.
+    ("Staff Data Scientist Posted 3 hours ago", "Staff Data Scientist"),
+    # Glued <Title><Location>Posted N ago: the Microsoft Phenom careers-page tile
+    # (company_id=217) scraped via careers_crawl. The no-separator location
+    # ("...ScientistUnited States, Multiple Locations...") is consumed along with
+    # the trailing posting-age chrome, recovering just the role name.
+    (
+        "Senior Data ScientistUnited States, Multiple Locations, Multiple LocationsPosted 15 days ago",
+        "Senior Data Scientist",
+    ),
+    # Glued <Title>(...)Location/reqID Posted N ago, the close-paren boundary
+    # variant (company_id=2297).
+    (
+        "Senior Analyst, Customer Engagement Measurement & InsightsHyderabad - TS - INR1599471Posted 19 days ago",
+        "Senior Analyst, Customer Engagement Measurement & Insights",
+    ),
 ]
 
 
@@ -225,6 +250,26 @@ def test_from_job_clean_title_unaffected():
     assert p.unresolved_reasons == []
 
 
+def test_from_job_phenom_glued_title_cleaned_then_quarantined():
+    # The company_id=217 Microsoft Phenom careers-page corruption: title + glued
+    # no-separator location + relative posting-age chrome. A RAW blob fed straight
+    # to the universal ingest gate still trips is_metadata_blob on the raw title
+    # (the "Posted N days ago" marker) and fail-closes to quarantine (I-08) — but
+    # the title FIELD is repaired to the role name, so a reviewer sees a clean
+    # title on /admin/review. (In the live careers_crawl flow, _extract_candidates
+    # runs _clean_title BEFORE from_job, so the gate receives the already-clean
+    # title and accepts it — see test_clean_title_repairs_card_tail.)
+    from job_finder.parsed_job import UnresolvedParsedJob
+
+    p = _from_job(
+        "Senior Data ScientistUnited States, Multiple Locations, "
+        "Multiple LocationsPosted 15 days ago"
+    )
+    assert isinstance(p, UnresolvedParsedJob)
+    assert p.title == "Senior Data Scientist"
+    assert "title_metadata_blob" in p.unresolved_reasons
+
+
 # ---------------------------------------------------------------------------
 # Retroactive re-sweep — heals legacy rows + declassifies + stamps watermark
 # ---------------------------------------------------------------------------
@@ -319,6 +364,34 @@ def test_resweep_idempotent(migrated_db):
         "SELECT classification FROM jobs WHERE dedup_key = 'acme|clean2'"
     ).fetchone()
     assert row["classification"] == "apply"  # untouched
+
+
+def test_resweep_heals_phenom_glued_title(migrated_db):
+    # Regression for the company_id=217 Microsoft Phenom corruption: the legacy
+    # careers_crawl row (title + glued no-separator location + relative posting-age
+    # chrome) is healed by the version-bump re-sweep — the title is rewritten to the
+    # role name, the original preserved in raw_title, and the row declassified for
+    # re-score. This is the exact mechanism that healed the live DB.
+    from job_finder.web.migrations._post_hooks import _run_title_resweep_if_stale
+
+    _path, conn = migrated_db
+    raw = "Senior Data ScientistUnited States, Multiple Locations, Multiple LocationsPosted 15 days ago"
+    _insert_job(conn, "microsoft|phenomjunk", raw, scoring_model="qwen2.5:14b")
+
+    conn.execute("UPDATE schema_meta SET value = '0' WHERE key = 'title_hygiene_version'")
+    conn.commit()
+
+    _run_title_resweep_if_stale(conn)
+
+    row = conn.execute(
+        "SELECT title, raw_title, classification, scoring_model, unresolved_reasons FROM jobs "
+        "WHERE title LIKE 'Senior Data Scientist%'"
+    ).fetchone()
+    assert row["title"] == "Senior Data Scientist"
+    assert row["raw_title"] == raw  # original preserved (reversible repair)
+    assert row["classification"] is None  # declassified (semantic repair → re-score)
+    assert row["scoring_model"] is None  # cleared with classification (I-04/I-05)
+    assert json.loads(row["unresolved_reasons"]) == []  # repaired, not quarantined
 
 
 # ---------------------------------------------------------------------------
