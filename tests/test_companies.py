@@ -437,6 +437,35 @@ class TestRetryRoute:
         response = client.post("/companies/99999/retry")
         assert response.status_code == 404
 
+    def test_retry_speculative_exhausted_with_slug_returns_200(self, companies_client):
+        """A miss/speculative_exhausted company that still carries a probeable
+        platform+slug is now retryable — this re-verifies stale false-negatives
+        (the Nvidia / Fannie Mae class) that the old error/unreachable-only gate
+        left as permanent dead-ends."""
+        client, db_path, conn = companies_client
+        company_id = _insert_company(
+            conn,
+            ats_probe_status="miss",
+            miss_reason="speculative_exhausted",
+            ats_platform="workday",
+            ats_slug="nvidia.wd5/NVIDIAExternalCareerSite",
+        )
+        with patch("job_finder.web.blueprints.companies.probe_single_company") as mock_probe:
+            mock_probe.return_value = {"status": "hit", "jobs_found": 0}
+            response = client.post(f"/companies/{company_id}/retry")
+        assert response.status_code == 200
+        mock_probe.assert_called_once()
+
+    def test_retry_miss_without_slug_still_400(self, companies_client):
+        """A miss with no platform/slug has nothing to re-probe → still 400.
+        Guards against the loosened gate admitting un-probeable misses."""
+        client, db_path, conn = companies_client
+        company_id = _insert_company(
+            conn, ats_probe_status="miss", miss_reason="speculative_exhausted"
+        )
+        response = client.post(f"/companies/{company_id}/retry")
+        assert response.status_code == 400
+
 
 # ---------------------------------------------------------------------------
 # Tests: Pagination (Fix 8)

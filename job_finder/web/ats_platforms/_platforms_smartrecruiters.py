@@ -14,6 +14,8 @@ import time
 import requests
 
 from job_finder.web.ats_platforms._registry import (
+    BOARD_GONE_STATUSES,
+    BoardGoneError,
     PlatformScanner,
     coerce_remote_bool,
     label_or_str,
@@ -75,6 +77,12 @@ def _fetch_postings_with_completeness(slug: str) -> tuple[list[dict], bool]:
             break
 
         if resp.status_code != 200:
+            # First-page 404/410 = the company slug no longer resolves: raise so
+            # the scan path can demote a stale hit. Other non-200 (403/5xx) or a
+            # 404/410 mid-pagination (postings already collected) stays a
+            # transient/partial break — report incomplete, as before.
+            if resp.status_code in BOARD_GONE_STATUSES and total_fetched == 0:
+                raise BoardGoneError(resp.status_code, slug)
             logger.debug("scan_smartrecruiters('%s') returned HTTP %d", slug, resp.status_code)
             break
 

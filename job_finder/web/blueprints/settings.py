@@ -37,18 +37,36 @@ logger = logging.getLogger(__name__)
 
 settings_bp = Blueprint("settings", __name__, url_prefix="/settings")
 
-# Resolve to the canonical user-data config.yaml (respects $JOB_CANNON_USER_DATA_DIR,
-# falls back to platformdirs). Was a cwd-relative "config.yaml" literal which silently
-# leaked the developer's repo-root config into any non-cwd boot and broke pipx/uv tool
-# installs that run from an arbitrary terminal pwd.
-_CONFIG_PATH = str(user_data_dirs.config_path())
+# Optional test override only — production leaves this None and resolves the
+# config.yaml path FRESH per-request via _config_path().
+#
+# This used to be `str(user_data_dirs.config_path())` evaluated AT IMPORT. That
+# froze the path to whatever $JOB_CANNON_USER_DATA_DIR pointed at when the module
+# was first imported (during test collection, the dev machine's repo root). Any
+# test that hit /settings/save WITHOUT pinning this global then wrote its
+# example-seeded config to the REAL config.yaml — silently resetting
+# target_titles from the user's curated list to the 2 example defaults (the
+# 2026-06-18 wipe; same import-frozen-path class as the PR #504 live-DB leak).
+# Resolving per-request lets the per-test JOB_CANNON_USER_DATA_DIR redirect win.
+_CONFIG_PATH: str | None = None
+
+
+def _config_path() -> str:
+    """Resolve the active config.yaml path, honoring a test override.
+
+    Production: ``_CONFIG_PATH`` is None → resolve fresh from
+    ``user_data_dirs.config_path()`` on every call, so the env-var redirect
+    (including each test's temp user-data dir) always wins. Tests may set
+    ``settings._CONFIG_PATH`` to pin an explicit path.
+    """
+    return _CONFIG_PATH or str(user_data_dirs.config_path())
 
 
 @settings_bp.route("/", strict_slashes=False)
 def index():
     """Settings page — display config.yaml values in editable form."""
     try:
-        config = load_config(_CONFIG_PATH)
+        config = load_config(_config_path())
     except FileNotFoundError:
         # Fall back to the in-memory config from app context
         config = current_app.config.get("JF_CONFIG", {})
@@ -64,7 +82,7 @@ def index():
 
     config_mtime = 0
     try:
-        config_mtime = os.path.getmtime(_CONFIG_PATH)
+        config_mtime = os.path.getmtime(_config_path())
     except OSError:
         pass
 
@@ -115,7 +133,7 @@ def inbox_check_fragment():
     Returns the same tile rendered standalone so HTMX can swap it in place.
     """
     try:
-        config = load_config(_CONFIG_PATH)
+        config = load_config(_config_path())
     except FileNotFoundError:
         config = current_app.config.get("JF_CONFIG", {})
     inbox_status = _safe_run_inbox_check(config)
@@ -181,7 +199,7 @@ def save():
     try:
         # Load existing config first so we preserve keys not in the form
         try:
-            existing = load_config(_CONFIG_PATH)
+            existing = load_config(_config_path())
         except FileNotFoundError:
             existing = {}
 
@@ -189,7 +207,7 @@ def save():
         submitted_mtime = request.form.get("_config_mtime", "")
         if submitted_mtime:
             try:
-                current_mtime = os.path.getmtime(_CONFIG_PATH)
+                current_mtime = os.path.getmtime(_config_path())
                 if abs(float(submitted_mtime) - current_mtime) > 0.01:
                     flash(
                         "Settings were modified externally. Page reloaded with latest values.",
@@ -273,7 +291,7 @@ def save():
             )
             return redirect(url_for("settings.index"))
 
-        _write_config(config, _CONFIG_PATH)
+        _write_config(config, _config_path())
 
         # Refresh the live in-memory config so changes take effect without restart.
         refresh_jf_config(current_app._get_current_object(), config)
@@ -630,8 +648,11 @@ def _parse_query_rows(form, prefix: str) -> list:
     return queries
 
 
-def _write_config(config: dict, config_path: str = _CONFIG_PATH) -> None:
+def _write_config(config: dict, config_path: str | None = None) -> None:
     """Write config dict to YAML file atomically.
+
+    ``config_path`` defaults to the per-request-resolved active config path
+    (never an import-frozen value — see ``_config_path``).
 
     Writes to a sibling temp file first, then uses os.replace() for an atomic
     rename so a crash or OS error mid-write cannot produce a partial/empty file.
@@ -641,6 +662,7 @@ def _write_config(config: dict, config_path: str = _CONFIG_PATH) -> None:
     world-readable. Windows uses ACLs not POSIX modes; the default
     home-directory ACL is already user-only there (M-4, 2026-05-20).
     """
+    config_path = config_path or _config_path()
     config_path_obj = Path(config_path)
     tmp_path = config_path_obj.with_suffix(".yaml.tmp")
     try:

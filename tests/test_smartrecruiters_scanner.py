@@ -462,6 +462,32 @@ class TestSmartRecruitersCompleteness:
         assert complete is False
 
     @patch("job_finder.web.ats_platforms._platforms_smartrecruiters.requests.get")
+    def test_first_page_410_raises_board_gone(self, mock_get):
+        """First-page HTTP 410 → BoardGoneError (the company slug no longer
+        resolves). The scan path demotes the stale hit on this signal."""
+        from job_finder.web.ats_platforms._platforms_smartrecruiters import (
+            _fetch_postings_with_completeness,
+        )
+        from job_finder.web.ats_platforms._registry import BoardGoneError
+
+        mock_get.return_value = MagicMock(status_code=410)
+        with pytest.raises(BoardGoneError) as exc_info:
+            _fetch_postings_with_completeness("DefunctCo")
+        assert exc_info.value.status == 410
+
+    @patch("job_finder.web.ats_platforms._platforms_smartrecruiters.requests.get")
+    def test_first_page_403_does_not_raise_board_gone(self, mock_get):
+        """First-page HTTP 403 (blocked, NOT gone) → incomplete, no raise."""
+        from job_finder.web.ats_platforms._platforms_smartrecruiters import (
+            _fetch_postings_with_completeness,
+        )
+
+        mock_get.return_value = MagicMock(status_code=403)
+        postings, complete = _fetch_postings_with_completeness("BlockedCo")
+        assert postings == []
+        assert complete is False
+
+    @patch("job_finder.web.ats_platforms._platforms_smartrecruiters.requests.get")
     def test_fetch_postings_wrapper_returns_list_only(self, mock_get):
         """Thin _fetch_postings wrapper returns just the postings list."""
         from job_finder.web.ats_platforms._platforms_smartrecruiters import _fetch_postings

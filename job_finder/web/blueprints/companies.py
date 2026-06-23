@@ -764,12 +764,24 @@ def _run_ats_scan_bg(db_path: str, session_id: int, config: dict) -> None:
 
 @companies_bp.route("/<int:company_id>/retry", methods=["POST"], strict_slashes=False)
 def retry(company_id):
-    """Immediately re-probe a company in error or unreachable state.
+    """Immediately re-probe a company whose ATS state may be stale.
 
-    Only valid for companies with ats_probe_status='error' or
-    ats_probe_status='miss' AND miss_reason='unreachable'. Returns 400 for
-    all other statuses (hit, pending, regular miss).
+    Retryable when ANY of:
+    - ``ats_probe_status='error'`` (transient failure), or
+    - ``ats_probe_status='miss' AND miss_reason='unreachable'``, or
+    - ``ats_probe_status='miss'`` with a probeable ``ats_platform``+``ats_slug``
+      still on the row (e.g. ``speculative_exhausted`` / ``platform_slug_404``).
 
+    The third clause closes a stale-bookkeeping dead-end: a company with a
+    *live* slug that was wrongly parked at ``miss/speculative_exhausted`` (the
+    Nvidia / Fannie Mae class) could never be re-verified from the UI, because
+    the gate previously admitted only error/unreachable. ``probe_single_company``
+    re-probes the stored slug and promotes miss→hit when it now resolves.
+
+    Demotion of a stale *hit* (dead 410 slug, e.g. Walmart) is handled at scan
+    time via the BoardGone path, not here — this route only promotes misses.
+
+    Returns 400 for non-retryable rows (pending, hit, or a miss with no slug).
     Returns updated _row.html fragment (innerHTML swap into #company-{id}).
     """
     config = current_app.config.get("JF_CONFIG", {})
@@ -780,13 +792,23 @@ def retry(company_id):
     if company is None:
         return "Company not found", 404
 
+    company_d = dict(company)
     status = company["ats_probe_status"]
-    miss_reason = dict(company).get("miss_reason")
+    miss_reason = company_d.get("miss_reason")
+    has_probeable_slug = bool(company_d.get("ats_platform")) and bool(company_d.get("ats_slug"))
 
-    # Only allow retry for error or unreachable companies
-    is_retryable = status == "error" or (status == "miss" and miss_reason == "unreachable")
+    # Allow retry for error/unreachable companies AND any miss that still has a
+    # probeable slug (re-verify false-negatives like speculative_exhausted).
+    is_retryable = (
+        status == "error"
+        or (status == "miss" and miss_reason == "unreachable")
+        or (status == "miss" and has_probeable_slug)
+    )
     if not is_retryable:
-        return "Company is not in error or unreachable state", 400
+        return (
+            "Company is not retryable (needs error/unreachable status or a probeable ATS slug)",
+            400,
+        )
 
     try:
         probe_single_company(company_id, conn, config)

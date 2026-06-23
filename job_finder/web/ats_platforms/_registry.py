@@ -37,6 +37,33 @@ from job_finder.web.ats_prober import _PROBE_TIMEOUT
 logger = logging.getLogger(__name__)
 
 
+# HTTP statuses that mean an ATS board/slug no longer resolves (permanent),
+# as opposed to transient 5xx / rate-limit 403 / network blips.
+BOARD_GONE_STATUSES = frozenset({404, 410})
+
+
+class BoardGoneError(Exception):
+    """A previously-discovered ATS board no longer exists.
+
+    Raised by a platform's completeness-fetch when the FIRST page of the board
+    returns a definitively-gone status (404 Not Found / 410 Gone) — the
+    tenant/slug stopped resolving, not a transient 5xx/403 and not an
+    empty-but-live board (HTTP 200, zero postings, which must stay a hit).
+
+    The scan driver lets this propagate so ``_scan_one_company_via_ats_api`` can
+    demote a stale ``hit`` to ``miss/platform_slug_gone`` (clearing
+    ``scan_enabled``) instead of logging "0 fetched" against a dead board every
+    run forever (e.g. Walmart's 410'd Workday slug). The ATS reconciler and the
+    enrichment ATS-query path catch it and degrade to "no data" (no expiry, no
+    enrichment) rather than crashing.
+    """
+
+    def __init__(self, status: int, slug: str):
+        self.status = status
+        self.slug = slug
+        super().__init__(f"ATS board gone (HTTP {status}): {slug}")
+
+
 # ── Structured-field CAPTURE helpers (#451) ──────────────────────────────────
 # Shared raw-as-provided extraction for the is_remote / employment_type /
 # department capture columns. Both helpers are pure and return None when the

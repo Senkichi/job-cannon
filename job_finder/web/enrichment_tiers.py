@@ -215,13 +215,20 @@ def query_ats_api(job_row: dict, conn: Any, config: dict) -> dict:
                 SCANNERS_BY_NAME,
                 run_platform_scan,
             )
+            from job_finder.web.ats_platforms._registry import BoardGoneError
         except ImportError:
             return {}
 
         scanner = SCANNERS_BY_NAME.get(platform)
         if scanner is None or platform in NON_SCANNABLE_PLATFORMS:
             return {}
-        postings = run_platform_scan(scanner, slug, target_titles, exclusions)
+        try:
+            postings = run_platform_scan(scanner, slug, target_titles, exclusions)
+        except BoardGoneError:
+            # The company's board 404/410'd — no data to enrich from. Degrade to
+            # "no enrichment" (the pre-existing behavior for an empty board); the
+            # stale-hit demotion is the scan path's job, not enrichment's.
+            return {}
 
         if not postings:
             return {}

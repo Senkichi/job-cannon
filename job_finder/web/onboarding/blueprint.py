@@ -706,9 +706,11 @@ def done():
             },
             "profile": {
                 "work_arrangement": profile_edit.get("work_arrangement") or "remote",
-                "target_titles": _split_lines(profile_edit.get("target_titles", "")),
                 "target_locations": _split_lines(profile_edit.get("target_locations", "")),
-                "skills": _split_lines(profile_edit.get("skills", "")),
+                # target_titles / skills are filled conditionally below — see the
+                # "fill-only-when-absent" guard. They are intentionally NOT in
+                # this inline slice so that omitting them lets _deep_merge
+                # preserve an existing curated list instead of clobbering it.
             },
             "scheduler": {
                 "cadence_preset": cadence_preset,
@@ -730,6 +732,22 @@ def done():
             config_slice["db"] = {"path": str(current_db_path)}
         if profile_edit.get("min_salary"):
             config_slice["profile"]["min_salary"] = profile_edit["min_salary"]
+        # Profile lists (target_titles / skills): fill from the wizard ONLY when
+        # the existing config has no curated list. A returning user re-running
+        # onboarding must not have their curated list (e.g. 27 target_titles)
+        # clobbered by the wizard's often-empty/example-prefilled field — the
+        # same data-loss class the settings save route guards against. First-run
+        # (existing absent/empty) still writes the wizard's values normally.
+        # Omitting a key here lets _deep_merge preserve the existing list.
+        existing_profile = (
+            existing_cfg.get("profile") if isinstance(existing_cfg, dict) else None
+        ) or {}
+        if not existing_profile.get("target_titles"):
+            config_slice["profile"]["target_titles"] = _split_lines(
+                profile_edit.get("target_titles", "")
+            )
+        if not existing_profile.get("skills"):
+            config_slice["profile"]["skills"] = _split_lines(profile_edit.get("skills", ""))
         if provider_block.get("api_key"):
             # API key only attached for BYO-key providers (D-04)
             config_slice["providers"]["api_keys"] = {
