@@ -11,19 +11,23 @@ Covers:
   descriptor.
 """
 
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 from apscheduler.schedulers.background import BackgroundScheduler
 
 from job_finder.web.scheduler._jobs import (
     _cadence_to_hour_expr,
+    register_all_jobs,
     register_enrichment_backfill,
     register_ingestion,
 )
 from job_finder.web.scheduler._schedule import (
+    SCHEDULE,
     JobSlot,
     assert_no_heavy_writer_collisions,
+    assert_schedule_matches_registered,
+    cron_kwargs,
     enrichment_hour_expr,
     ingestion_hour_expr,
 )
@@ -207,3 +211,79 @@ def test_collision_guard_ignores_non_heavy_and_chained():
     }
     # Should not raise.
     assert_no_heavy_writer_collisions(ok)
+
+
+# ---------------------------------------------------------------------------
+# cron_kwargs — fixed-slot trigger args derive from the SCHEDULE descriptor.
+# ---------------------------------------------------------------------------
+
+
+def test_cron_kwargs_daily_weekly_monthly():
+    """Daily/weekly/monthly fixed-slot jobs project to the right CronTrigger args."""
+    assert cron_kwargs("staleness_check") == {"hour": 2, "minute": 0}
+    assert cron_kwargs("ats_reprobe") == {"day_of_week": "sun", "hour": 8, "minute": 0}
+    assert cron_kwargs("orphan_cleanup") == {"day": 1, "hour": 3, "minute": 0}
+
+
+@pytest.mark.parametrize(
+    "job_id",
+    [
+        "ingestion_poll",
+        "enrichment_backfill",
+        "pipeline_detection",
+        "heartbeat",
+        "agentic_backfill",
+    ],
+)
+def test_cron_kwargs_rejects_non_fixed_slot(job_id):
+    """Cadence/interval/chained jobs have no fixed slot — cron_kwargs must refuse
+    rather than silently emit hour=None."""
+    with pytest.raises(ValueError, match="fixed-slot"):
+        cron_kwargs(job_id)
+
+
+# ---------------------------------------------------------------------------
+# Registration-completeness guard (#229 follow-up): SCHEDULE is the authority.
+# ---------------------------------------------------------------------------
+
+
+class _FakeJob:
+    def __init__(self, job_id):
+        self.id = job_id
+
+
+class _FakeScheduler:
+    def __init__(self, ids):
+        self._ids = list(ids)
+
+    def get_jobs(self):
+        return [_FakeJob(i) for i in self._ids]
+
+
+def _boot_registered_ids():
+    """Job ids registered at boot = SCHEDULE minus the lazily-chained successors."""
+    return [jid for jid, slot in SCHEDULE.items() if slot.depends_on is None]
+
+
+def test_schedule_matches_registered_for_live_registration():
+    """register_all_jobs registers exactly the SCHEDULE-described boot jobs (its
+    internal assert_schedule_matches_registered must not raise)."""
+    app = _make_app()
+    sched = BackgroundScheduler()
+    with patch("job_finder.web.scheduler._heartbeat.write_heartbeat"):
+        register_all_jobs(sched, app)  # raises if drifted
+    assert_schedule_matches_registered(sched)
+
+
+def test_completeness_guard_fires_on_unscheduled_job():
+    """A job registered without a SCHEDULE entry trips the guard."""
+    sched = _FakeScheduler([*_boot_registered_ids(), "rogue_job"])
+    with pytest.raises(AssertionError, match="registered-but-not-in-SCHEDULE"):
+        assert_schedule_matches_registered(sched)
+
+
+def test_completeness_guard_fires_on_missing_registrar():
+    """A SCHEDULE entry that nothing registers trips the guard."""
+    sched = _FakeScheduler(_boot_registered_ids()[:-1])
+    with pytest.raises(AssertionError, match="in-SCHEDULE-but-not-registered"):
+        assert_schedule_matches_registered(sched)
