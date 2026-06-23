@@ -251,11 +251,29 @@ def local_date(iso_str):
     return dt.strftime("%Y-%m-%d")
 
 
+def local_datetime(iso_str):
+    """Render a stored UTC ISO timestamp as a local 'YYYY-MM-DD HH:MM' string.
+
+    Companion to ``local_date`` for views that show clock time (the dashboard
+    activity / history tables and the pipeline-event timelines). Replaces
+    template ``iso_str[:16|:19] | replace('T', ' ')`` slices that emitted the
+    stored UTC wall-clock as if it were local — a run at 23:30 PT (=06:30 UTC
+    next day) now renders in the user's local time, not the UTC slice.
+    """
+    if not iso_str:
+        return ""
+    dt = _parse_stored_ts_as_local(iso_str)
+    if dt is None:
+        return iso_str[:16].replace("T", " ") if isinstance(iso_str, str) else ""
+    return dt.strftime("%Y-%m-%d %H:%M")
+
+
 @jobs_bp.record_once
 def _register_filters(state):
-    """Register the relative_date / local_date Jinja2 filters when blueprint is registered."""
+    """Register the relative_date / local_date / local_datetime Jinja2 filters when blueprint is registered."""
     state.app.jinja_env.filters["relative_date"] = relative_date
     state.app.jinja_env.filters["local_date"] = local_date
+    state.app.jinja_env.filters["local_datetime"] = local_datetime
 
 
 def _total_jobs(conn) -> int:
