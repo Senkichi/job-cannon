@@ -127,8 +127,14 @@ def _fetch_postings_with_completeness(slug: str) -> tuple[list[dict], bool]:
             break
 
         data = payload.get("data") or {}
-        if payload.get("error"):
-            logger.debug("scan_microsoft('%s') API error: %s", slug, payload.get("error"))
+        # The API always returns an ``error`` object, empty on success
+        # (``{"message": "", "body": ""}``) — only a non-empty message is a real
+        # error. Checking the dict's truthiness would abort every successful page.
+        err = payload.get("error")
+        if isinstance(err, dict):
+            err = err.get("message")
+        if err:
+            logger.debug("scan_microsoft('%s') API error: %s", slug, err)
             break
 
         total_found = data.get("count", 0)
