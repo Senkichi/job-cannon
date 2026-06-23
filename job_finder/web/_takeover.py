@@ -19,19 +19,22 @@ the user never types.
 This module folds those three steps into one function, :func:`claim_or_takeover`,
 that every launch path calls before binding.
 
-The bare path is now a **health-gated takeover** (PR2):
+Both ``bare`` and ``serve`` now run the same **health-gated takeover**:
 
-* a current instance answering ``/__jc_health`` → focus the browser and defer
-  (a *serving* instance is never killed);
+* a current instance answering ``/__jc_health`` → defer (a *serving* instance is
+  never killed — replace one with ``job-cannon stop``);
 * a Job-Cannon listener that does not answer ``/__jc_health`` but still serves
-  *some* HTTP → a live pre-``/__jc_health`` instance → focus and defer;
+  *some* HTTP → a live pre-``/__jc_health`` instance → defer;
 * a Job-Cannon listener that is **wedged** (socket held, but no HTTP response
   within a short timeout) → reap its whole process tree, then proceed;
 * a foreign listener → refuse (exit non-zero with port guidance);
 * a free port → proceed.
 
-``serve`` retains the unconditional ``free_jc_port`` reclaim until PR5 routes it
-through the same health-gated path.
+The only difference between the modes is the browser: a ``bare`` launch focuses
+the browser when it defers (unless ``no_browser``); a ``serve`` supervisor
+restart defers silently. ``serve`` no longer unconditionally reclaims the port
+(PR5) — it defers to a healthy instance like everything else, so the supervisor
+never kills a live app it should have left alone.
 """
 
 from __future__ import annotations
@@ -122,6 +125,9 @@ def claim_or_takeover(
         port: Port the app intends to bind.
         url: User-facing base URL (e.g. ``http://127.0.0.1:5000``).
         mode: ``"bare"`` (interactive ``job-cannon``) or ``"serve"`` (supervisor).
+            Both run the same health-gated takeover; the only difference is that
+            ``serve`` never focuses a browser when it defers (a supervisor
+            restart must stay headless).
         no_browser: Suppress the browser focus (``JOB_CANNON_NO_BROWSER``).
 
     Returns:
@@ -136,31 +142,19 @@ def claim_or_takeover(
         probe_existing_jc,
     )
 
-    if mode == "serve":
-        # Supervisor entry — TAKE OVER: reclaim the port from a confirmed-JC
-        # orphan (free_jc_port kills the whole identified process tree). A
-        # foreign listener is never killed; the caller surfaces guidance.
-        # (PR5 routes this through the same health-gated path as bare.)
-        from job_finder.web.supervisor import free_jc_port
+    # Browser focus is for an interactive bare launch only. A supervisor `serve`
+    # restart defers to a live instance silently — it must never pop a browser.
+    focus = mode == "bare"
 
-        if free_jc_port(client_host, port):
-            return TakeoverAction.PROCEED
-        print(
-            f"job-cannon serve: port {port} is occupied by a process that is "
-            f"not Job Cannon — refusing to kill it.\n"
-            f"  Use a different port:  job-cannon serve --port 5001\n"
-            f"  Or stop the other process.",
-            file=sys.stderr,
-        )
-        return TakeoverAction.EXIT_FAILURE
-
-    # mode == "bare": health-gated takeover.
-    #
-    # 1. A current instance answering /__jc_health → focus & defer. A *serving*
-    #    instance is never reaped — to replace one, use `job-cannon stop`.
+    # 1. A current instance answering /__jc_health → defer. A *serving* instance
+    #    is never reaped — to replace one, use `job-cannon stop`. serve defers
+    #    too: if a healthy instance is already up, the supervisor has nothing to
+    #    do (this is the PR5 health-gating that replaced serve's unconditional
+    #    free_jc_port reclaim, which used to kill even a healthy instance).
     if probe_existing_jc(url) is not None:
         print(f"Job Cannon is already running at {url}")
-        _focus_browser(url, no_browser=no_browser)
+        if focus:
+            _focus_browser(url, no_browser=no_browser)
         return TakeoverAction.EXIT_SUCCESS
 
     # 2. Nothing listening → free port → proceed.
@@ -181,7 +175,8 @@ def claim_or_takeover(
     #    orphan (listening socket, no HTTP response → reap).
     if _port_serves_http(url):
         print(f"Job Cannon (pre-upgrade instance, PID {listener_pid}) is running at {url}")
-        _focus_browser(url, no_browser=no_browser)
+        if focus:
+            _focus_browser(url, no_browser=no_browser)
         return TakeoverAction.EXIT_SUCCESS
 
     # 5. Wedged Job Cannon orphan — reap its whole process tree, then proceed.

@@ -1,4 +1,5 @@
-"""Tests for the ``supervisor-install`` / ``serve`` CLI surface (#439).
+"""Tests for the ``supervisor-install`` / ``serve`` / ``stop`` / ``doctor`` CLI
+surface (#439, and the PR5 lifecycle commands).
 
 Coverage:
 - parser wiring — the new subcommands parse and ``--help`` exits 0; the bare
@@ -58,6 +59,17 @@ def test_supervisor_install_subcommand_parses_uninstall():
     assert parser.parse_args(["supervisor-install", "--uninstall"]).uninstall is True
 
 
+def test_stop_subcommand_registered():
+    args = main_mod._build_parser().parse_args(["stop"])
+    assert args.command == "stop"
+
+
+def test_doctor_subcommand_parses_user_data_dir():
+    args = main_mod._build_parser().parse_args(["doctor", "--user-data-dir", "/tmp/jc"])
+    assert args.command == "doctor"
+    assert args.user_data_dir == "/tmp/jc"
+
+
 @pytest.mark.parametrize(
     "argv",
     [
@@ -66,6 +78,8 @@ def test_supervisor_install_subcommand_parses_uninstall():
         ["serve", "--help"],
         ["healthcheck", "--help"],
         ["supervisor-install", "--help"],
+        ["stop", "--help"],
+        ["doctor", "--help"],
     ],
 )
 def test_help_and_version_exit_zero(argv):
@@ -396,3 +410,99 @@ def test_reap_skips_dead_pid(monkeypatch, tmp_path):
     monkeypatch.setattr(supervisor.psutil, "Process", _gone)
 
     assert supervisor.free_jc_port("127.0.0.1", 5000, grace_sec=0.01) is True
+
+
+# ---------------------------------------------------------------------------
+# stop / doctor commands (PR5)
+# ---------------------------------------------------------------------------
+
+
+def _write_claim_marker(tmp_path, host, port, *, pid, owned=None):
+    logs_dir = tmp_path / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    _lock, meta = claim_paths(logs_dir, host, port)
+    meta.write_text(
+        json.dumps({"pid": pid, "host": host, "port": port, "owned_pids": owned or []}),
+        encoding="utf-8",
+    )
+    return meta
+
+
+def test_cmd_stop_disables_supervisor_then_stops_instances(monkeypatch, tmp_path):
+    _write_claim_marker(tmp_path, "127.0.0.1", 5000, pid=4242)
+    disabled: list[bool] = []
+    freed: list[tuple] = []
+
+    monkeypatch.setattr(supervisor, "user_data_root", lambda: tmp_path)
+    monkeypatch.setattr(
+        supervisor,
+        "_supervisor_action",
+        lambda plat, *, uninstall: disabled.append(uninstall) or 0,
+    )
+    monkeypatch.setattr(
+        supervisor, "free_jc_port", lambda h, p, **kw: freed.append((h, p)) or True
+    )
+
+    rc = supervisor.cmd_stop(argparse.Namespace(), platform="linux")
+    assert rc == 0
+    assert disabled == [True]  # supervisor disabled (uninstall) ...
+    assert freed == [("127.0.0.1", 5000)]  # ... and the recorded instance stopped
+
+
+def test_cmd_stop_no_instances_still_disables_supervisor(monkeypatch, tmp_path):
+    disabled: list[bool] = []
+    monkeypatch.setattr(supervisor, "user_data_root", lambda: tmp_path)  # empty — no markers
+    monkeypatch.setattr(
+        supervisor,
+        "_supervisor_action",
+        lambda plat, *, uninstall: disabled.append(uninstall) or 0,
+    )
+    monkeypatch.setattr(supervisor, "free_jc_port", lambda *a, **k: pytest.fail("must not free"))
+
+    rc = supervisor.cmd_stop(argparse.Namespace(), platform="linux")
+    assert rc == 0
+    assert disabled == [True]
+
+
+def test_cmd_stop_reports_foreign_held_port(monkeypatch, tmp_path, capsys):
+    _write_claim_marker(tmp_path, "127.0.0.1", 5000, pid=4242)
+    monkeypatch.setattr(supervisor, "user_data_root", lambda: tmp_path)
+    monkeypatch.setattr(supervisor, "_supervisor_action", lambda plat, *, uninstall: 0)
+    monkeypatch.setattr(supervisor, "free_jc_port", lambda h, p, **kw: False)  # refused
+
+    rc = supervisor.cmd_stop(argparse.Namespace(), platform="linux")
+    assert rc == 0
+    assert "not Job Cannon" in capsys.readouterr().err
+
+
+def test_cmd_doctor_reports_markers_and_supervisor(monkeypatch, tmp_path, capsys):
+    _write_claim_marker(
+        tmp_path, "127.0.0.1", 5000, pid=4242, owned=[{"pid": 99, "name": "ollama.exe"}]
+    )
+    monkeypatch.setattr(supervisor, "user_data_root", lambda: tmp_path)
+    monkeypatch.setattr(supervisor, "is_supervisor_installed", lambda plat=None: True)
+    monkeypatch.setattr(supervisor.psutil, "pid_exists", lambda pid: pid == 4242)
+
+    rc = supervisor.cmd_doctor(argparse.Namespace(user_data_dir=None), platform="linux")
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "127.0.0.1:5000" in out
+    assert "ALIVE" in out  # the live main pid
+    assert "ollama.exe" in out  # owned child listed
+    assert "installed" in out  # supervisor status line
+
+
+def test_cmd_doctor_no_markers(monkeypatch, tmp_path, capsys):
+    monkeypatch.setattr(supervisor, "user_data_root", lambda: tmp_path)
+    monkeypatch.setattr(supervisor, "is_supervisor_installed", lambda plat=None: False)
+    rc = supervisor.cmd_doctor(argparse.Namespace(user_data_dir=None), platform="linux")
+    assert rc == 0
+    assert "none" in capsys.readouterr().out
+
+
+def test_is_supervisor_installed_linux_checks_unit_file(monkeypatch, tmp_path):
+    unit = tmp_path / "job-cannon.service"
+    monkeypatch.setattr(supervisor, "_systemd_unit_path", lambda: unit)
+    assert supervisor.is_supervisor_installed("linux") is False
+    unit.write_text("[Service]\n", encoding="utf-8")
+    assert supervisor.is_supervisor_installed("linux") is True
