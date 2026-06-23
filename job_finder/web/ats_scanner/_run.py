@@ -24,46 +24,9 @@ from job_finder.db import derive_classification
 from job_finder.db._jd_full import set_jd_full as _set_jd_full
 from job_finder.json_utils import utc_now_iso
 from job_finder.secrets import get_secret
-from job_finder.web.ats_platforms import NON_SCANNABLE_PLATFORMS
-from job_finder.web.ats_platforms._platforms_ashby import SCANNER as _ASHBY_SCANNER
-from job_finder.web.ats_platforms._platforms_bamboohr import (
-    SCANNER as _BAMBOOHR_SCANNER,
-)
-from job_finder.web.ats_platforms._platforms_breezy import SCANNER as _BREEZY_SCANNER
-from job_finder.web.ats_platforms._platforms_greenhouse import (
-    SCANNER as _GREENHOUSE_SCANNER,
-)
-from job_finder.web.ats_platforms._platforms_jazzhr import SCANNER as _JAZZHR_SCANNER
-from job_finder.web.ats_platforms._platforms_jobvite import SCANNER as _JOBVITE_SCANNER
-from job_finder.web.ats_platforms._platforms_lever import SCANNER as _LEVER_SCANNER
-from job_finder.web.ats_platforms._platforms_paylocity import (
-    SCANNER as _PAYLOCITY_SCANNER,
-)
-from job_finder.web.ats_platforms._platforms_personio import (
-    SCANNER as _PERSONIO_SCANNER,
-)
-from job_finder.web.ats_platforms._platforms_pinpoint import (
-    SCANNER as _PINPOINT_SCANNER,
-)
-from job_finder.web.ats_platforms._platforms_recruitee import (
-    SCANNER as _RECRUITEE_SCANNER,
-)
-from job_finder.web.ats_platforms._platforms_rippling import (
-    SCANNER as _RIPPLING_SCANNER,
-)
-from job_finder.web.ats_platforms._platforms_smartrecruiters import (
-    SCANNER as _SMARTRECRUITERS_SCANNER,
-)
-from job_finder.web.ats_platforms._platforms_teamtailor import (
-    SCANNER as _TEAMTAILOR_SCANNER,
-)
-from job_finder.web.ats_platforms._platforms_workable import (
-    SCANNER as _WORKABLE_SCANNER,
-)
-from job_finder.web.ats_platforms._platforms_workday import SCANNER as _WORKDAY_SCANNER
+from job_finder.web.ats_platforms import NON_SCANNABLE_PLATFORMS, SCANNERS_BY_NAME
 from job_finder.web.ats_platforms._registry import (
     BoardGoneError,
-    PlatformScanner,
     run_platform_scan,
 )
 from job_finder.web.ats_prober import _handle_scan_error, _is_transient_error
@@ -76,28 +39,14 @@ from job_finder.web.ats_scanner._run_playwright import (
 from job_finder.web.db_helpers import standalone_connection
 from job_finder.web.description_formatter import strip_html_to_text
 
-# Platform key -> PlatformScanner registry. Adding a new platform = add an
-# entry here + a new _platforms_X.py module; the dispatch in
-# _scan_one_company_via_ats_api never changes.
-_PLATFORM_SCANNERS: dict[str, PlatformScanner] = {
-    "lever": _LEVER_SCANNER,
-    "greenhouse": _GREENHOUSE_SCANNER,
-    "ashby": _ASHBY_SCANNER,
-    "workday": _WORKDAY_SCANNER,
-    "smartrecruiters": _SMARTRECRUITERS_SCANNER,
-    "recruitee": _RECRUITEE_SCANNER,
-    "breezy": _BREEZY_SCANNER,
-    "jazzhr": _JAZZHR_SCANNER,
-    "pinpoint": _PINPOINT_SCANNER,
-    "personio": _PERSONIO_SCANNER,
-    "bamboohr": _BAMBOOHR_SCANNER,
-    "teamtailor": _TEAMTAILOR_SCANNER,
-    # Round 6 (2026-05-27 audit B2-roadmap):
-    "workable": _WORKABLE_SCANNER,
-    "jobvite": _JOBVITE_SCANNER,  # stub: probe-only, see _platforms_jobvite.py
-    "paylocity": _PAYLOCITY_SCANNER,
-    "rippling": _RIPPLING_SCANNER,
-}
+# Platform key -> PlatformScanner. The scan dispatch consumes the SINGLE central
+# registry (job_finder.web.ats_platforms.SCANNERS_BY_NAME) directly — registering
+# a scanner there is the only step to make a platform scannable; there is no
+# second list to keep in sync. (A parallel hardcoded dict here silently dropped
+# the Amazon/Microsoft/Eightfold adapters from the live scan — see #529 fallout.)
+# NON_SCANNABLE platforms (jobvite/google) are caught before dispatch, so their
+# presence in the registry is harmless.
+_PLATFORM_SCANNERS = SCANNERS_BY_NAME
 
 # Scoring orchestrator functions for ATS-discovered job scoring (ImportError guard).
 # Uses the centralized orchestrator instead of pipeline_runner's private functions,
