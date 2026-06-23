@@ -502,8 +502,8 @@ class TestLoadSaveProfile:
 
         import job_finder.web.blueprints.profile as profile_mod
 
-        orig_path = profile_mod._PROFILE_PATH
-        profile_mod._PROFILE_PATH = tmp_profile_path
+        orig_fn = profile_mod._profile_path
+        profile_mod._profile_path = lambda: tmp_profile_path
         try:
             payload = {
                 "positions": [
@@ -527,7 +527,7 @@ class TestLoadSaveProfile:
             )
             assert resp.status_code == 409
         finally:
-            profile_mod._PROFILE_PATH = orig_path
+            profile_mod._profile_path = orig_fn
 
     def test_save_profile_accepts_fresh_mtime(self, client, tmp_profile_path):
         """POST /profile/save with fresh _mtime succeeds.
@@ -554,8 +554,8 @@ class TestLoadSaveProfile:
 
         import job_finder.web.blueprints.profile as profile_mod
 
-        orig_path = profile_mod._PROFILE_PATH
-        profile_mod._PROFILE_PATH = tmp_profile_path
+        orig_fn = profile_mod._profile_path
+        profile_mod._profile_path = lambda: tmp_profile_path
         try:
             payload = {
                 "positions": [
@@ -579,7 +579,7 @@ class TestLoadSaveProfile:
             )
             assert resp.status_code in (200, 204, 302)
         finally:
-            profile_mod._PROFILE_PATH = orig_path
+            profile_mod._profile_path = orig_fn
 
     def test_save_profile_preserves_education(self, tmp_profile_path):
         """save_profile round-trips education data — it must not be dropped."""
@@ -625,8 +625,8 @@ class TestProfileEditorRoutes:
         """POST /profile/save with valid JSON redirects to /profile."""
         import job_finder.web.blueprints.profile as profile_mod
 
-        orig_path = profile_mod._PROFILE_PATH
-        profile_mod._PROFILE_PATH = tmp_profile_path
+        orig_fn = profile_mod._profile_path
+        profile_mod._profile_path = lambda: tmp_profile_path
         try:
             response = client.post(
                 "/profile/save",
@@ -636,7 +636,7 @@ class TestProfileEditorRoutes:
             # Should redirect (302) or succeed
             assert response.status_code in (200, 302, 204)
         finally:
-            profile_mod._PROFILE_PATH = orig_path
+            profile_mod._profile_path = orig_fn
 
     def test_post_profile_save_persists_data(self, client, valid_profile):
         """POST /profile/save writes profile to disk; GET /profile then shows it."""
@@ -654,8 +654,8 @@ class TestProfileEditorRoutes:
             # Monkeypatch the profile path used by the blueprint
             import job_finder.web.blueprints.profile as profile_mod
 
-            original_path = profile_mod._PROFILE_PATH
-            profile_mod._PROFILE_PATH = tmp_path
+            orig_fn = profile_mod._profile_path
+            profile_mod._profile_path = lambda: tmp_path
 
             response = client.post(
                 "/profile/save",
@@ -669,6 +669,38 @@ class TestProfileEditorRoutes:
                 assert saved["positions"][0]["company"] == "Acme Corp"
 
         finally:
-            profile_mod._PROFILE_PATH = original_path
+            profile_mod._profile_path = orig_fn
             if os.path.exists(tmp_path):
                 os.remove(tmp_path)
+
+
+class TestProfilePathUnification:
+    """Onboarding (writer), the Profile editor, and the scorer must resolve the
+    SAME experience_profile.json. They previously split: onboarding wrote the
+    absolute user-data root while editor + scorer defaulted to a bare CWD-relative
+    string, so a packaged/pipx install scored against an empty file."""
+
+    def test_editor_scorer_onboarding_agree_on_path(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("JOB_CANNON_USER_DATA_DIR", str(tmp_path))
+
+        import job_finder.web.blueprints.profile as profile_mod
+        from job_finder.web import scoring_orchestrator, user_data_dirs
+
+        canonical = str(tmp_path / "experience_profile.json")
+
+        # The writer (onboarding uses user_data_dirs.user_data_root()/<file>).
+        assert str(user_data_dirs.profile_path()) == canonical
+        # The editor.
+        assert profile_mod._profile_path() == canonical
+        # The scorer's default (no explicit config override).
+        assert scoring_orchestrator._profile_path({}) == canonical
+        assert scoring_orchestrator._profile_path({"scoring": {}, "profile": {}}) == canonical
+
+    def test_scorer_still_honors_explicit_config_override(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("JOB_CANNON_USER_DATA_DIR", str(tmp_path))
+        from job_finder.web import scoring_orchestrator
+
+        override = str(tmp_path / "custom_profile.json")
+        assert (
+            scoring_orchestrator._profile_path({"scoring": {"profile_path": override}}) == override
+        )
