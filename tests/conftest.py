@@ -690,17 +690,19 @@ def make_model_result():
 
 
 @pytest.fixture(autouse=True)
-def mock_scheduler_pidfile():
-    """Auto-mock _acquire_scheduler_pidfile so tests do not collide with a
-    real run.py Flask instance that may be holding the pidfile.
+def mock_scheduler_claim():
+    """Auto-mock the scheduler's single-instance claim consult so tests do not
+    collide with a real Flask instance that may be holding the live lock.
 
-    The production pidfile prevents two live Python processes from both
-    running the 0,8,16 cron schedule. In tests we always want init_scheduler
-    to proceed as if it owns the lock — hermetic isolation from whatever
-    pidfile happens to exist on disk at test time.
+    The production lock prevents two live Python processes from both running
+    the 0,8,16 cron schedule. A test process never goes through the launcher,
+    so it never holds the (host, port) liveness lock — without this, every
+    test's init_scheduler would short-circuit at the holds_claim() guard. We
+    force the guard True so init_scheduler proceeds as if it owns the lock,
+    hermetic from whatever lock happens to exist on disk at test time.
     """
     with patch(
-        "job_finder.web.scheduler._acquire_scheduler_pidfile",
+        "job_finder.web.scheduler.holds_claim",
         return_value=True,
     ) as mock:
         yield mock

@@ -5,11 +5,14 @@ The scheduler is started once per process via init_scheduler(app).
 
 Guards:
 1. Flask debug reloader guard: WERKZEUG_RUN_MAIN prevents double-start when
-   Flask's reloader spawns a child process (run.py uses use_reloader=False,
+   Flask's reloader spawns a child process (use_reloader=False everywhere,
    but this guard is a safety net).
 2. Double-init guard: module-level _scheduler singleton prevents re-initialization
    if create_app() is called more than once in the same process.
 3. Testing guard: scheduler is skipped when app.config["TESTING"] is True.
+4. Single-instance claim: the scheduler starts only if THIS process holds the
+   one (host, port) liveness lock (job_finder.web._pidfile.holds_claim) — the
+   same lock the launcher acquires before binding. No second scheduler lock.
 """
 
 from __future__ import annotations
@@ -21,6 +24,7 @@ import threading
 
 from apscheduler.schedulers.background import BackgroundScheduler
 
+from job_finder.web._pidfile import holds_claim
 from job_finder.web.scheduler._jobs import register_all_jobs
 from job_finder.web.scheduler._ollama import (
     AlreadyRunning,
@@ -30,13 +34,12 @@ from job_finder.web.scheduler._ollama import (
     resolve_ollama_url,
     spawn_ollama,
 )
-from job_finder.web.scheduler._pidfile import _acquire_scheduler_pidfile
 from job_finder.web.scheduler._sync import run_sync_now
 
 __all__ = [
-    "_acquire_scheduler_pidfile",
     "get_scheduler",
     "get_spawned_ollama_proc",
+    "holds_claim",
     "init_scheduler",
     "probe_ollama",
     "register_all_jobs",
@@ -94,12 +97,22 @@ def init_scheduler(app) -> None:
             logger.debug("Scheduler: already initialized, skipping")
             return
 
-        # Guard 4: Cross-process pidfile lock. If another Python process has
-        # already claimed the pidfile and is still alive, skip scheduler start.
-        if not _acquire_scheduler_pidfile(app):
+        # Guard 4: Single-instance claim. The scheduler runs *in the same
+        # process* that bound the port and holds the one (host, port) liveness
+        # lock (see job_finder.web._pidfile). If this process does not hold that
+        # claim — e.g. a secondary app instance sharing the DB, or any caller
+        # that built the app without going through the launcher — it must not
+        # start a competing scheduler. This replaces the former second,
+        # separately-keyed scheduler pidfile: one lock, one truth.
+        if not holds_claim():
+            logger.info(
+                "Scheduler: this process does not hold the (host, port) liveness "
+                "claim — not starting (another instance owns it, or the app was "
+                "built without acquiring the lock)"
+            )
             return
 
-        # We now own the pidfile — any prior scheduler process is dead, so any
+        # We hold the claim — any prior scheduler process is dead, so any
         # batch_score_sessions row still at 'running'/'cancelling' was orphaned
         # by that dead process (its daemon worker thread died with it). Reap them
         # to 'error' so phantom scan/sync banners aren't re-mounted on page load.

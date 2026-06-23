@@ -33,8 +33,8 @@ def test_scheduler_public_surface():
         "get_scheduler",
         "reset_scheduler",
         "run_sync_now",
-        # Conftest patches `job_finder.web.scheduler._acquire_scheduler_pidfile`
-        "_acquire_scheduler_pidfile",
+        # Conftest patches `job_finder.web.scheduler.holds_claim`
+        "holds_claim",
         # Test patches `job_finder.web.scheduler.BackgroundScheduler`
         "BackgroundScheduler",
         # Test patches `job_finder.web.scheduler.os.environ.get`

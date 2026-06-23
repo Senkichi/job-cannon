@@ -249,7 +249,24 @@ def _write_server_json(logs_dir: Path, payload: dict) -> None:
 def test_read_liveness_no_marker(tmp_path):
     v = read_liveness(tmp_path / "logs")
     assert v.alive is False
-    assert "no server.json" in v.reason
+    assert "no server marker" in v.reason
+
+
+def test_read_liveness_finds_host_port_keyed_marker(tmp_path):
+    """A live instance writes a (host, port)-keyed marker (server-<slug>.json);
+    read_liveness must discover it via the glob, not only the legacy name."""
+    from job_finder.web._pidfile import claim_paths
+
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    _lock, meta = claim_paths(logs, "127.0.0.1", 5000)
+    meta.write_text(
+        json.dumps({"pid": os.getpid(), "start_time_utc": datetime.now(UTC).isoformat()}),
+        encoding="utf-8",
+    )
+    v = read_liveness(logs)
+    assert v.alive is True
+    assert v.pid == os.getpid()
 
 
 def test_read_liveness_unparseable_marker(tmp_path):
@@ -380,7 +397,9 @@ def test_cli_healthcheck_subprocess_ok(tmp_path):
     assert payload["status"] == "ok"
     assert payload["exit_code"] == 0
 
-    # No listener was bound and no scheduler pidfile lock was taken: the probe
-    # path never builds the app. server.lock / scheduler.pid must not appear.
-    assert not (root / "logs" / "server.lock").exists()
+    # No listener was bound and no lock was taken: the probe path never builds
+    # the app, so no (host, port)-keyed server-*.lock must appear. scheduler.pid
+    # is retired entirely (PR3 collapsed it onto the single lock) — assert it
+    # stays gone so nobody reintroduces a second, separately-keyed lock.
+    assert not list((root / "logs").glob("server*.lock"))
     assert not (root / "logs" / "scheduler.pid").exists()

@@ -38,6 +38,7 @@ import requests
 from job_finder.web._pidfile import (
     ExistingInstanceAction,
     acquire_pidfile,
+    claim_paths,
 )
 
 logger = logging.getLogger(__name__)
@@ -845,12 +846,17 @@ def main() -> None:
         sys.exit(1)
     # TakeoverAction.PROCEED → fall through to Step 3 (acquire the lock + bind).
 
-    # --- Step 3: acquire the split-file advisory lock.
+    # --- Step 3: acquire the single (host, port)-keyed advisory lock. The same
+    # lock the in-process scheduler consults via holds_claim() — one key, one
+    # truth for "am I the live instance on this (host, port)?". claim_paths()
+    # is the sole authority for the on-disk filenames (also read by healthcheck
+    # / the supervisor), so the keying never drifts between writer and readers.
     logs_dir = user_data_root() / "logs"
-    lock_path = logs_dir / "server.lock"
-    meta_path = logs_dir / "server.json"
+    lock_path, meta_path = claim_paths(logs_dir, client_host, port)
     metadata = {
         "pid": os.getpid(),
+        "host": client_host,
+        "port": port,
         "url": url,
         "start_time_utc": datetime.now(UTC).isoformat(),
         "lock_path": str(lock_path),

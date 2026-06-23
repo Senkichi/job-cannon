@@ -1,7 +1,18 @@
-"""Main-process split-file advisory lock for Job Cannon.
+"""The single ``(host, port)``-keyed liveness lock for a Job Cannon instance.
 
-Uses a split-file pattern: ``server.lock`` holds the kernel-released
-exclusive lock; ``server.json`` is a readable metadata sidecar.
+This is the **one** lock that answers "am I the live Job Cannon serving this
+``(host, port)``?". Both the main launch (before it binds the port) and the
+in-process APScheduler (before it starts the cron) key their start decision
+off it — the scheduler consults :func:`holds_claim` rather than maintaining a
+second, independently-keyed lock. Collapsing the two onto a single key removes
+the divergence that let a wedged or half-killed instance leave one lock held
+and the other free.
+
+Uses a split-file pattern: ``server-<slug>.lock`` holds the kernel-released
+exclusive lock; ``server-<slug>.json`` is a readable metadata sidecar, where
+``<slug>`` encodes the ``(host, port)`` (see :func:`claim_paths`). Two
+instances on *different* ports therefore hold *different* locks and do not
+false-collide; two on the *same* ``(host, port)`` contend, as intended.
 
 Why split files?
 On Windows, ``portalocker.LOCK_EX`` on a single file also blocks readers
@@ -10,11 +21,6 @@ On Windows, ``portalocker.LOCK_EX`` on a single file also blocks readers
 lock from the metadata means:
 - The lock file is the liveness signal (kernel releases it on any process exit).
 - The metadata file is always readable from any process.
-
-This module must NOT be confused with ``job_finder/web/scheduler/_pidfile.py``,
-which uses a single-file pattern for the background scheduler. That module
-is preserved as-is per §7.2.5 of the Process Lifecycle Plan — do not
-merge or refactor it.
 
 Acquire once, hold for process lifetime. The OS releases the lock on any
 process termination (clean shutdown, SIGKILL, crash). Never close the
@@ -25,6 +31,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -37,6 +44,44 @@ logger = logging.getLogger(__name__)
 # The OS releases the lock when the handle is GC'd or the process exits.
 # Never close handles stored here during normal operation.
 _lock_handles: dict[Path, object] = {}
+
+
+def _claim_slug(host: str, port: int) -> str:
+    """Filesystem-safe ``(host, port)`` identifier for the lock/metadata names.
+
+    ``127.0.0.1`` + 5000 → ``127.0.0.1_5000``; ``::1`` → ``__1_5000``. Any
+    character outside ``[A-Za-z0-9._-]`` (notably ``:`` in IPv6 / ``host:port``
+    forms) is replaced with ``_`` so the slug is a legal filename on every OS.
+    """
+    safe_host = re.sub(r"[^A-Za-z0-9._-]", "_", host or "")
+    return f"{safe_host}_{port}"
+
+
+def claim_paths(logs_dir: Path, host: str, port: int) -> tuple[Path, Path]:
+    """Return the ``(lock_path, meta_path)`` for the ``(host, port)`` claim.
+
+    The single source of truth for *where* a given instance's lock lives, so
+    the writer (the launcher) and every reader (healthcheck, supervisor, the
+    ``doctor`` CLI) agree without hard-coding the filenames. Lock and metadata
+    share the same ``(host, port)`` slug:
+
+        ``server-<slug>.lock`` / ``server-<slug>.json``
+    """
+    slug = _claim_slug(host, port)
+    return logs_dir / f"server-{slug}.lock", logs_dir / f"server-{slug}.json"
+
+
+def holds_claim() -> bool:
+    """True if *this* process holds a Job Cannon liveness lock.
+
+    A process acquires at most one such lock (it binds one ``(host, port)``),
+    via :func:`acquire_pidfile`, which records the handle in ``_lock_handles``
+    for the process lifetime. This is therefore an unambiguous, process-local
+    answer to "am I the launched server instance?" — the single fact the
+    in-process scheduler consults before starting its cron, replacing the
+    former second, separately-keyed scheduler pidfile.
+    """
+    return bool(_lock_handles)
 
 
 class ExistingInstanceAction(Enum):

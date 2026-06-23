@@ -17,9 +17,12 @@ from pathlib import Path
 import pytest
 
 from job_finder.web._pidfile import (
+    _claim_slug,
     _lock_handles,
     _read_metadata,
     acquire_pidfile,
+    claim_paths,
+    holds_claim,
 )
 
 
@@ -186,6 +189,78 @@ class TestAcquirePidfileContention:
 # ---------------------------------------------------------------------------
 # _read_metadata
 # ---------------------------------------------------------------------------
+
+
+class TestClaimPaths:
+    """The (host, port) keying that lets different ports hold different locks."""
+
+    def test_slug_is_filesystem_safe(self):
+        assert _claim_slug("127.0.0.1", 5000) == "127.0.0.1_5000"
+        # IPv6 colons (and any other non-[A-Za-z0-9._-]) collapse to underscores.
+        assert _claim_slug("::1", 5000) == "__1_5000"
+        assert _claim_slug("", 5000) == "_5000"
+
+    def test_lock_and_meta_share_the_slug(self, tmp_path):
+        lock, meta = claim_paths(tmp_path, "127.0.0.1", 5000)
+        assert lock == tmp_path / "server-127.0.0.1_5000.lock"
+        assert meta == tmp_path / "server-127.0.0.1_5000.json"
+
+    def test_different_ports_yield_different_files(self, tmp_path):
+        lock_a, meta_a = claim_paths(tmp_path, "127.0.0.1", 5000)
+        lock_b, meta_b = claim_paths(tmp_path, "127.0.0.1", 5001)
+        assert lock_a != lock_b
+        assert meta_a != meta_b
+
+    def test_different_ports_do_not_contend(self, tmp_path):
+        """Two instances on different ports acquire independently — the whole
+        point of keying the lock on (host, port)."""
+        lock_a, meta_a = claim_paths(tmp_path, "127.0.0.1", 5000)
+        lock_b, meta_b = claim_paths(tmp_path, "127.0.0.1", 5001)
+        assert acquire_pidfile(lock_a, meta_a, {"pid": os.getpid()}).acquired is True
+        assert acquire_pidfile(lock_b, meta_b, {"pid": os.getpid()}).acquired is True
+
+
+class TestHoldsClaim:
+    """holds_claim() is the single fact the scheduler consults: does THIS
+    process hold a liveness lock?"""
+
+    @pytest.fixture
+    def isolated_handles(self):
+        """Snapshot/clear/restore the process-global _lock_handles so these
+        assertions are not polluted by locks other tests left held."""
+        saved = dict(_lock_handles)
+        _lock_handles.clear()
+        try:
+            yield
+        finally:
+            _lock_handles.clear()
+            _lock_handles.update(saved)
+
+    def test_false_when_no_lock_held(self, isolated_handles):
+        assert holds_claim() is False
+
+    def test_true_after_acquire(self, isolated_handles, tmp_path):
+        lock, meta = claim_paths(tmp_path, "127.0.0.1", 5000)
+        acquire_pidfile(lock, meta, {"pid": os.getpid()})
+        assert holds_claim() is True
+
+    def test_false_after_failed_acquire(self, isolated_handles, tmp_path):
+        """A contended (failed) acquire must NOT make holds_claim() true — the
+        loser is not the live instance and must not start a scheduler."""
+        import portalocker
+
+        lock, meta = claim_paths(tmp_path, "127.0.0.1", 5000)
+        lock.parent.mkdir(parents=True, exist_ok=True)
+        # Simulate ANOTHER process holding the lock: a handle kept alive but
+        # deliberately OUT of _lock_handles, so it models a foreign holder.
+        foreign = open(lock, "a+", encoding="utf-8")  # noqa: SIM115
+        portalocker.lock(foreign, portalocker.LOCK_EX | portalocker.LOCK_NB)
+        try:
+            result = acquire_pidfile(lock, meta, {"pid": 9999})
+            assert result.acquired is False
+            assert holds_claim() is False
+        finally:
+            foreign.close()
 
 
 class TestReadMetadata:

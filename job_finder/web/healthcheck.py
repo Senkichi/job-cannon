@@ -3,13 +3,15 @@
 Invoked on a cadence by the **OS scheduler** (Windows Task Scheduler / cron /
 launchd) — NOT by the in-process APScheduler. It MUST NOT call ``create_app()``,
 construct a scheduler, or acquire the pidfile lock. It reads state directly from
-the on-disk liveness marker (``logs/server.json``) and the SQLite DB
-(**read-only**), computes a verdict from three inputs, and returns a
-deterministic exit code plus a machine-readable JSON verdict on stdout.
+the on-disk liveness markers (``logs/server-<slug>.json``, the launcher's
+``(host, port)``-keyed sidecars) and the SQLite DB (**read-only**), computes a
+verdict from three inputs, and returns a deterministic exit code plus a
+machine-readable JSON verdict on stdout.
 
 Three inputs:
-1. **Liveness** — ``logs/server.json`` (the launcher's marker): is a JC process
-   alive (``psutil.pid_exists``) and is ``start_time_utc`` parseable?
+1. **Liveness** — the launcher's ``logs/server-<slug>.json`` markers (legacy
+   fixed-name ``server.json`` also honoured): is any JC process alive
+   (``psutil.pid_exists``) and is its ``start_time_utc`` parseable?
 2. **Heartbeat** — the most recent ``scheduled_health`` row in ``user_activity``
    (its ``metadata.status`` / ``metadata.issues``), and whether it is *stale*
    (older than ``--heartbeat-max-age-hours``).
@@ -156,25 +158,49 @@ def _ro_connect(db_path: str) -> sqlite3.Connection:
 
 
 def read_liveness(logs_dir: Path) -> LivenessVerdict:
-    """Probe ``logs_dir/server.json`` for a live JC process.
+    """Probe ``logs_dir`` for a live JC process across all instance markers.
 
-    Returns ``alive=False`` when the marker is absent / unreadable, has no valid
-    pid, or names a pid that is not currently running.
+    Markers are ``(host, port)``-keyed (``server-<slug>.json``; the legacy
+    fixed-name ``server.json`` is also matched for backward compatibility), so
+    this scans every ``server*.json`` and reports the first one naming a live
+    pid — a machine-level "is *any* Job Cannon up?" probe. When markers exist
+    but none is alive, the most recently inspected dead verdict is returned so
+    the caller still sees *why*; when no marker exists at all, the app is simply
+    not running.
     """
-    server_json = logs_dir / "server.json"
-    if not server_json.exists():
-        return LivenessVerdict(
-            alive=False, pid=None, reason="no server.json marker (app not running)"
-        )
+    markers = sorted(logs_dir.glob("server*.json"))
+    if not markers:
+        return LivenessVerdict(alive=False, pid=None, reason="no server marker (app not running)")
+    last_dead = LivenessVerdict(alive=False, pid=None, reason="no server marker (app not running)")
+    for marker in markers:
+        verdict = _read_one_marker(marker)
+        if verdict.alive:
+            return verdict
+        last_dead = verdict
+    return last_dead
+
+
+def _read_one_marker(server_json: Path) -> LivenessVerdict:
+    """Liveness verdict for a single ``server*.json`` marker file.
+
+    Each failure mode (unreadable, not an object, no valid pid, dead pid) gets
+    its own reason so a caller inspecting a lone marker still learns the cause.
+    """
     try:
         meta = json.loads(server_json.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
-        return LivenessVerdict(alive=False, pid=None, reason=f"server.json unreadable: {exc}")
+        return LivenessVerdict(
+            alive=False, pid=None, reason=f"{server_json.name} unreadable: {exc}"
+        )
     if not isinstance(meta, dict):
-        return LivenessVerdict(alive=False, pid=None, reason="server.json is not an object")
+        return LivenessVerdict(
+            alive=False, pid=None, reason=f"{server_json.name} is not an object"
+        )
     pid = meta.get("pid")
     if not isinstance(pid, int):
-        return LivenessVerdict(alive=False, pid=None, reason="server.json has no valid pid")
+        return LivenessVerdict(
+            alive=False, pid=None, reason=f"{server_json.name} has no valid pid"
+        )
     try:
         alive = psutil.pid_exists(pid)
     except Exception:
