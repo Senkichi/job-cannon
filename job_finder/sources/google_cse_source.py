@@ -25,7 +25,6 @@ CSE has no batch endpoint, so each query is one round-trip.
 from __future__ import annotations
 
 import logging
-import sqlite3
 from datetime import date
 
 import requests
@@ -180,16 +179,15 @@ class GoogleCSESource:
         if self._db_path is None:
             return self._quota_used
         try:
-            conn = sqlite3.connect(self._db_path)
-            try:
+            from job_finder.web.db_helpers import standalone_connection
+
+            with standalone_connection(self._db_path) as conn:
                 row = conn.execute(
                     """SELECT COUNT(*) FROM scoring_costs
                        WHERE provider=? AND DATE(timestamp, 'localtime')=DATE('now', 'localtime')""",
                     (_PROVIDER_NAME,),
                 ).fetchone()
                 return int(row[0]) if row and row[0] is not None else 0
-            finally:
-                conn.close()
         except Exception as exc:
             logger.warning(
                 "CSE quota DB read failed (%s); falling back to in-process counter",
@@ -203,8 +201,9 @@ class GoogleCSESource:
             self._quota_used += 1
             return
         try:
-            conn = sqlite3.connect(self._db_path)
-            try:
+            from job_finder.web.db_helpers import standalone_connection
+
+            with standalone_connection(self._db_path) as conn:
                 conn.execute(
                     """INSERT INTO scoring_costs
                        (job_id, purpose, model, input_tokens, output_tokens,
@@ -218,8 +217,6 @@ class GoogleCSESource:
                     ),
                 )
                 conn.commit()
-            finally:
-                conn.close()
         except Exception as exc:
             logger.warning(
                 "CSE quota DB write failed (%s); bumping in-process counter as fallback",

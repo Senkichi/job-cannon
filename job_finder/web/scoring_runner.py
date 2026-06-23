@@ -7,10 +7,10 @@ Plan 4 Commit E.
 """
 
 import logging
-import sqlite3
 
 from job_finder.db import JOBS_ALL_COLUMNS, persist_job_expiry_state, update_pipeline_status
 from job_finder.json_utils import utc_now_iso
+from job_finder.web.db_helpers import standalone_connection
 from job_finder.web.exclusion_filter import should_exclude
 from job_finder.web.expiry_checker import EXPIRED as _EXPIRED
 from job_finder.web.expiry_checker import check_job_liveness
@@ -73,9 +73,11 @@ def run_scoring(
     if not new_job_keys:
         return summary
 
-    conn = sqlite3.connect(db_path)
-    try:
-        conn.row_factory = sqlite3.Row
+    # Background/CLI path (ingestion + enrichment_backfill thread, never a
+    # Flask request) — use the sanctioned standalone_connection so the whole
+    # multi-write scoring loop gets WAL + busy_timeout=30000 and does not lose
+    # writes to "database is locked" when it contends with Flask HTMX polling.
+    with standalone_connection(db_path) as conn:
         for dedup_key in new_job_keys:
             try:
                 row = conn.execute(
@@ -194,8 +196,6 @@ def run_scoring(
                     e,
                 )
                 summary["errors"] += 1
-    finally:
-        conn.close()
 
     logger.info(
         "run_scoring: %d scored, %d dead, %d no-jd, %d errors",

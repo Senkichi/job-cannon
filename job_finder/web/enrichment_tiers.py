@@ -203,19 +203,25 @@ def query_ats_api(job_row: dict, conn: Any, config: dict) -> dict:
 
         exclusions = config.get("scoring", {}).get("exclusions", [])
 
-        # Lazy import with ImportError guard
+        # Registry dispatch: resolve the scanner for THIS platform from the
+        # single SCANNERS_BY_NAME registry rather than a hardcoded 3-branch
+        # if/elif, so every requests-path ATS (SmartRecruiters / Workday /
+        # Recruitee / BambooHR / Workable / ... — all 16 registered platforms)
+        # is enriched, not just lever/greenhouse/ashby. iCIMS is Playwright-only
+        # and absent from the registry, so it correctly falls through to {}.
         try:
-            from job_finder.web.ats_scanner import scan_ashby, scan_greenhouse, scan_lever
+            from job_finder.web.ats_platforms import (
+                NON_SCANNABLE_PLATFORMS,
+                SCANNERS_BY_NAME,
+                run_platform_scan,
+            )
         except ImportError:
             return {}
 
-        postings = []
-        if platform == "lever":
-            postings = scan_lever(slug, target_titles, exclusions)
-        elif platform == "greenhouse":
-            postings = scan_greenhouse(slug, target_titles, exclusions)
-        elif platform == "ashby":
-            postings = scan_ashby(slug, target_titles, exclusions)
+        scanner = SCANNERS_BY_NAME.get(platform)
+        if scanner is None or platform in NON_SCANNABLE_PLATFORMS:
+            return {}
+        postings = run_platform_scan(scanner, slug, target_titles, exclusions)
 
         if not postings:
             return {}
