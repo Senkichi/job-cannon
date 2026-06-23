@@ -51,8 +51,13 @@ from job_finder.normalizers import body_mentions_any_stem, significant_tokens
 # such that an already-stored title could newly pass or newly fail the contract.
 # Bumping re-arms _run_title_resweep_if_stale (migrations/_post_hooks.py), which
 # re-cleans + re-validates every row under the new version on next startup.
+#
+# v2: added _RELATIVE_POSTED_RE — the relative "Posted N <unit> ago" listing-tile
+# chrome (Phenom careers pages glue it onto the title with no separator). This is
+# both a quarantine signal here and a repair anchor in _title_filters; the bump
+# re-sweeps the legacy careers_crawl corruption (e.g. company_id=217 Microsoft).
 # ---------------------------------------------------------------------------
-TITLE_HYGIENE_VERSION: int = 1
+TITLE_HYGIENE_VERSION: int = 2
 
 # Reason codes emitted into jobs.unresolved_reasons (the m078 quarantine surface).
 TITLE_INVALID_SHAPE: str = "title_invalid_shape"
@@ -74,6 +79,20 @@ TITLE_REASON_CODES: frozenset[str] = frozenset(
 _DATE_TOKEN_RE = re.compile(
     r"\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?\s+\d{1,2}(?:st|nd|rd|th)?,?\s+\d{4}\b"
     r"|\b\d{4}-\d{2}-\d{2}\b",
+    re.IGNORECASE,
+)
+
+#: Relative posting-age chrome: "Posted N <unit> ago" ("Posted 15 days ago",
+#: "Posted 3 hours ago", "Posted 30+ days ago"). Distinct from _DATE_TOKEN_RE,
+#: which requires an absolute month name / ISO date — this is the relative form
+#: that Phenom / Workday listing tiles glue onto the title with no separator
+#: ("...Multiple LocationsPosted 15 days ago"). NO leading word boundary on
+#: "Posted": the location often glues directly into it ("LocationsPosted"), so a
+#: \b would never anchor. The "\d+ ... ago" core is what bounds the false-positive
+#: rate to ~zero — a legitimate recruiter tag like "(Posted by SAM)" has neither a
+#: digit nor "ago", so it never matches.
+_RELATIVE_POSTED_RE = re.compile(
+    r"Posted\s+\d+\+?\s+(?:second|minute|hour|day|week|month|year)s?\s+ago\b",
     re.IGNORECASE,
 )
 
@@ -143,6 +162,8 @@ def title_contract_violation(title: str | None) -> str | None:
     if _CONTROL_RE.search(title):
         return TITLE_INVALID_SHAPE
     if _DATE_TOKEN_RE.search(title):
+        return TITLE_INVALID_SHAPE
+    if _RELATIVE_POSTED_RE.search(title):
         return TITLE_INVALID_SHAPE
     if _CTA_RE.search(title):
         return TITLE_INVALID_SHAPE

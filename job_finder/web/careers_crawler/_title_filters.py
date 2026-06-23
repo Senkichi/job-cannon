@@ -12,6 +12,7 @@ import re
 from job_finder.web.careers_crawler._title_contract import (
     _CTA_RE,
     _DATE_TOKEN_RE,
+    _RELATIVE_POSTED_RE,
     _TRAILING_ARROW_RE,
 )
 
@@ -152,21 +153,56 @@ _CARD_JUNK_ANCHOR_RE = re.compile(
 )
 _MIN_REPAIR_HEAD = 3
 
+# Glued listing-tile card: "<Title><Location>Posted N <unit> ago" where the
+# location is concatenated to the title with NO separator (a lowercase / close-
+# paren -> uppercase boundary) and the whole tail is confirmed as card chrome by
+# the trailing relative posted-date. Strips from the no-separator boundary to
+# end-of-string, recovering just the role name
+# ("Senior Data ScientistUnited States, Multiple LocationsPosted 15 days ago"
+# -> "Senior Data Scientist"). The trailing relative-posted-date confirmation is
+# load-bearing — no legitimate title ends in "Posted N days ago", so it lets us
+# strip a camelCase-glued tail that the generic ALLCAPS-only _NOSEP_TRAIL_LOC_RE
+# cannot. Only the posted-date sub-pattern is case-insensitive (inline (?i:...));
+# the boundary lookarounds stay case-sensitive so they actually detect camelCase.
+# Seen on Microsoft (company_id=217) and other Phenom careers tiles scraped via
+# careers_crawl before the metadata-blob ingest gate existed.
+_GLUED_LOC_POSTED_RE = re.compile(
+    rf"(?<=[a-z\)])(?=[A-Z]).*?(?i:{_RELATIVE_POSTED_RE.pattern})\s*$",
+)
+
+
+def _strip_from_anchor(s: str, anchor: re.Pattern[str]) -> str:
+    """Strip from the first *anchor* match to end-of-string, if a non-trivial
+    head (>= _MIN_REPAIR_HEAD chars) remains.
+
+    Conservative: never reduces a title to nothing. Shared by the glued-location,
+    relative-posted, and date/CTA card-chrome strippers so all three honor the
+    same minimum-head guard.
+    """
+    match = anchor.search(s)
+    if match:
+        head = s[: match.start()].strip()
+        if len(head) >= _MIN_REPAIR_HEAD:
+            return head
+    return s
+
 
 def _strip_trailing_card_junk(s: str) -> str:
-    """Strip a trailing date/CTA card-chrome tail, recovering the real title.
+    """Strip a trailing date/CTA/posting-age card-chrome tail, recovering the title.
 
     Conservative: only strips when a non-trivial head (>= _MIN_REPAIR_HEAD chars)
     remains, so a title is never reduced to nothing. A bare trailing arrow glyph
     is always removed. Deterministic and idempotent — re-running on an already
     repaired title is a no-op (which the retroactive re-sweep relies on).
+
+    Anchor order matters: the glued "<Title><Location>Posted N ago" strip runs
+    FIRST because it also consumes the no-separator location, which the bare
+    relative-posted / date anchors below would otherwise leave stranded.
     """
     cleaned = _TRAILING_ARROW_RE.sub("", s).rstrip()
-    match = _CARD_JUNK_ANCHOR_RE.search(cleaned)
-    if match:
-        head = cleaned[: match.start()].strip()
-        if len(head) >= _MIN_REPAIR_HEAD:
-            cleaned = head
+    cleaned = _strip_from_anchor(cleaned, _GLUED_LOC_POSTED_RE)
+    cleaned = _strip_from_anchor(cleaned, _RELATIVE_POSTED_RE)
+    cleaned = _strip_from_anchor(cleaned, _CARD_JUNK_ANCHOR_RE)
     return cleaned
 
 
