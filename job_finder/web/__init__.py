@@ -156,10 +156,27 @@ def create_app(config_path: str = "config.yaml", config: dict | None = None) -> 
         cfg = config
 
     app.config["JF_CONFIG"] = cfg
-    # DB path: explicit config wins, otherwise use user_data_dirs.db_path()
+    # DB path: explicit config wins, otherwise use user_data_dirs.db_path().
+    # A *relative* db.path (the shipped default is `jobs.db`) historically
+    # resolved against the process CWD — so launching from any directory other
+    # than the data root silently opened, and sqlite-auto-created, an EMPTY
+    # jobs.db elsewhere with no error (e.g. a `serve` launched with a worktree
+    # CWD scanning 0 companies). Anchor relative paths to the user-data root
+    # (where config.yaml itself lives) so the DB location is CWD-independent;
+    # honor an absolute path verbatim as a deliberate override.
     explicit_db_path = cfg.get("db", {}).get("path")
     if explicit_db_path:
-        app.config["DB_PATH"] = explicit_db_path
+        if os.path.isabs(explicit_db_path):
+            app.config["DB_PATH"] = explicit_db_path
+        else:
+            resolved = user_data_dirs.user_data_root() / explicit_db_path
+            if str(resolved) != explicit_db_path:
+                logger.info(
+                    "Resolved relative db.path %r against user-data root → %s",
+                    explicit_db_path,
+                    resolved,
+                )
+            app.config["DB_PATH"] = str(resolved)
     else:
         app.config["DB_PATH"] = str(user_data_dirs.db_path())
     if "TESTING" in cfg:
