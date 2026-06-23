@@ -137,3 +137,37 @@ class TestScanAmazon:
 
         mock_get.side_effect = Exception("network error")
         assert scan_amazon("data scientist", ["data scientist"], []) == []
+
+    @patch("job_finder.web.ats_platforms.requests.get")
+    def test_multi_query_slug_unions_and_dedups(self, mock_get):
+        """A '|'-delimited slug runs each focused query and merges by id_icims.
+
+        Amazon's global board + 2000-cap means a single broad keyword drowns
+        genuine matches; the focused-query union is the fix. The same posting
+        surfacing under two queries must appear once.
+        """
+        from job_finder.web.ats_platforms import scan_amazon
+
+        def _resp(jobs):
+            r = MagicMock(status_code=200)
+            r.json.return_value = {"hits": len(jobs), "jobs": jobs}
+            return r
+
+        def _side_effect(url, params=None, **kwargs):
+            q = (params or {}).get("base_query", "")
+            if q == "data scientist":
+                return _resp([_job("Data Scientist", icims="1")])
+            if q == "data analyst":
+                # id 1 is shared with the 'data scientist' query -> must dedup.
+                return _resp([_job("Data Analyst", icims="2"), _job("Data Scientist", icims="1")])
+            return _resp([])
+
+        mock_get.side_effect = _side_effect
+
+        results = scan_amazon(
+            "data scientist|data analyst", ["data scientist", "data analyst"], []
+        )
+        assert sorted(j["source_id"] for j in results) == ["1", "2"]
+        # both focused queries were actually issued
+        issued = {c.kwargs["params"].get("base_query") for c in mock_get.call_args_list}
+        assert {"data scientist", "data analyst"} <= issued

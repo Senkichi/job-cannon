@@ -66,12 +66,11 @@ def _is_remote(posting: dict) -> bool | None:
     return None
 
 
-def _fetch_postings(slug: str) -> list[dict]:
-    """GET + paginate ``search.json`` (recent-sorted), capped at _MAX_RESULTS.
-
-    Returns ``[]`` on any error — a single global board, so no BoardGoneError.
+def _fetch_one_query(base_query: str, slug: str) -> list[dict]:
+    """GET + paginate ``search.json`` (recent-sorted) for ONE keyword, capped at
+    _MAX_RESULTS. Returns ``[]`` on any error — a single global board, so no
+    BoardGoneError. ``slug`` is only used for log attribution.
     """
-    base_query = (slug or "").strip()
     offset = 0
     out: list[dict] = []
 
@@ -118,6 +117,34 @@ def _fetch_postings(slug: str) -> list[dict]:
             break  # last page
         offset += _PAGE_SIZE
 
+    return out
+
+
+def _fetch_postings(slug: str) -> list[dict]:
+    """Fetch Amazon's global board for the registry slug.
+
+    The board is keyword-bounded (``base_query``) and capped at
+    :data:`_MAX_RESULTS` recent results. A single BROAD keyword (e.g. ``data``)
+    hits Amazon's 10k ceiling, and the cap then drowns genuine matches behind
+    unrelated ``data*`` noise (data-center, database, metadata) — a real
+    coverage gap observed live. So the slug may be a ``|``-delimited set of
+    FOCUSED queries (e.g. ``data scientist|data analyst|business intelligence``);
+    each is paged independently with its OWN cap, and the union is returned,
+    de-duplicated by ``id_icims``. A plain slug (no ``|``) is a single query,
+    unchanged. The driver's title gate still does the final filtering.
+    """
+    queries = [q.strip() for q in (slug or "").split("|") if q.strip()] or [""]
+    seen: set[str] = set()
+    out: list[dict] = []
+    for base_query in queries:
+        for posting in _fetch_one_query(base_query, slug):
+            sid = posting.get("id_icims")
+            key = str(sid) if sid is not None else None
+            if key is not None and key in seen:
+                continue
+            if key is not None:
+                seen.add(key)
+            out.append(posting)
     return out
 
 
