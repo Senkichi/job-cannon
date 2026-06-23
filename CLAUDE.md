@@ -22,6 +22,13 @@ Job Cannon is a personal job search command center. Flask web app (localhost:500
 uv run job-cannon                                 # Flask dev server on localhost:5000 (canonical)
 uv run python -m job_finder                       # equivalent module entry
 
+# Lifecycle / single-instance (see "Process lifecycle" below)
+uv run job-cannon stop                            # stop the running instance + disable the supervisor
+uv run job-cannon doctor                          # read-only diagnostics: claim markers, liveness, supervisor
+uv run job-cannon serve                           # headless launch under the OS supervisor (health-gated)
+uv run job-cannon supervisor-install [--uninstall] # opt-in OS keepalive (Scheduled Task / launchd / systemd)
+uv run job-cannon healthcheck                     # machine-readable health verdict (exit 0/1/2)
+
 # Tests — parallel by default (addopts carries `-n auto --dist loadscope`)
 uv run --active pytest tests/                     # full suite
 uv run --active pytest -x                         # stop on first failure
@@ -85,10 +92,17 @@ tests/
 - Stale detector creates own sqlite3 connection (thread-safe for APScheduler, not Flask g.db)
 - sort_by validated against Python allowlist before SQL interpolation (no parameterized column names in SQLite)
 
+**Process lifecycle / single-instance** (one live Job Cannon tree per `(host, port)`):
+- **One pre-bind authority**: every launch (bare or `serve`) calls `job_finder.web._takeover.claim_or_takeover` before binding. Health-gated: defer to a healthy / pre-`/__jc_health` instance, reap only a **wedged** orphan (socket held, no HTTP within a short timeout), refuse a foreign listener. `serve` runs the same path but headless (never opens a browser) — it does NOT kill a healthy instance.
+- **One lock**, keyed on `(host, port)`: `_pidfile.claim_paths()` is the sole authority for the on-disk names (`logs/server-<slug>.lock` + `.json`). The in-process scheduler consults `_pidfile.holds_claim()` (does THIS process hold the lock?) instead of a second, separately-keyed lock. There is no `scheduler.pid` — collapsed in favor of the single claim.
+- **Child reap**: Windows Job Object uses `KILL_ON_JOB_CLOSE` only (NOT `SILENT_BREAKAWAY_OK`), so spawned children (Ollama) inherit the job and are reaped on any death of the owner. Belt-and-suspenders: `register_owned_process` records owned child `{pid, name, create_time}` in the sidecar; `free_jc_port` sweeps those (create_time-validated) for the reparented-orphan-across-restart case.
+- **Commands**: `stop` (terminate instance + disable supervisor), `doctor` (read-only diagnostics), `serve` (headless, supervised), `supervisor-install [--uninstall]` (opt-in OS keepalive — never auto-installed in dev). Prefer `job-cannon stop` over manually killing the process tree.
+
 **Testing**:
 - `create_app()` accepts `config=` dict for test isolation
 - Temp DB per test; mocked Claude client at injection point
 - `conftest.py` has fixtures for app factory, test DB, mock Claude
+- Scheduler start in tests is gated by the autouse `mock_scheduler_claim` fixture (patches `holds_claim`); the prior `mock_scheduler_pidfile` seam is gone
 
 **Scoring**:
 - v3.0 single tier: `'scoring'` tier. Output is a six-axis ordinal rubric; classification is **Python-derived** from the sub-scores in `job_finder.db._classification.derive_classification` — never emitted by the LLM.
@@ -140,3 +154,6 @@ These files contain personal data and API keys. They are `.gitignore`d.
 - Don't use `204` for HTMX fragment responses (use `200`)
 - Don't create separate detail pages — inline expansion via HTMX is the pattern
 - Don't use `hx-include` with CSS selectors for form fields — use proper `<form>` wrappers
+- Don't manually kill the process tree to restart — use `job-cannon stop` (it reaps owned children + disables the supervisor); a bare relaunch already reclaims a wedged orphan
+- Don't add a second single-instance lock or `scheduler.pid` — the one `(host, port)` claim (`_pidfile`) is the single source of truth; the scheduler consults `holds_claim()`
+- Don't re-add `SILENT_BREAKAWAY_OK` to the Win32 Job Object — it orphans the spawned Ollama on hard-kill
