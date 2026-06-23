@@ -132,6 +132,7 @@ def sync_status(session_id):
 
 
 @sync_bp.route("/sync/dismiss", strict_slashes=False)
+@htmx_fragment("dashboard.index")
 def sync_dismiss():
     """Return the original Sync Now button so it reappears after auto-dismiss."""
     start_url = url_for("sync.sync_start")

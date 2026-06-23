@@ -405,7 +405,11 @@ def test_imap_credentials_surfaces_readonly_and_workspace_tradeoffs(client):
 
 
 def test_imap_credentials_post_failure_rerenders_with_error(client, monkeypatch):
-    """D-08: POST /onboarding/imap_credentials with bad creds → HTTP 200 + error + preserved email."""
+    """D-08: POST /onboarding/imap_credentials with bad creds → HTTP 200 + error + preserved email.
+
+    Bug #9: the submitted app password must also be echoed back into the form so a
+    retry doesn't force the user to re-type the full 16-char password.
+    """
     from job_finder.web.onboarding.imap_test import ImapTestResult
 
     monkeypatch.setattr(
@@ -424,6 +428,24 @@ def test_imap_credentials_post_failure_rerenders_with_error(client, monkeypatch)
     body = resp.get_data(as_text=True)
     assert "Authentication failed" in body
     assert "user@gmail.com" in body  # preserved
+    # Bug #9: the typed app password is preserved in the re-rendered field value.
+    assert 'value="wrong pass word here"' in body
+
+
+def test_imap_credentials_post_missing_field_preserves_password(client):
+    """Bug #9: a missing-email submission still echoes the typed app password back.
+
+    The "Both Gmail address and app password are required" branch re-renders before
+    any smoke test runs, so it exercises the password echo-back independently.
+    """
+    resp = client.post(
+        "/onboarding/imap_credentials",
+        data={"email": "", "app_password": "typed pass word here"},
+    )
+    assert resp.status_code == 200
+    body = resp.get_data(as_text=True)
+    assert "Both Gmail address and app password are required" in body
+    assert 'value="typed pass word here"' in body
 
 
 def test_imap_credentials_post_success_redirects_to_done(client, monkeypatch, app):

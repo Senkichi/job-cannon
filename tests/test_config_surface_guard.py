@@ -77,10 +77,6 @@ _INV1_UNREAD_ALLOWLIST: frozenset[str] = frozenset(
         # job_finder/.
         "default_format",
         "markdown_path",
-        # --- Aspirational / future-feature keys ---
-        # profile.job_archetypes.*.weight_overrides — planned scoring override;
-        # no consumer exists yet.  Documented for future use.
-        "weight_overrides",
         # --- Parser auto-heal Phase C keys (C1: dormant infrastructure) ---
         # These keys are introduced in config.example.yaml by Phase C / C1 so
         # users can see the full autoheal: block when they copy the template.
@@ -193,7 +189,12 @@ def _get_form_field_names() -> set[str]:
 
 
 def _get_parser_has_calls() -> set[str]:
-    """Extract keys from _has("key") calls inside _parse_form_to_config."""
+    """Extract keys from _has("key") / _has_value("key") calls in _parse_form_to_config.
+
+    _has_value() is the stricter sibling of _has() (submitted AND non-blank) used
+    for numeric fields where a blank submission must preserve the existing value
+    rather than snap to a default; it counts as a parser branch just the same.
+    """
     src = SETTINGS_BLUEPRINT.read_text(encoding="utf-8", errors="replace")
     # Find the function body by slicing from definition to next top-level def
     func_match = re.search(
@@ -204,7 +205,7 @@ def _get_parser_has_calls() -> set[str]:
     if not func_match:
         return set()
     func_body = func_match.group(0)
-    return set(re.findall(r'_has\(\s*["\']([^"\']+)["\']\s*\)', func_body))
+    return set(re.findall(r'_has(?:_value)?\(\s*["\']([^"\']+)["\']\s*\)', func_body))
 
 
 def _get_source_module_names() -> set[str]:
