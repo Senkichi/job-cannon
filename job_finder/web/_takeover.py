@@ -19,10 +19,19 @@ the user never types.
 This module folds those three steps into one function, :func:`claim_or_takeover`,
 that every launch path calls before binding.
 
-PR1 is **behaviour-neutral**: ``mode="bare"`` reproduces the legacy
-focus-and-exit Steps 1-2 exactly, and ``mode="serve"`` reproduces the legacy
-``free_jc_port`` reclaim exactly. Later PRs converge both modes onto a single
-health-gated takeover (a wedged orphan is reaped rather than deferred to).
+The bare path is now a **health-gated takeover** (PR2):
+
+* a current instance answering ``/__jc_health`` → focus the browser and defer
+  (a *serving* instance is never killed);
+* a Job-Cannon listener that does not answer ``/__jc_health`` but still serves
+  *some* HTTP → a live pre-``/__jc_health`` instance → focus and defer;
+* a Job-Cannon listener that is **wedged** (socket held, but no HTTP response
+  within a short timeout) → reap its whole process tree, then proceed;
+* a foreign listener → refuse (exit non-zero with port guidance);
+* a free port → proceed.
+
+``serve`` retains the unconditional ``free_jc_port`` reclaim until PR5 routes it
+through the same health-gated path.
 """
 
 from __future__ import annotations
@@ -32,14 +41,22 @@ import sys
 import webbrowser
 from enum import Enum
 
+import requests
+
 logger = logging.getLogger(__name__)
+
+# Short, fixed timeout for the "is this listener actually serving HTTP?" probe.
+# A healthy server answers in well under this; a wedged one (live process holding
+# the socket but no longer servicing requests) never answers, so the timeout is
+# what distinguishes "live, defer" from "wedged, reap".
+_SERVES_HTTP_TIMEOUT = 2.0
 
 
 class TakeoverAction(Enum):
     """What the caller should do after :func:`claim_or_takeover` returns."""
 
     PROCEED = "proceed"  # port free (or a wedged orphan was reaped) — caller binds
-    EXIT_SUCCESS = "exit_0"  # a healthy JC is already serving — browser focused
+    EXIT_SUCCESS = "exit_0"  # a live JC is already serving — browser focused
     EXIT_FAILURE = "exit_1"  # a foreign process holds the port — caller exits non-zero
 
 
@@ -52,6 +69,42 @@ def _focus_browser(url: str, *, no_browser: bool) -> None:
     """
     if not no_browser:
         webbrowser.open(url, new=2)
+
+
+def _port_serves_http(url: str, *, timeout: float = _SERVES_HTTP_TIMEOUT) -> bool:
+    """True if ``url`` returns *any* HTTP response within ``timeout``.
+
+    Distinguishes a live instance (current or pre-``/__jc_health``; any status
+    code counts) from a wedged orphan whose listening socket is held by a live
+    process that no longer answers HTTP (connection failure / read timeout).
+
+    Conservative on ambiguity: any non-connection ``RequestException`` is treated
+    as "alive" so an unexpected error never escalates to reaping a process.
+    """
+    try:
+        requests.get(url, timeout=timeout, allow_redirects=False)
+    except (requests.ConnectionError, requests.Timeout):
+        # Socket failure or no response within the timeout → wedged / not serving.
+        # requests wraps raw socket OSErrors in ConnectionError, so these two
+        # cover the "not serving" cases.
+        return False
+    except requests.RequestException:
+        # Any other HTTP-level error (e.g. redirect loop, decode error) means we
+        # DID reach a server → treat as alive and defer rather than reap.
+        return True
+    return True
+
+
+def _print_port_occupied(port: int, listener_desc: str) -> None:
+    """Print the bare-mode 'port occupied by a foreign process' guidance."""
+    print(
+        f"Job Cannon: port {port} is occupied by `{listener_desc}`.\n"
+        f"  Use a different port:  job-cannon --port 5001\n"
+        f"  Or set env var:        JOB_CANNON_PORT=5001 job-cannon\n"
+        f"  Or edit config.yaml:   server.port: 5001\n"
+        f"  Or stop the other process.",
+        file=sys.stderr,
+    )
 
 
 def claim_or_takeover(
@@ -87,6 +140,7 @@ def claim_or_takeover(
         # Supervisor entry — TAKE OVER: reclaim the port from a confirmed-JC
         # orphan (free_jc_port kills the whole identified process tree). A
         # foreign listener is never killed; the caller surfaces guidance.
+        # (PR5 routes this through the same health-gated path as bare.)
         from job_finder.web.supervisor import free_jc_port
 
         if free_jc_port(client_host, port):
@@ -100,34 +154,56 @@ def claim_or_takeover(
         )
         return TakeoverAction.EXIT_FAILURE
 
-    # mode == "bare": legacy Steps 1-2 — focus-and-exit on a live instance, no
-    # reaping. (PR2 converges this onto the health-gated takeover.)
+    # mode == "bare": health-gated takeover.
     #
-    # Step 1: HTTP probe — matches post-plan instances responding at /__jc_health.
+    # 1. A current instance answering /__jc_health → focus & defer. A *serving*
+    #    instance is never reaped — to replace one, use `job-cannon stop`.
     if probe_existing_jc(url) is not None:
         print(f"Job Cannon is already running at {url}")
         _focus_browser(url, no_browser=no_browser)
         return TakeoverAction.EXIT_SUCCESS
 
-    # Step 2: port-listening + psutil cmdline — matches pre-plan instances during
-    # the upgrade window (no /__jc_health endpoint yet).
-    if _port_is_listening(client_host, port):
-        looks_like_jc, cmdline, listener_pid = _listener_looks_like_jc(client_host, port)
-        if looks_like_jc:
-            print(f"Job Cannon (pre-upgrade instance, PID {listener_pid}) is running at {url}")
-            _focus_browser(url, no_browser=no_browser)
-            return TakeoverAction.EXIT_SUCCESS
+    # 2. Nothing listening → free port → proceed.
+    if not _port_is_listening(client_host, port):
+        return TakeoverAction.PROCEED
+
+    # 3. Something is listening — identify it.
+    looks_like_jc, cmdline, listener_pid = _listener_looks_like_jc(client_host, port)
+    if not looks_like_jc:
         listener_desc = (
             cmdline if cmdline else (f"PID {listener_pid}" if listener_pid else "unknown process")
         )
-        print(
-            f"Job Cannon: port {port} is occupied by `{listener_desc}`.\n"
-            f"  Use a different port:  job-cannon --port 5001\n"
-            f"  Or set env var:        JOB_CANNON_PORT=5001 job-cannon\n"
-            f"  Or edit config.yaml:   server.port: 5001\n"
-            f"  Or stop the other process.",
-            file=sys.stderr,
-        )
+        _print_port_occupied(port, listener_desc)
         return TakeoverAction.EXIT_FAILURE
 
+    # 4. A Job Cannon listener that does NOT answer /__jc_health. Distinguish a
+    #    live pre-/__jc_health instance (serves some HTTP → defer) from a wedged
+    #    orphan (listening socket, no HTTP response → reap).
+    if _port_serves_http(url):
+        print(f"Job Cannon (pre-upgrade instance, PID {listener_pid}) is running at {url}")
+        _focus_browser(url, no_browser=no_browser)
+        return TakeoverAction.EXIT_SUCCESS
+
+    # 5. Wedged Job Cannon orphan — reap its whole process tree, then proceed.
+    #    This is the core fix: bare launch now RECLAIMS a non-responsive orphan
+    #    instead of deferring to it (which left it alive forever and stranded
+    #    the user). free_jc_port re-confirms JC identity before terminating.
+    print(f"Reclaiming a non-responsive Job Cannon instance on port {port} (PID {listener_pid})…")
+    logger.warning(
+        "Reaping wedged Job Cannon orphan on %s:%d (PID %s) — held the port but did not "
+        "answer /__jc_health within %.1fs",
+        client_host,
+        port,
+        listener_pid,
+        _SERVES_HTTP_TIMEOUT,
+    )
+    from job_finder.web.supervisor import free_jc_port
+
+    if not free_jc_port(client_host, port):
+        # Race: the listener changed identity between checks → treat as occupied.
+        listener_desc = (
+            cmdline if cmdline else (f"PID {listener_pid}" if listener_pid else "unknown process")
+        )
+        _print_port_occupied(port, listener_desc)
+        return TakeoverAction.EXIT_FAILURE
     return TakeoverAction.PROCEED

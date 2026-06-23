@@ -414,9 +414,11 @@ class TestMainSequence:
 
         mock_open.assert_called_once()
 
-    # Branch 2: probe=None, listener is jc → exit 0 (pre-plan handoff)
+    # Branch 2: probe=None, JC listener still serving HTTP → exit 0 (pre-plan handoff)
     def test_branch2_psutil_jc_listener_exits_0(self, monkeypatch):
-        """Load-bearing: psutil fallback for pre-plan instances without /__jc_health."""
+        """Load-bearing: a pre-/__jc_health JC instance that is still SERVING is
+        deferred-to (focus + exit 0), not reaped. The health-gated takeover only
+        reaps a wedged orphan (see test_branch2b)."""
         monkeypatch.setenv("JOB_CANNON_NO_BROWSER", "1")
 
         with (
@@ -426,6 +428,8 @@ class TestMainSequence:
                 "job_finder.__main__._listener_looks_like_jc",
                 return_value=(True, "uv run job-cannon", 1234),
             ),
+            # Still serving HTTP (no /__jc_health, but alive) → defer, do not reap.
+            patch("job_finder.web._takeover._port_serves_http", return_value=True),
             patch("job_finder.__main__.sys.argv", ["job-cannon"]),
             patch("job_finder.config.load_config", return_value={}),
             pytest.raises(SystemExit) as exc,
@@ -433,6 +437,38 @@ class TestMainSequence:
             main_mod.main()
 
         assert exc.value.code == 0
+
+    # Branch 2b: probe=None, JC listener WEDGED (no HTTP) → reap orphan, continue
+    def test_branch2b_wedged_jc_orphan_reaped_then_continues(self, monkeypatch, tmp_path):
+        """THE CORE FIX: bare launch reclaims a wedged JC orphan (socket held, no
+        HTTP) and proceeds to bind, instead of deferring to it forever."""
+        monkeypatch.setenv("JOB_CANNON_NO_BROWSER", "1")
+        monkeypatch.setenv("JOB_CANNON_USER_DATA_DIR", str(tmp_path))
+        fake_app = MagicMock()
+
+        with (
+            patch("job_finder.__main__.probe_existing_jc", return_value=None),
+            patch("job_finder.__main__._port_is_listening", return_value=True),
+            patch(
+                "job_finder.__main__._listener_looks_like_jc",
+                return_value=(True, "uv run job-cannon", 1234),
+            ),
+            patch("job_finder.web._takeover._port_serves_http", return_value=False),
+            patch("job_finder.web.supervisor.free_jc_port", return_value=True) as mock_reap,
+            patch(
+                "job_finder.__main__.acquire_pidfile",
+                return_value=MagicMock(acquired=True),
+            ),
+            patch("job_finder.__main__.sys.argv", ["job-cannon", "--terminal"]),
+            patch("job_finder.config.load_config", return_value={}),
+            patch("job_finder.web.create_app", return_value=fake_app),
+            patch("job_finder.web._process_lifecycle.install_kill_on_exit"),
+            patch("job_finder.web._runtime.runtime_shutdown"),
+        ):
+            main_mod.main()
+
+        mock_reap.assert_called_once()  # the wedged orphan was reaped
+        fake_app.run.assert_called_once()  # and the launch proceeded to bind
 
     # Branch 3: probe=None, listener is foreign → exit 1
     def test_branch3_foreign_listener_exits_1(self, monkeypatch, capsys):
