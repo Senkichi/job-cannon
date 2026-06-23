@@ -32,7 +32,7 @@ import re
 import sqlite3
 from collections import defaultdict
 
-from job_finder.web.dedup_normalizer import normalize_company
+from job_finder.web.dedup_normalizer import derive_dedup_key, normalize_company
 
 logger = logging.getLogger(__name__)
 
@@ -183,11 +183,14 @@ def rewrite_loser_jobs(
         return (0, 0)
 
     moved = deleted = 0
-    canonical_prefix = canonical_name.lower().strip()
     for j in loser_jobs:
         old_key = j["dedup_key"] if isinstance(j, sqlite3.Row) else j[0]
         title = (j["title"] if isinstance(j, sqlite3.Row) else j[1]) or ""
-        new_key = f"{canonical_prefix}|{title.lower().strip()}"
+        # Canonical dedup_key derivation (D-8) — must match Job.dedup_key and the
+        # upsert lookup, else the collision check below misses and a duplicate
+        # row is created. Raw .lower().strip() skipped legal-suffix / abbreviation
+        # / level-suffix normalization and diverged from the canonical key.
+        new_key = derive_dedup_key(canonical_name, title)
         if new_key == old_key:
             conn.execute(
                 "UPDATE jobs SET company_id = ?, company = ? WHERE dedup_key = ?",

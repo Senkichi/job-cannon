@@ -75,7 +75,7 @@ from typing import TYPE_CHECKING, Literal
 
 from job_finder.config import get_company_denylist, load_config
 from job_finder.db._jd_content_contract import jd_content_reject
-from job_finder.normalizers import normalize_company, normalize_title
+from job_finder.normalizers import derive_dedup_key, normalize_company
 from job_finder.web.careers_crawler._title_contract import title_contract_violation
 from job_finder.web.careers_crawler._title_filters import (
     clean_title,
@@ -481,8 +481,10 @@ class ParsedJob:
         ):
             unresolved_reasons.append("salary_implausible")
 
-        # Derive canonical dedup_key from validated company + cleaned title
-        dedup_key = f"{normalize_company(job.company)}|{normalize_title(cleaned_title)}"
+        # Derive canonical dedup_key from validated company + cleaned title via
+        # the single derivation entry point (D-8) so it matches Job.dedup_key,
+        # the upsert lookup, and the retroactive re-key byte-for-byte.
+        dedup_key = derive_dedup_key(job.company, cleaned_title)
 
         # Denormalize structured location fields from locations_structured[0]
         workplace_type = (
