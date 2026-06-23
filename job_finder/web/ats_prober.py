@@ -535,6 +535,76 @@ def _probe_workday(slug: str) -> bool:
         return False
 
 
+def _probe_oracle_cloud(slug: str) -> bool:
+    """Return True if slug resolves to a live Oracle Recruiting Cloud (Fusion CE) site.
+
+    Slug format: ``"{host}|{site}"`` (e.g. ``"ehmk.fa.us2.oraclecloud.com|CX_1"``).
+    GETs the public Candidate-Experience REST finder for a single requisition; a
+    200 means the pod + site resolve. Oracle's finder uses literal ``;,=``
+    delimiters, so the query string is built by hand (mirrors the scanner's
+    ``_fetch_postings`` — ``params=`` would percent-encode and break the finder).
+    """
+    host, _, site = (slug or "").partition("|")
+    host = host.strip()
+    site = site.strip() or "CX_1"
+    if not host:
+        return False
+    url = (
+        f"https://{host}/hcmRestApi/resources/latest/recruitingCEJobRequisitions"
+        f"?onlyData=true&finder=findReqs;siteNumber={site},limit=1,offset=0"
+    )
+    try:
+        r = requests.get(url, headers={"Accept": "application/json"}, timeout=_PROBE_TIMEOUT)
+        return r.status_code == 200
+    except Exception as e:
+        logger.debug("_probe_oracle_cloud('%s') failed: %s", slug, e)
+        return False
+
+
+def _probe_ultipro(slug: str) -> bool:
+    """Return True if slug resolves to a live UKG Pro Recruiting (UltiPro) board.
+
+    Slug format: ``"{host}/{tenant}/{board}"`` (e.g.
+    ``"recruiting2.ultipro.com/JAN1000JANI/<board-guid>"``). POSTs the public
+    ``LoadSearchResults`` search endpoint with a minimal ``Top=1`` body; a 200
+    means the board GUID resolves (empty boards still return 200).
+    """
+    parts = (slug or "").split("/")
+    if len(parts) < 3 or not all(parts[:3]):
+        return False
+    host, tenant, board = parts[0], parts[1], parts[2]
+    url = f"https://{host}/{tenant}/JobBoard/{board}/JobBoardView/LoadSearchResults"
+    body = {
+        "opportunitySearch": {
+            "Top": 1,
+            "Skip": 0,
+            "QueryString": "",
+            "OrderBy": [],
+            "Filters": [],
+        },
+        "matchCriteria": {
+            "PreferredJobs": [],
+            "Educations": [],
+            "LicenseAndCertifications": [],
+            "Skills": [],
+            "WorkExperiences": [],
+            "DegreeFlexFields": [],
+            "IsCurrentlyEmployed": False,
+            "IsWillingToRelocate": False,
+            "IsWillingToTravel": False,
+            "EmploymentDesiredFlexFields": [],
+        },
+    }
+    try:
+        r = requests.post(
+            url, json=body, headers={"Content-Type": "application/json"}, timeout=_PROBE_TIMEOUT
+        )
+        return r.status_code == 200
+    except Exception as e:
+        logger.debug("_probe_ultipro('%s') failed: %s", slug, e)
+        return False
+
+
 def _probe_icims(slug: str) -> bool:
     """Return True if slug resolves to a live iCIMS career portal.
 

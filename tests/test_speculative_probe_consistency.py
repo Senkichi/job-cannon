@@ -697,13 +697,13 @@ class TestSpeculativeProbeFpExclusion:
         from job_finder.web.ats_identity_reconcile import _verify_live
 
         for platform, probe_target in (
-            ("bamboohr", "job_finder.web.ats_identity_reconcile._probe_bamboohr"),
-            ("personio", "job_finder.web.ats_identity_reconcile._probe_personio"),
-            ("recruitee", "job_finder.web.ats_identity_reconcile._probe_recruitee"),
-            ("breezy", "job_finder.web.ats_identity_reconcile._probe_breezy"),
-            ("pinpoint", "job_finder.web.ats_identity_reconcile._probe_pinpoint"),
-            ("jazzhr", "job_finder.web.ats_identity_reconcile._probe_jazzhr"),
-            ("teamtailor", "job_finder.web.ats_identity_reconcile._probe_teamtailor"),
+            ("bamboohr", "job_finder.web.ats_prober._probe_bamboohr"),
+            ("personio", "job_finder.web.ats_prober._probe_personio"),
+            ("recruitee", "job_finder.web.ats_prober._probe_recruitee"),
+            ("breezy", "job_finder.web.ats_prober._probe_breezy"),
+            ("pinpoint", "job_finder.web.ats_prober._probe_pinpoint"),
+            ("jazzhr", "job_finder.web.ats_prober._probe_jazzhr"),
+            ("teamtailor", "job_finder.web.ats_prober._probe_teamtailor"),
         ):
             with patch(probe_target, return_value=True):
                 assert _verify_live(platform, "any-slug") is True, (
