@@ -705,6 +705,26 @@ class TestQueryAtsApiRegistry:
         assert result == {}
         assert not mock_scan.called
 
+    def test_board_gone_returns_empty_no_crash(self):
+        """A 404/410'd board raises BoardGoneError from the scan; enrichment must
+        degrade to {} (no data) — never propagate the exception and crash the
+        per-job enrichment pass. Demotion of the stale hit is the scan path's
+        job, not enrichment's."""
+        from job_finder.web.ats_platforms._registry import BoardGoneError
+        from job_finder.web.enrichment_tiers import query_ats_api
+
+        conn = MagicMock()
+        conn.execute.return_value.fetchone.return_value = self._company_row("workday")
+        job_row = {"title": "Data Scientist", "company_id": 13, "location": "Remote"}
+
+        with patch(
+            "job_finder.web.ats_platforms.run_platform_scan",
+            side_effect=BoardGoneError(410, "acme"),
+        ):
+            result = query_ats_api(job_row, conn=conn, config={})
+
+        assert result == {}
+
     def test_non_scannable_platform_returns_empty(self):
         """A registered-but-non-scannable platform (jobvite) short-circuits to {}."""
         from job_finder.web.enrichment_tiers import query_ats_api

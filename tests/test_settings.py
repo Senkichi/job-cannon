@@ -1164,3 +1164,35 @@ class TestSettingsDailyBudgetPersistence:
         assert sc["daily_budget_usd"] == 15.0
         assert sc["min_score_threshold"] == 45
         assert sc["candidate_score_threshold"] == 60
+
+
+class TestConfigPathPerRequest:
+    """The settings config path is resolved per-request, not frozen at import.
+
+    Import-time freezing pinned it to whatever $JOB_CANNON_USER_DATA_DIR was at
+    collection time (the dev machine's repo root), so a test hitting /settings/save
+    without pinning the global wrote its example-seeded config onto the REAL
+    config.yaml — silently resetting target_titles from the curated list to the 2
+    example defaults (the 2026-06-18 wipe; same import-frozen-path class as the
+    PR #504 live-DB leak)."""
+
+    def test_config_path_resolves_fresh_from_env(self, tmp_path, monkeypatch):
+        import job_finder.web.blueprints.settings as settings_mod
+
+        monkeypatch.setattr(settings_mod, "_CONFIG_PATH", None)
+        d1 = tmp_path / "u1"
+        d1.mkdir()
+        monkeypatch.setenv("JOB_CANNON_USER_DATA_DIR", str(d1))
+        assert str(d1) in settings_mod._config_path()
+        # Changing the env changes the result → proves it is NOT import-frozen.
+        d2 = tmp_path / "u2"
+        d2.mkdir()
+        monkeypatch.setenv("JOB_CANNON_USER_DATA_DIR", str(d2))
+        assert str(d2) in settings_mod._config_path()
+
+    def test_config_path_honors_test_override(self, tmp_path, monkeypatch):
+        import job_finder.web.blueprints.settings as settings_mod
+
+        pinned = str(tmp_path / "pinned.yaml")
+        monkeypatch.setattr(settings_mod, "_CONFIG_PATH", pinned)
+        assert settings_mod._config_path() == pinned

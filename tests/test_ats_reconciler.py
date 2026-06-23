@@ -1243,3 +1243,32 @@ class TestReconcileAllCompanies:
         # Zero companies queried (filtered by WHERE ats_platform/slug NOT NULL)
         assert summary["companies_checked"] == 0
         assert summary["companies_skipped"] == 0
+
+
+class TestLiveIdSetBoardGone:
+    """A 404/410'd board raises BoardGoneError from the completeness fetch; the
+    reconciler's live-id helpers must catch it and report (empty, incomplete) so
+    expiry is SKIPPED — never false-expire tracked jobs against a gone board.
+    Demotion of the stale hit happens on the scan path, not here."""
+
+    @patch("job_finder.web.ats_platforms._platforms_workday._fetch_postings_with_completeness")
+    def test_workday_live_id_set_board_gone_returns_incomplete(self, mock_fetch):
+        from job_finder.web.ats_platforms._registry import BoardGoneError
+        from job_finder.web.ats_reconciler import _workday_live_id_set
+
+        mock_fetch.side_effect = BoardGoneError(410, "walmart.wd5/WalmartExternal")
+        live_ids, complete = _workday_live_id_set("walmart.wd5/WalmartExternal")
+        assert live_ids == set()
+        assert complete is False
+
+    @patch(
+        "job_finder.web.ats_platforms._platforms_smartrecruiters._fetch_postings_with_completeness"
+    )
+    def test_smartrecruiters_live_id_set_board_gone_returns_incomplete(self, mock_fetch):
+        from job_finder.web.ats_platforms._registry import BoardGoneError
+        from job_finder.web.ats_reconciler import _smartrecruiters_live_id_set
+
+        mock_fetch.side_effect = BoardGoneError(404, "DefunctCo")
+        live_ids, complete = _smartrecruiters_live_id_set("DefunctCo")
+        assert live_ids == set()
+        assert complete is False

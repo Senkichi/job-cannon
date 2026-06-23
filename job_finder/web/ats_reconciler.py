@@ -147,8 +147,15 @@ def _workday_live_id_set(slug: str) -> tuple[set[str], bool]:
         from stored ``source_urls``.
     """
     from job_finder.web.ats_platforms._platforms_workday import _fetch_postings_with_completeness
+    from job_finder.web.ats_platforms._registry import BoardGoneError
 
-    postings, complete = _fetch_postings_with_completeness(slug)
+    try:
+        postings, complete = _fetch_postings_with_completeness(slug)
+    except BoardGoneError:
+        # Board no longer resolves → treat as incomplete so the reconciler SKIPS
+        # expiry (identical to the over-cap/partial path). Demoting the stale hit
+        # happens on the scan path, not during reconciliation.
+        return set(), False
     live_ids: set[str] = set()
     for posting in postings:
         external_path = posting.get("externalPath", "")
@@ -180,8 +187,14 @@ def _smartrecruiters_live_id_set(slug: str) -> tuple[set[str], bool]:
     from job_finder.web.ats_platforms._platforms_smartrecruiters import (
         _fetch_postings_with_completeness,
     )
+    from job_finder.web.ats_platforms._registry import BoardGoneError
 
-    postings, complete = _fetch_postings_with_completeness(slug)
+    try:
+        postings, complete = _fetch_postings_with_completeness(slug)
+    except BoardGoneError:
+        # Board no longer resolves → incomplete → reconciler skips expiry (same
+        # as over-cap/partial). Demotion of the stale hit happens on scan path.
+        return set(), False
     live_ids: set[str] = set()
     for posting in postings:
         posting_id = posting.get("id")

@@ -214,16 +214,32 @@ class TestScanWorkday:
 
     @patch("job_finder.web.ats_platforms.requests.post")
     def test_scan_handles_http_error(self, mock_post, _mock_detail):
-        """scan_workday returns empty list on non-200 status."""
+        """scan_workday returns empty list on a transient (non-gone) non-200.
+
+        404/410 now bifurcate to BoardGoneError (see the gone test below); a 503
+        is a transient block that must still degrade to an empty list, never
+        demote a real board."""
         from job_finder.web.ats_platforms import scan_workday
 
-        mock_post.return_value = MagicMock(status_code=404)
+        mock_post.return_value = MagicMock(status_code=503)
         results = scan_workday(
-            "invalid/board",
+            "acme.wd5/Blocked",
             target_titles=["data scientist"],
             exclusions=[],
         )
         assert results == []
+
+    @patch("job_finder.web.ats_platforms.requests.post")
+    def test_scan_raises_board_gone_on_first_page_404(self, mock_post, _mock_detail):
+        """A first-page 404/410 propagates BoardGoneError through the public
+        scan_workday entry (run_platform_scan calls fetch_postings OUTSIDE its
+        try), so scan callers can catch it and demote the stale hit."""
+        from job_finder.web.ats_platforms import scan_workday
+        from job_finder.web.ats_platforms._registry import BoardGoneError
+
+        mock_post.return_value = MagicMock(status_code=404)
+        with pytest.raises(BoardGoneError):
+            scan_workday("invalid/board", target_titles=["data scientist"], exclusions=[])
 
     def test_scan_rejects_invalid_slug_format(self, _mock_detail):
         """scan_workday returns empty list for slug without '/'."""
@@ -554,6 +570,67 @@ class TestFetchPostingsWithCompleteness:
         postings, complete = _fetch_postings_with_completeness("no-slash")
         assert complete is False
         assert postings == []
+
+    @patch("job_finder.web.ats_platforms._platforms_workday.requests.post")
+    def test_first_page_410_raises_board_gone(self, mock_post, _mock_detail):
+        """First-page HTTP 410 → BoardGoneError (the tenant/slug no longer
+        resolves, e.g. Walmart). The scan path catches this to demote the stale
+        hit rather than logging '0 fetched' against a dead board forever."""
+        from job_finder.web.ats_platforms._platforms_workday import (
+            _fetch_postings_with_completeness,
+        )
+        from job_finder.web.ats_platforms._registry import BoardGoneError
+
+        mock_post.return_value = MagicMock(status_code=410)
+        with pytest.raises(BoardGoneError) as exc_info:
+            _fetch_postings_with_completeness("walmart.wd5/WalmartExternal")
+        assert exc_info.value.status == 410
+
+    @patch("job_finder.web.ats_platforms._platforms_workday.requests.post")
+    def test_first_page_404_raises_board_gone(self, mock_post, _mock_detail):
+        """First-page HTTP 404 → BoardGoneError (slug doesn't resolve)."""
+        from job_finder.web.ats_platforms._platforms_workday import (
+            _fetch_postings_with_completeness,
+        )
+        from job_finder.web.ats_platforms._registry import BoardGoneError
+
+        mock_post.return_value = MagicMock(status_code=404)
+        with pytest.raises(BoardGoneError):
+            _fetch_postings_with_completeness("acme.wd5/Gone")
+
+    @patch("job_finder.web.ats_platforms._platforms_workday.requests.post")
+    def test_first_page_403_does_not_raise_board_gone(self, mock_post, _mock_detail):
+        """First-page HTTP 403 (blocked/rate-limited, NOT gone) → incomplete, no
+        raise: a transient block must never demote a real board."""
+        from job_finder.web.ats_platforms._platforms_workday import (
+            _fetch_postings_with_completeness,
+        )
+
+        mock_post.return_value = MagicMock(status_code=403)
+        postings, complete = _fetch_postings_with_completeness("acme.wd5/Blocked")
+        assert postings == []
+        assert complete is False
+
+    @patch("job_finder.web.ats_platforms._platforms_workday.requests.post")
+    def test_mid_pagination_410_does_not_raise_board_gone(self, mock_post, _mock_detail):
+        """A 410 AFTER page 1 (postings already collected) is a partial break, NOT
+        board-gone — we never demote a board that just served real postings."""
+        from job_finder.web.ats_platforms._platforms_workday import (
+            _fetch_postings_with_completeness,
+        )
+
+        page1 = MagicMock(status_code=200)
+        page1.json.return_value = {
+            "total": 100,
+            "jobPostings": [
+                {"title": f"Job {i}", "externalPath": f"/job/Job-{i}_R-{i}"} for i in range(20)
+            ],
+        }
+        page2 = MagicMock(status_code=410)
+        mock_post.side_effect = [page1, page2]
+        postings, complete = _fetch_postings_with_completeness("acme.wd5/Partial")
+        assert len(postings) == 20
+        assert complete is False
 
     @patch("job_finder.web.ats_platforms._platforms_workday.requests.post")
     def test_fetch_postings_thin_wrapper_returns_list(self, mock_post, _mock_detail):

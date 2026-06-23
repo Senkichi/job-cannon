@@ -827,3 +827,53 @@ def test_profile_edit_chip_serialization_roundtrips(client):
     # newline string splits into the target_titles list written to config/profile.
     split = [ln.strip() for ln in persisted["target_titles"].splitlines() if ln.strip()]
     assert split == ["Title A", "Title B"]
+
+
+def test_done_post_preserves_existing_curated_target_titles(client):
+    """Re-running onboarding must NOT clobber a curated target_titles/skills list
+    with the wizard's (often empty/example-prefilled) field — the 2026-06-18
+    27->2 wipe class. Existing non-empty lists are preserved (fill-only-when-
+    absent); only a fresh install with no curated list takes the wizard values."""
+    import json
+    import sqlite3
+    from unittest.mock import MagicMock, patch
+
+    import yaml
+
+    from job_finder.web import user_data_dirs
+
+    curated = [f"Title {i}" for i in range(27)]
+    cfg_path = user_data_dirs.config_path()
+    cfg_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(cfg_path, "w", encoding="utf-8") as f:
+        yaml.safe_dump({"profile": {"target_titles": list(curated), "skills": ["Python"]}}, f)
+
+    # Wizard would write only the 2 example defaults (the clobber attempt).
+    conn = sqlite3.connect(client.application.config["DB_PATH"])
+    try:
+        conn.execute(
+            "UPDATE onboarding_state SET wizard_data=? WHERE id=1",
+            (
+                json.dumps(
+                    {
+                        "provider": {"name": "ollama"},
+                        "profile_edit": {
+                            "target_titles": "Data Scientist\nSenior Data Scientist",
+                            "skills": "",
+                        },
+                    }
+                ),
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    with patch("job_finder.web.onboarding.blueprint.get_scheduler", return_value=MagicMock()):
+        resp = client.post("/onboarding/done")
+    assert resp.status_code == 302
+
+    with open(cfg_path, encoding="utf-8") as f:
+        written = yaml.safe_load(f)
+    assert written["profile"]["target_titles"] == curated  # preserved, not clobbered
+    assert written["profile"]["skills"] == ["Python"]

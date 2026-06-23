@@ -1592,6 +1592,47 @@ class TestRunAtsScan:
         mock_get.assert_not_called()
         assert result["companies_scanned"] == 0
 
+    def test_run_ats_scan_demotes_gone_workday_board(self, migrated_db_path):
+        """A hit Workday company whose board 410s is demoted to
+        miss/platform_slug_gone with scan_enabled cleared — the Walmart-class
+        stale-hit self-heal. Pre-fix, the 410 was swallowed as an empty board and
+        the dead hit lingered forever. Promotion back happens via /retry or a
+        future probe if the slug ever resolves again."""
+        from job_finder.web.ats_scanner import run_ats_scan
+
+        conn = sqlite3.connect(migrated_db_path)
+        conn.row_factory = sqlite3.Row
+        _insert_hit_company(
+            conn, "Walmart", "workday", "walmart.wd5/WalmartExternal", scan_enabled=1
+        )
+        conn.close()
+
+        config = {
+            "TESTING": False,
+            "profile": {
+                "target_titles": ["Data Scientist"],
+                "exclusions": {"title_keywords": []},
+            },
+        }
+
+        gone = MagicMock(status_code=410)
+        with patch(
+            "job_finder.web.ats_platforms._platforms_workday.requests.post", return_value=gone
+        ):
+            result = run_ats_scan(migrated_db_path, config=config)
+
+        conn = sqlite3.connect(migrated_db_path)
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT ats_probe_status, miss_reason, scan_enabled "
+            "FROM companies WHERE name_raw = 'Walmart'"
+        ).fetchone()
+        conn.close()
+        assert row["ats_probe_status"] == "miss"
+        assert row["miss_reason"] == "platform_slug_gone"
+        assert row["scan_enabled"] == 0
+        assert result.get("boards_demoted", 0) >= 1
+
     def test_run_ats_scan_upserts_discovered_jobs(self, migrated_db_path):
         """run_ats_scan creates Job objects and calls upsert_job for matched postings."""
         from job_finder.web.ats_scanner import run_ats_scan

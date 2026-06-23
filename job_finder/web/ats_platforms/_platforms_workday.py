@@ -34,6 +34,8 @@ from datetime import UTC, datetime, timedelta
 import requests
 
 from job_finder.web.ats_platforms._registry import (
+    BOARD_GONE_STATUSES,
+    BoardGoneError,
     PlatformScanner,
     coerce_remote_bool,
     label_or_str,
@@ -341,6 +343,13 @@ def _fetch_postings_with_completeness(
             break
 
         if resp.status_code != 200:
+            # First-page 404/410 = the tenant/board no longer resolves: raise so
+            # the scan path can demote a stale hit (Walmart-class). Any other
+            # non-200 (403/5xx) or a 404/410 mid-pagination (we already have
+            # postings) is treated as transient/partial — break + report
+            # incomplete, exactly as before.
+            if resp.status_code in BOARD_GONE_STATUSES and total_fetched == 0:
+                raise BoardGoneError(resp.status_code, slug)
             logger.debug("scan_workday('%s') returned HTTP %d", slug, resp.status_code)
             break
 

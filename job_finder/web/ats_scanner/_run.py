@@ -61,7 +61,11 @@ from job_finder.web.ats_platforms._platforms_workable import (
     SCANNER as _WORKABLE_SCANNER,
 )
 from job_finder.web.ats_platforms._platforms_workday import SCANNER as _WORKDAY_SCANNER
-from job_finder.web.ats_platforms._registry import PlatformScanner, run_platform_scan
+from job_finder.web.ats_platforms._registry import (
+    BoardGoneError,
+    PlatformScanner,
+    run_platform_scan,
+)
 from job_finder.web.ats_prober import _handle_scan_error, _is_transient_error
 from job_finder.web.ats_scanner._run_html import _run_html_fallback_scan
 from job_finder.web.ats_scanner._run_playwright import (
@@ -518,6 +522,41 @@ def _scan_one_company_via_ats_api(
         )
         conn.commit()
         summary["companies_scanned"] += 1
+
+    except BoardGoneError as gone:
+        # The board's slug 404/410'd — it no longer resolves. Demote the stale
+        # hit (clear scan_enabled + record miss_reason) so we stop firing a dead
+        # request at it every scan and the UI reflects reality. Promotion back to
+        # hit happens via the loosened /companies/<id>/retry route or a future
+        # probe if the slug ever resolves again.
+        logger.warning(
+            "ATS scan: '%s' board gone (HTTP %d) — demoting %s/%s to miss/platform_slug_gone",
+            company_name,
+            gone.status,
+            platform,
+            slug,
+        )
+        try:
+            conn.execute(
+                """UPDATE companies
+                   SET ats_probe_status = 'miss',
+                       miss_reason = 'platform_slug_gone',
+                       scan_enabled = 0,
+                       last_scanned_at = ?,
+                       updated_at = ?
+                   WHERE id = ?""",
+                (now, now, company_id),
+            )
+            conn.execute(
+                """INSERT INTO company_scan_log (company_id, scanned_at, jobs_found, error)
+                   VALUES (?, ?, 0, ?)""",
+                (company_id, now, f"board gone (HTTP {gone.status})"),
+            )
+            conn.commit()
+        except Exception:
+            logger.exception("ATS scan: failed to demote gone board for '%s'", company_name)
+        summary["boards_demoted"] = summary.get("boards_demoted", 0) + 1
+        return
 
     except Exception as company_err:
         error_msg = f"{company_name}: {company_err}"
