@@ -164,11 +164,12 @@ def _build_parser() -> argparse.ArgumentParser:
     # subcommand is given (the classic argparse same-dest gotcha).
     serve = subparsers.add_parser(
         "serve",
-        help="Launch the app, first reclaiming the port from a crashed instance "
-        "(for use under the OS supervisor). Bare `job-cannon` does NOT kill.",
-        description="Free :5000 from a confirmed Job Cannon orphan (reloader "
-        "parent + worker), then launch exactly as the bare invocation does. A "
-        "foreign listener is never killed — serve exits non-zero instead.",
+        help="Launch the app headlessly under the OS supervisor. Defers to a "
+        "healthy instance; reaps only a wedged orphan. Never opens a browser.",
+        description="Launch like the bare invocation but headless (no browser). "
+        "Runs the same health-gated takeover: defer to a healthy / pre-upgrade "
+        "instance, reap a wedged Job Cannon orphan, refuse a foreign listener. "
+        "It does NOT kill a healthy instance — use `job-cannon stop` for that.",
     )
     serve.add_argument(
         "--terminal",
@@ -200,6 +201,38 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Remove the installed supervisor manifest and deregister it "
         "(no-op success if nothing is installed).",
+    )
+
+    # ``stop`` — gracefully stop the running instance(s) and disable the
+    # keepalive supervisor so it cannot relaunch what we just stopped. Reads the
+    # claim metadata to find what is running; needs no config, Flask, or lock.
+    subparsers.add_parser(
+        "stop",
+        help="Stop the running Job Cannon instance(s) and disable the keepalive "
+        "supervisor (so it does not immediately relaunch).",
+        description="Disable the supervisor, then terminate every Job Cannon "
+        "instance the on-disk claim metadata records — its process tree plus any "
+        "recorded owned child (e.g. a spawned Ollama). Idempotent.",
+    )
+
+    # ``doctor`` — read-only lifecycle diagnostics. Out-of-process like
+    # healthcheck: prints claim markers, liveness, and supervisor status.
+    doctor = subparsers.add_parser(
+        "doctor",
+        help="Print read-only lifecycle diagnostics: claim markers, liveness, "
+        "owned children, and supervisor status.",
+        description="Passive observer (never builds the app or takes a lock). "
+        "Reports each on-disk claim marker, whether its process is alive, the "
+        "owned children it recorded, and whether the keepalive supervisor is "
+        "installed.",
+    )
+    doctor.add_argument(
+        "--user-data-dir",
+        type=str,
+        default=None,
+        metavar="PATH",
+        help="Override the user-data directory (else JOB_CANNON_USER_DATA_DIR "
+        "or the platformdirs default).",
     )
     return parser
 
@@ -715,6 +748,18 @@ def main() -> None:
         from job_finder.web.supervisor import cmd_supervisor_install
 
         sys.exit(cmd_supervisor_install(args))
+
+    # SHORT-CIRCUIT: `stop` and `doctor` are out-of-process lifecycle commands —
+    # they read claim metadata + the process table and never build the app, a
+    # scheduler, or take the pidfile lock. Route them here (mirrors healthcheck).
+    if getattr(args, "command", None) == "stop":
+        from job_finder.web.supervisor import cmd_stop
+
+        sys.exit(cmd_stop(args))
+    if getattr(args, "command", None) == "doctor":
+        from job_finder.web.supervisor import cmd_doctor
+
+        sys.exit(cmd_doctor(args))
 
     # `serve` shares the entire launch flow below; it differs only by a pre-bind
     # port reclaim (inserted after host/port resolution). Fold its own

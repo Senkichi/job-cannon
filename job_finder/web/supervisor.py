@@ -44,6 +44,7 @@ missing manifest is a no-op success.
 
 from __future__ import annotations
 
+import json
 import logging
 import shutil
 import subprocess
@@ -480,15 +481,12 @@ def _uninstall_linux() -> int:
 # ---------------------------------------------------------------------------
 
 
-def cmd_supervisor_install(args, *, platform: str | None = None) -> int:
-    """Install (or, with ``--uninstall``, remove) the per-OS keepalive supervisor.
+def _supervisor_action(plat: str, *, uninstall: bool) -> int:
+    """Install or uninstall the per-OS supervisor manifest. Returns an exit code.
 
-    ``platform`` is injectable for tests; production resolves it from
-    ``sys.platform``. Returns a process exit code (0 = success).
+    Shared by ``supervisor-install`` and ``stop`` (which disables the supervisor
+    so it cannot relaunch the instance being stopped).
     """
-    plat = platform if platform is not None else sys.platform
-    uninstall = bool(getattr(args, "uninstall", False))
-
     if plat.startswith("win"):
         return _uninstall_windows() if uninstall else _install_windows()
     if plat == "darwin":
@@ -497,17 +495,154 @@ def cmd_supervisor_install(args, *, platform: str | None = None) -> int:
         return _uninstall_linux() if uninstall else _install_linux()
 
     print(
-        f"supervisor-install: unsupported platform {plat!r}. Supervisor manifests "
-        "are only generated for Windows, macOS, and Linux.",
+        f"supervisor: unsupported platform {plat!r}. Supervisor manifests are "
+        "only generated for Windows, macOS, and Linux.",
         file=sys.stderr,
     )
     return 1
 
 
+def cmd_supervisor_install(args, *, platform: str | None = None) -> int:
+    """Install (or, with ``--uninstall``, remove) the per-OS keepalive supervisor.
+
+    ``platform`` is injectable for tests; production resolves it from
+    ``sys.platform``. Returns a process exit code (0 = success).
+    """
+    plat = platform if platform is not None else sys.platform
+    return _supervisor_action(plat, uninstall=bool(getattr(args, "uninstall", False)))
+
+
+def is_supervisor_installed(platform: str | None = None) -> bool:
+    """True if the per-OS keepalive supervisor manifest is currently installed.
+
+    Windows queries the Scheduled Task; macOS / Linux check for the manifest
+    file. Best-effort — any error is reported as "not installed".
+    """
+    plat = platform if platform is not None else sys.platform
+    try:
+        if plat.startswith("win"):
+            return _run(["schtasks", "/query", "/tn", _TASK_NAME]).returncode == 0
+        if plat == "darwin":
+            return _launchd_plist_path().exists()
+        if plat.startswith("linux"):
+            return _systemd_unit_path().exists()
+    except Exception:  # pragma: no cover - status probe must never raise
+        logger.debug("is_supervisor_installed probe failed", exc_info=True)
+    return False
+
+
+def _iter_claim_markers() -> list[dict]:
+    """Return parsed metadata for every ``server*.json`` claim marker on disk.
+
+    Each dict is the raw sidecar content (``pid``/``host``/``port``/
+    ``owned_pids``/…). Unreadable markers are skipped. The single source the
+    ``stop`` and ``doctor`` commands use to discover what is (or was) running.
+    """
+    logs_dir = user_data_root() / "logs"
+    if not logs_dir.exists():
+        return []
+    markers: list[dict] = []
+    for meta in sorted(logs_dir.glob("server*.json")):
+        try:
+            data = json.loads(meta.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if isinstance(data, dict):
+            markers.append(data)
+    return markers
+
+
+def cmd_stop(args, *, platform: str | None = None) -> int:
+    """Stop the running Job Cannon instance(s) and disable the keepalive supervisor.
+
+    Order matters: the supervisor is disabled FIRST so it cannot relaunch the
+    instance during the shutdown grace window. Then every ``(host, port)`` the
+    claim metadata records is freed — terminating the JC process tree and
+    sweeping recorded owned children (e.g. a spawned Ollama). Idempotent: with
+    nothing running it still disables the supervisor and reports cleanly.
+    """
+    plat = platform if platform is not None else sys.platform
+
+    # 1. Disable the supervisor so a self-restart cannot race the stop.
+    _supervisor_action(plat, uninstall=True)
+
+    # 2. Terminate each recorded instance.
+    targets = [
+        (m["host"], m["port"])
+        for m in _iter_claim_markers()
+        if isinstance(m.get("host"), str) and isinstance(m.get("port"), int)
+    ]
+    if not targets:
+        print("Job Cannon: no running instance found (supervisor disabled).")
+        return 0
+    for host, port in targets:
+        if free_jc_port(host, port):
+            print(f"Stopped Job Cannon on {host}:{port}.")
+        else:
+            print(
+                f"Job Cannon: {host}:{port} is held by a process that is not Job "
+                f"Cannon — left untouched.",
+                file=sys.stderr,
+            )
+    return 0
+
+
+def cmd_doctor(args, *, platform: str | None = None) -> int:
+    """Print read-only lifecycle diagnostics: claim markers, liveness, supervisor.
+
+    Never builds the app, starts a scheduler, or acquires a lock — a passive
+    observer like ``healthcheck``. Always exits 0 (it reports state; it does not
+    judge health). Honors ``--user-data-dir`` if present on ``args``.
+    """
+    import os
+
+    override = getattr(args, "user_data_dir", None)
+    if override:
+        os.environ["JOB_CANNON_USER_DATA_DIR"] = override
+
+    plat = platform if platform is not None else sys.platform
+    print("Job Cannon — doctor")
+    print("===================")
+    print(f"user data dir : {user_data_root()}")
+    print(f"supervisor    : {'installed' if is_supervisor_installed(plat) else 'not installed'}")
+
+    markers = _iter_claim_markers()
+    if not markers:
+        print("instances     : none (no server*.json claim marker on disk)")
+        return 0
+
+    print(f"instances     : {len(markers)} claim marker(s)")
+    for m in markers:
+        pid = m.get("pid")
+        host, port = m.get("host", "?"), m.get("port", "?")
+        try:
+            alive = isinstance(pid, int) and psutil.pid_exists(pid)
+        except Exception:
+            alive = False
+        state = "ALIVE" if alive else "dead"
+        print(f"  - {host}:{port} pid={pid} [{state}] started={m.get('start_time_utc', '?')}")
+        owned = m.get("owned_pids") or []
+        for o in owned:
+            if isinstance(o, dict):
+                opid = o.get("pid")
+                try:
+                    oalive = isinstance(opid, int) and psutil.pid_exists(opid)
+                except Exception:
+                    oalive = False
+                print(
+                    f"      owned: pid={opid} ({o.get('name', '?')}) "
+                    f"[{'ALIVE' if oalive else 'dead'}]"
+                )
+    return 0
+
+
 # Re-exported so callers can resolve supervisor state paths consistently.
 __all__ = [
+    "cmd_doctor",
+    "cmd_stop",
     "cmd_supervisor_install",
     "free_jc_port",
+    "is_supervisor_installed",
     "render_launchd_plist",
     "render_systemd_unit",
     "render_windows_task_xml",

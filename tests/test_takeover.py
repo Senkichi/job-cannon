@@ -133,31 +133,59 @@ class TestBareMode:
 
 
 # ---------------------------------------------------------------------------
-# serve mode — legacy Step 0 (free_jc_port reclaim, retained until PR5)
+# serve mode — health-gated takeover (PR5), identical to bare but headless
 # ---------------------------------------------------------------------------
 class TestServeMode:
-    def test_reclaim_succeeds_proceeds(self):
-        with patch("job_finder.web.supervisor.free_jc_port", return_value=True) as mock_reap:
+    def test_defers_to_healthy_instance_without_browser(self):
+        """A supervisor restart that finds a healthy instance defers (exit 0)
+        and — crucially — never opens a browser."""
+        with (
+            patch("job_finder.__main__.probe_existing_jc", return_value={"app": "job-cannon"}),
+            patch("job_finder.web._takeover.webbrowser.open") as mock_open,
+            patch("job_finder.web.supervisor.free_jc_port") as mock_reap,
+        ):
+            action = claim_or_takeover("127.0.0.1", 5000, _URL, mode="serve")
+        assert action == TakeoverAction.EXIT_SUCCESS
+        mock_open.assert_not_called()  # serve is headless even when deferring
+        mock_reap.assert_not_called()  # a healthy instance is never killed
+
+    def test_port_free_proceeds(self):
+        with (
+            patch("job_finder.__main__.probe_existing_jc", return_value=None),
+            patch("job_finder.__main__._port_is_listening", return_value=False),
+        ):
+            action = claim_or_takeover("127.0.0.1", 5000, _URL, mode="serve")
+        assert action == TakeoverAction.PROCEED
+
+    def test_reaps_wedged_orphan_then_proceeds(self):
+        with (
+            patch("job_finder.__main__.probe_existing_jc", return_value=None),
+            patch("job_finder.__main__._port_is_listening", return_value=True),
+            patch(
+                "job_finder.__main__._listener_looks_like_jc",
+                return_value=(True, "uv run job-cannon serve", 1234),
+            ),
+            patch("job_finder.web._takeover._port_serves_http", return_value=False),
+            patch("job_finder.web.supervisor.free_jc_port", return_value=True) as mock_reap,
+        ):
             action = claim_or_takeover("127.0.0.1", 5000, _URL, mode="serve")
         assert action == TakeoverAction.PROCEED
         mock_reap.assert_called_once_with("127.0.0.1", 5000)
 
-    def test_foreign_listener_refuses_and_exits_failure(self, capsys):
-        with patch("job_finder.web.supervisor.free_jc_port", return_value=False):
+    def test_foreign_listener_exits_failure(self, capsys):
+        with (
+            patch("job_finder.__main__.probe_existing_jc", return_value=None),
+            patch("job_finder.__main__._port_is_listening", return_value=True),
+            patch(
+                "job_finder.__main__._listener_looks_like_jc",
+                return_value=(False, "nginx", 9999),
+            ),
+            patch("job_finder.web.supervisor.free_jc_port") as mock_reap,
+        ):
             action = claim_or_takeover("127.0.0.1", 5000, _URL, mode="serve")
         assert action == TakeoverAction.EXIT_FAILURE
-        err = capsys.readouterr().err
-        assert "serve" in err
-        assert "refusing to kill" in err
-
-    def test_serve_does_not_run_focus_probes(self):
-        """serve reclaims via free_jc_port and never consults the focus probes."""
-        with (
-            patch("job_finder.web.supervisor.free_jc_port", return_value=True),
-            patch("job_finder.__main__.probe_existing_jc") as mock_probe,
-        ):
-            claim_or_takeover("127.0.0.1", 5000, _URL, mode="serve")
-        mock_probe.assert_not_called()
+        assert "occupied" in capsys.readouterr().err
+        mock_reap.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
