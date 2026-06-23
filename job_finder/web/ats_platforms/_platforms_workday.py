@@ -350,8 +350,16 @@ def _fetch_postings_with_completeness(
             logger.warning("scan_workday('%s') JSON parse error: %s", slug, exc)
             break
 
-        total = data.get("total", 0)
-        saw_total = True
+        # Capture `total` ONLY from the first page. The Workday CXS API
+        # reports the real board size on the offset=0 response but returns
+        # total=0 on every subsequent page (while still serving 20 valid
+        # postings). Re-reading it each iteration overwrote `total` with 0 on
+        # page 2, so the `total_fetched >= total` break below fired after just
+        # 40 postings — silently capping EVERY board at 2 pages regardless of
+        # size (Nvidia 2000, Salesforce 1461, Adobe 1091 all truncated to 40).
+        if not saw_total:
+            total = data.get("total", 0)
+            saw_total = True
         pages_fetched += 1
 
         postings = data.get("jobPostings", [])

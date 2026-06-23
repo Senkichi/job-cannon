@@ -417,6 +417,48 @@ class TestFetchPostingsWithCompleteness:
         assert len(postings) == total
 
     @patch("job_finder.web.ats_platforms._platforms_workday.requests.post")
+    def test_total_reported_only_on_first_page_is_not_truncated(self, mock_post, _mock_detail):
+        """Real Workday CXS: ``total`` is populated ONLY on the offset=0 page;
+        every subsequent page returns ``total=0`` (with 20 valid postings).
+
+        Regression for the silent 40-job cap: the loop re-read ``total`` each
+        page, so page 2 overwrote it with 0 and the ``total_fetched >= total``
+        break fired at ``40 >= 0`` — truncating EVERY board to 2 pages
+        regardless of size (Nvidia 2000 / Salesforce 1461 / Adobe 1091 all
+        cut to 40). All other completeness tests reported the real total on
+        every page, so none caught this. The fix captures ``total`` once.
+        """
+        from job_finder.web.ats_platforms._platforms_workday import (
+            _PAGE_SIZE,
+            _fetch_postings_with_completeness,
+        )
+
+        total = 130  # 7 pages (last partial) — well past the old 2-page/40 cap.
+
+        def _page(_url, **_kwargs):
+            offset = _kwargs["json"]["offset"]
+            end = min(offset + _PAGE_SIZE, total)
+            resp = MagicMock(status_code=200)
+            resp.json.return_value = {
+                # Real total on the first page, 0 on every later page.
+                "total": total if offset == 0 else 0,
+                "jobPostings": [
+                    {"title": f"Job {i}", "externalPath": f"/job/Job-{i}_R-{i}"}
+                    for i in range(offset, end)
+                ],
+            }
+            return resp
+
+        mock_post.side_effect = _page
+
+        postings, complete = _fetch_postings_with_completeness(
+            "acme.wd5/AcmeExternal", max_pages=100
+        )
+        # The whole board comes back — NOT truncated to 40 (the old cap).
+        assert len(postings) == total
+        assert complete is True
+
+    @patch("job_finder.web.ats_platforms._platforms_workday.requests.post")
     def test_max_pages_contextvar_override_applied(self, mock_post, _mock_detail):
         """set_max_pages ContextVar caps pagination when no explicit arg is passed.
 

@@ -688,9 +688,18 @@ class TestReconcileCompany:
     def test_smartrecruiters_over_cap_total_skips_via_completeness_gate(
         self, mock_get, tmp_db_path
     ):
-        """End-to-end: list endpoint returns totalFound=600 (> 500 cap) →
-        complete=False → reconcile skips with 'smartrecruiters_incomplete',
-        no DB writes. Guards the 501+ tail described in #217."""
+        """End-to-end: list endpoint returns totalFound just over the
+        pagination cap (`_MAX_RESULTS`) → complete=False → reconcile skips
+        with 'smartrecruiters_incomplete', no DB writes. Guards the over-cap
+        tail described in #217.
+
+        Cap-agnostic on purpose: references `_MAX_RESULTS` rather than a
+        hardcoded boundary. The cap was 500 when this test was written; when
+        it was raised to 2000 (so 501-2000 boards are now fully fetchable and
+        legitimately complete), a literal `totalFound=600` quietly fell *under*
+        the cap and voided this expiry-safety gate. Pin to the live constant so
+        any future bump can't silently disarm the guard."""
+        from job_finder.web.ats_platforms._platforms_smartrecruiters import _MAX_RESULTS
         from job_finder.web.ats_reconciler import reconcile_company
         from job_finder.web.db_helpers import standalone_connection
 
@@ -703,7 +712,7 @@ class TestReconcileCompany:
         )
         mock_resp = MagicMock(status_code=200)
         mock_resp.json.return_value = {
-            "totalFound": 600,
+            "totalFound": _MAX_RESULTS + 100,
             "content": [{"id": str(i), "name": f"Job {i}"} for i in range(100)],
         }
         mock_get.return_value = mock_resp

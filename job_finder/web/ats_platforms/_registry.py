@@ -184,7 +184,11 @@ def run_platform_scan(
         if job_dict is not None:
             results.append(job_dict)
 
-    logger.debug(
+    # INFO (not DEBUG): per-company fetched-vs-matched is the primary live
+    # observability signal during a scan — it surfaces title-filter
+    # over-restriction (many fetched, 0 matched) and silent board breaks
+    # (0 fetched on a previously-productive board) as they stream.
+    logger.info(
         "scan_%s('%s'): %d postings fetched, %d matched",
         scanner.name,
         slug,
