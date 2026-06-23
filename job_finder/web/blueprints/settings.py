@@ -27,6 +27,7 @@ from job_finder.config import (
     DEFAULT_LOOKBACK_DAYS,
     DEFAULT_MIN_SCORE_THRESHOLD,
     load_config,
+    normalize_profile_work_arrangement,
 )
 from job_finder.web import user_data_dirs
 from job_finder.web._htmx import htmx_fragment
@@ -292,6 +293,15 @@ def save():
             )
             return redirect(url_for("settings.index"))
 
+        # Heal the legacy "Remote" sentinel BEFORE persisting: a user who types
+        # "Remote" into target_locations would otherwise have it written to disk
+        # but stripped only in-memory by load_config on the next read — the value
+        # appears to "not save". Enforcing the invariant (no remote sentinel in
+        # target_locations; arrangement lives in work_arrangement) at the write
+        # boundary keeps disk + the refreshed in-memory config consistent and
+        # self-heals any already-stored sentinel on the next save. Idempotent.
+        config = normalize_profile_work_arrangement(config)
+
         _write_config(config, _config_path())
 
         # Refresh the live in-memory config so changes take effect without restart.
@@ -376,6 +386,13 @@ def _parse_form_to_config(form) -> dict:
         profile["target_titles"] = lines_to_list(form["target_titles"])
     if _has("target_locations"):
         profile["target_locations"] = lines_to_list(form["target_locations"])
+    if _has("work_arrangement"):
+        # Canonical remote/hybrid/on-site preference (consumed by location_fit +
+        # scoring_orchestrator). Mirrors the onboarding wizard's toggle; values
+        # validated against the same vocabulary (location_fit.VALID_WORK_ARRANGEMENTS).
+        # Anything unexpected falls back to "remote" — the wizard's default.
+        wa = form["work_arrangement"].strip().lower()
+        profile["work_arrangement"] = wa if wa in ("remote", "hybrid", "on-site") else "remote"
     if _has("min_salary"):
         profile["min_salary"] = safe_int(form["min_salary"])
     if _has("industries"):

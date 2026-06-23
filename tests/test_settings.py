@@ -128,6 +128,80 @@ class TestSettingsWipeGuard:
         assert config["profile"]["min_salary"] == 200000
 
 
+class TestSettingsWorkArrangement:
+    """The Settings page exposes a work_arrangement toggle (remote/hybrid/on-site)
+    mirroring the onboarding wizard. 'Remote' is a work arrangement, NOT a
+    geography: typing it into target_locations is healed away on save so the
+    value no longer silently 'disappears' on the next page load."""
+
+    def test_save_work_arrangement_persists(self, settings_client, settings_app):
+        """POST work_arrangement=hybrid → persisted to config.profile."""
+        resp = settings_client.post(
+            "/settings/save",
+            data={
+                "target_titles": "Staff Data Scientist\nSenior Data Scientist",
+                "profile_skills": "Python\nSQL\nSpark",
+                "work_arrangement": "hybrid",
+            },
+        )
+        assert resp.status_code == 302
+
+        with open(settings_app._test_config_path, encoding="utf-8") as f:
+            config = yaml.safe_load(f)
+        assert config["profile"]["work_arrangement"] == "hybrid"
+
+    def test_save_strips_remote_sentinel_from_target_locations(
+        self, settings_client, settings_app
+    ):
+        """Typing 'Remote' as a location is stripped on disk (the original bug:
+        it was written then hidden on read, looking like it never saved)."""
+        resp = settings_client.post(
+            "/settings/save",
+            data={
+                "target_titles": "Staff Data Scientist\nSenior Data Scientist",
+                "profile_skills": "Python\nSQL\nSpark",
+                "target_locations": "San Francisco\nRemote",
+                "work_arrangement": "remote",
+            },
+        )
+        assert resp.status_code == 302
+
+        with open(settings_app._test_config_path, encoding="utf-8") as f:
+            config = yaml.safe_load(f)
+        locs = config["profile"]["target_locations"]
+        assert "San Francisco" in locs
+        assert not any((loc or "").strip().lower() == "remote" for loc in locs), (
+            f"remote sentinel must be stripped from target_locations on disk, got {locs!r}"
+        )
+        assert config["profile"]["work_arrangement"] == "remote"
+
+    def test_invalid_work_arrangement_falls_back_to_remote(self, settings_client, settings_app):
+        """An out-of-vocabulary value falls back to the wizard default ('remote')."""
+        resp = settings_client.post(
+            "/settings/save",
+            data={
+                "target_titles": "Staff Data Scientist\nSenior Data Scientist",
+                "profile_skills": "Python\nSQL\nSpark",
+                "work_arrangement": "telepathic",
+            },
+        )
+        assert resp.status_code == 302
+
+        with open(settings_app._test_config_path, encoding="utf-8") as f:
+            config = yaml.safe_load(f)
+        assert config["profile"]["work_arrangement"] == "remote"
+
+    def test_settings_page_renders_work_arrangement_toggle(self, settings_client):
+        """GET /settings renders the radio group (guards the template edit)."""
+        resp = settings_client.get("/settings/")
+        assert resp.status_code == 200
+        body = resp.get_data(as_text=True)
+        assert 'name="work_arrangement"' in body
+        # Seed config has only the 'Remote' location sentinel → normalized to
+        # work_arrangement='remote', so the remote radio must render checked.
+        assert 'value="remote"' in body
+
+
 class TestSettingsKeyringWrite:
     """Commit 3.5: SerpAPI keys submitted via the Settings form
     land in the OS keyring; the plaintext field in config.yaml is cleared on

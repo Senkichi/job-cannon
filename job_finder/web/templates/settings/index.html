@@ -46,6 +46,7 @@
             <label class="block text-sm font-medium text-slate-300 mb-1">Target Locations <span class="text-slate-500 font-normal">(one per line)</span></label>
             <textarea name="target_locations" rows="5"
                       class="w-full bg-slate-900 border border-slate-600 rounded px-3 py-2 text-sm text-slate-100 focus:border-violet-500 focus:outline-none resize-y font-mono">{{ config.get('profile', {}).get('target_locations', []) | join('\n') }}</textarea>
+            <p class="text-xs text-slate-500 mt-1">Cities, regions, or countries only. To say you want remote roles, use the Work Arrangement toggle below &mdash; "Remote" typed here is stripped on save.</p>
           </div>
           <div>
             <label class="block text-sm font-medium text-slate-300 mb-1">Minimum Salary (USD/year)</label>
@@ -57,6 +58,22 @@
             <label class="block text-sm font-medium text-slate-300 mb-1">Industries <span class="text-slate-500 font-normal">(one per line)</span></label>
             <textarea name="industries" rows="4"
                       class="w-full bg-slate-900 border border-slate-600 rounded px-3 py-2 text-sm text-slate-100 focus:border-violet-500 focus:outline-none resize-y font-mono">{{ config.get('profile', {}).get('industries', []) | join('\n') }}</textarea>
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-sm font-medium text-slate-300 mb-1">Work Arrangement</label>
+          <p class="text-xs text-slate-500 mb-2">Your remote / hybrid / on-site preference (used for fit scoring). This is the canonical home for "remote" &mdash; it is a separate signal from the geographies above.</p>
+          {% set current_arrangement = config.get('profile', {}).get('work_arrangement', 'remote') %}
+          <div class="flex gap-4">
+            {% for opt in [('remote', 'Remote'), ('hybrid', 'Hybrid'), ('on-site', 'On-site')] %}
+            <label class="flex items-center gap-1.5 cursor-pointer">
+              <input type="radio" name="work_arrangement" value="{{ opt[0] }}"
+                     {% if current_arrangement == opt[0] %}checked{% endif %}
+                     class="accent-violet-500">
+              <span class="text-sm text-slate-200">{{ opt[1] }}</span>
+            </label>
+            {% endfor %}
           </div>
         </div>
 
