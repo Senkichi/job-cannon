@@ -225,6 +225,47 @@ class TestAddRoute:
         response = client.post("/companies/add", data={"company_name": ""})
         assert response.status_code == 302
 
+    def test_add_new_company_flashes_probe_scheduled(self, companies_client):
+        """A genuinely new company flashes 'added. ATS probe scheduled.'
+
+        Runs the real upsert path against the test DB (no patch) and follows
+        the redirect so the flash renders into the index page.
+        """
+        client, db_path, conn = companies_client
+        response = client.post(
+            "/companies/add",
+            data={"company_name": "BrandNewCo"},
+            follow_redirects=True,
+        )
+        assert response.status_code == 200
+        body = response.data.decode()
+        assert "ATS probe scheduled" in body
+        assert "already tracked" not in body
+
+    def test_add_existing_company_flashes_already_tracked(self, companies_client):
+        """Re-adding an existing company flashes 'already tracked', NOT the
+        misleading 'added. ATS probe scheduled.' message.
+
+        Regression for Bug #14: the upsert is idempotent and returns the same
+        id whether it inserted or matched, so the route used to claim a probe
+        was scheduled even when the row already existed.
+        """
+        client, db_path, conn = companies_client
+        from job_finder.web.dedup_normalizer import normalize_company
+
+        # Pre-existing row keyed by the SAME normalized name the route looks up.
+        _insert_company(conn, name=normalize_company("DupCorp"))
+
+        response = client.post(
+            "/companies/add",
+            data={"company_name": "DupCorp"},
+            follow_redirects=True,
+        )
+        assert response.status_code == 200
+        body = response.data.decode()
+        assert "already tracked" in body
+        assert "ATS probe scheduled" not in body
+
 
 # ---------------------------------------------------------------------------
 # Tests: POST /companies/<id>/toggle
@@ -354,6 +395,47 @@ class TestUpdateSlugRoute:
         assert owner_row["ats_slug"] == "acme"
         assert loser_row["ats_platform"] is None
         assert loser_row["ats_slug"] is None
+
+    def test_update_slug_collision_renders_inline_error(self, companies_client):
+        """Bug #15: the collision error must render INLINE in the returned
+        fragment (flash can't surface in an HTMX swap).
+
+        The route passes `error=` into _row_expanded.html; the template renders
+        it in a red banner. Without it the row silently reverts with no reason.
+        """
+        client, db_path, conn = companies_client
+        _insert_company(
+            conn,
+            name="Owner Corp",
+            ats_probe_status="hit",
+            ats_platform="greenhouse",
+            ats_slug="ownerslug",
+        )
+        loser_id = _insert_company(conn, name="Loser Corp")
+
+        response = client.post(
+            f"/companies/{loser_id}/update-slug",
+            data={"ats_platform": "greenhouse", "ats_slug": "ownerslug"},
+        )
+        assert response.status_code == 200
+        body = response.data.decode()
+        # Inline banner text + the red banner styling that carries it.
+        assert "already owned by company" in body
+        assert "ownerslug" in body
+        assert "text-red-300" in body
+
+    def test_update_slug_success_has_no_inline_error(self, companies_client):
+        """A non-colliding slug update returns the fragment with NO error banner."""
+        client, db_path, conn = companies_client
+        company_id = _insert_company(conn, name="Clean Corp")
+
+        response = client.post(
+            f"/companies/{company_id}/update-slug",
+            data={"ats_platform": "lever", "ats_slug": "cleanslug"},
+        )
+        assert response.status_code == 200
+        body = response.data.decode()
+        assert "already owned by company" not in body
 
 
 # ---------------------------------------------------------------------------

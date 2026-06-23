@@ -3,6 +3,12 @@
 
 <div class="bg-slate-750 border-b border-slate-700">
 
+  {# Inline error banner (e.g. update_slug ATS-slug collision). flash() can't
+     render inside an HTMX fragment swap, so the route passes the message here. #}
+  {% if error %}
+  <div class="bg-red-900/50 border border-red-700/50 rounded-md px-3 py-2 text-xs text-red-300 m-3">{{ error }}</div>
+  {% endif %}
+
   <!-- Company header bar -->
   <div class="flex items-center justify-between px-4 py-3 bg-slate-700/50 border-b border-slate-600">
     <div class="flex items-center gap-3">

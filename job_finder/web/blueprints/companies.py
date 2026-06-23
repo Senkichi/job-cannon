@@ -271,6 +271,18 @@ def add():
 
     try:
         from job_finder.web.ats_scanner import upsert_company
+        from job_finder.web.dedup_normalizer import normalize_company
+
+        # Detect new-vs-existing BEFORE the (idempotent) upsert so the flash is
+        # truthful. upsert_company looks up by normalized name and returns the
+        # same id whether it inserted or matched, so its return value alone can't
+        # distinguish the two. We mirror that exact lookup here. (is_company_tracked
+        # additionally requires scan_enabled=1, which would mislabel a disabled-
+        # but-existing row as "new" — so we check raw existence instead.)
+        existing = conn.execute(
+            "SELECT id FROM companies WHERE name = ?",
+            (normalize_company(company_name),),
+        ).fetchone()
 
         company_id = upsert_company(
             conn,
@@ -280,10 +292,16 @@ def add():
         )
         conn.commit()
 
-        if company_id:
-            flash(f"Company '{company_name}' added. ATS probe scheduled.", "success")
+        if company_id is None:
+            flash(f"Company '{company_name}' could not be created.", "error")
+        elif existing is not None:
+            # Idempotent upsert hit an existing row — no new probe is queued
+            # beyond what was already scheduled, so don't promise one.
+            flash(f"Company '{company_name}' is already tracked.", "info")
         else:
-            flash(f"Company '{company_name}' already exists or could not be created.", "info")
+            # New row inserted with ats_probe_status='pending' — the nightly
+            # pending sweep will probe it.
+            flash(f"Company '{company_name}' added. ATS probe scheduled.", "success")
 
     except Exception as e:
         logger.error("Failed to add company '%s': %s", company_name, e)
@@ -436,6 +454,10 @@ def update_slug(company_id):
         ).fetchone()
         owner_id = owner["id"] if owner else None
         owner_name = owner["name_raw"] if owner else None
+        collision_msg = (
+            f"Cannot set ATS to {ats_platform}/{ats_slug} — already owned "
+            f"by company id={owner_id} ({owner_name!r})"
+        )
         logger.warning(
             "update_slug: admin override blocked for company id=%d on "
             "%s/%s — already owned by id=%s (%r). exc=%s",
@@ -446,13 +468,13 @@ def update_slug(company_id):
             owner_name,
             exc,
         )
-        flash(
-            f"Cannot set ATS to {ats_platform}/{ats_slug} — already owned "
-            f"by company id={owner_id} ({owner_name!r})",
-            "error",
-        )
+        # flash() can't render inside an HTMX fragment swap (it only surfaces on
+        # a full page render), so the collision would otherwise revert the row to
+        # its old values with no visible reason. Pass the error inline into the
+        # fragment instead — _row_expanded.html renders an `error` banner.
+        flash(collision_msg, "error")
         # Re-render the (unchanged) expanded row so the operator sees the
-        # flash and the current state. Skip the commit — the original
+        # error and the current state. Skip the commit — the original
         # values are preserved.
         unchanged_company = conn.execute(
             "SELECT * FROM companies WHERE id = ?", (company_id,)
@@ -463,6 +485,7 @@ def update_slug(company_id):
             jobs=[],
             scan_history=[],
             research=None,
+            error=collision_msg,
             ats_not_scannable=(unchanged_company["ats_platform"] or "").lower()
             in NON_SCANNABLE_PLATFORMS,
         )
