@@ -33,8 +33,12 @@ from job_finder.web.ats_detection import (
 
 
 def test_extractor_version_bumped_for_round6_patterns():
-    """Round-6 added 4 URL patterns -- the version string must be bumped."""
-    assert ATS_EXTRACTOR_VERSION == "m049-v4"
+    """Round-6 added 4 URL patterns -- the version string must be bumped.
+
+    Tracks the current extractor version (bumped again to m049-v5 when the iCIMS
+    URL pattern was added in PR-A2); every material regex change bumps it.
+    """
+    assert ATS_EXTRACTOR_VERSION == "m049-v5"
 
 
 # ---------------------------------------------------------------------------
@@ -91,6 +95,26 @@ class TestUrlDetection:
     def test_unknown_workable_lookalike_returns_none(self):
         """Don't match `workable.com` directly; only the apply.workable.com tenant URL."""
         assert extract_ats_from_url_best("https://www.workable.com/careers") is None
+
+    def test_icims_careers_host_returns_icims_and_tenant(self):
+        url = "https://careers-acme.icims.com/jobs/search?ss=1"
+        assert extract_ats_from_url_best(url) == ("icims", "acme", 5)
+
+    def test_icims_jobs_host_returns_icims_and_tenant(self):
+        url = "https://jobs-acme.icims.com/jobs/12345/data-scientist/job"
+        assert extract_ats_from_url_best(url) == ("icims", "acme", 5)
+
+    def test_icims_tenant_lowercased_with_hyphen(self):
+        url = "https://careers-Big-Co.icims.com/jobs/search"
+        assert extract_ats_from_url_best(url) == ("icims", "big-co", 5)
+
+    def test_icims_vendor_host_returns_none(self):
+        """The vendor's own www.icims.com marketing host is not a tenant board."""
+        assert extract_ats_from_url_best("https://www.icims.com/products") is None
+
+    def test_icims_bare_subdomain_without_prefix_returns_none(self):
+        """Require the careers-/jobs- prefix; a bare {sub}.icims.com isn't matched."""
+        assert extract_ats_from_url_best("https://acme.icims.com/jobs/search") is None
 
 
 # ---------------------------------------------------------------------------

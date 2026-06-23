@@ -57,12 +57,35 @@ class TestDiscoverAtsLinks:
         specs = [spec for _p, _s, spec in results]
         assert specs == sorted(specs, reverse=True)
 
-    def test_non_target_platform_filtered(self):
-        # recruitee is URL-detectable but is NOT one of the five target
-        # scanners — it must not appear in discovery results.
-        html = '<html><body><a href="https://acme.recruitee.com/o/eng">Jobs</a></body></html>'
+    def test_non_scannable_platform_filtered(self):
+        # jobvite is URL-detectable but has no working scanner (a stub listed in
+        # NON_SCANNABLE_PLATFORMS) — it must not appear in discovery results.
+        html = '<html><body><a href="https://jobs.jobvite.com/acme/job/abc">Jobs</a></body></html>'
         results = discover_ats_links_from_html(html, "https://acme.com/careers")
         assert results == []
+
+    def test_scanner_backed_platforms_now_targeted(self):
+        # recruitee/workable/bamboohr own working scanners but were silently
+        # dropped by the old hardcoded 5-platform target set. They must now
+        # surface for promotion (the PR-A2 registry-derived widening).
+        for url, platform, slug in (
+            ("https://acme.recruitee.com/o/eng", "recruitee", "acme"),
+            ("https://apply.workable.com/datadog", "workable", "datadog"),
+            ("https://acme.bamboohr.com/careers", "bamboohr", "acme"),
+        ):
+            html = f'<html><body><a href="{url}">Jobs</a></body></html>'
+            results = discover_ats_links_from_html(html, "https://acme.com/careers")
+            assert (platform, slug, 5) in results, url
+
+    def test_icims_embed_discovered(self):
+        # An iCIMS board iframed onto a custom careers page → discovered. iCIMS
+        # has a working Playwright scanner; its slug is the careers-/jobs- tenant.
+        html = (
+            "<html><body><iframe "
+            'src="https://careers-acme.icims.com/jobs/search?ss=1"></iframe></body></html>'
+        )
+        results = discover_ats_links_from_html(html, "https://acme.com/careers")
+        assert ("icims", "acme", 5) in results
 
     def test_no_links_returns_empty(self):
         html = "<html><body><a href='https://acme.com/about'>About</a></body></html>"
@@ -108,6 +131,31 @@ class TestBestAtsCandidate:
 
     def test_none_when_no_links(self):
         assert best_ats_candidate("<html><body>nothing</body></html>", "https://x.com") is None
+
+
+# ---------------------------------------------------------------------------
+# Promotable-set contract
+# ---------------------------------------------------------------------------
+
+
+def test_target_platforms_derived_from_scanner_registry():
+    """``_TARGET_PLATFORMS`` is the live scanner set, never a hardcoded subset.
+
+    Guards the drift that silently dropped six scannable platforms: the set must
+    equal (every registered scanner − non-scannable stubs) ∪ the Playwright-only
+    iCIMS, so adding a scanner automatically makes its embeds promotable and a
+    stub (jobvite) can never be promoted to.
+    """
+    from job_finder.web.ats_platforms import NON_SCANNABLE_PLATFORMS, SCANNERS_BY_NAME
+    from job_finder.web.careers_crawler._ats_link_discovery import _TARGET_PLATFORMS
+
+    expected = (frozenset(SCANNERS_BY_NAME) - NON_SCANNABLE_PLATFORMS) | {"icims"}
+    assert expected == _TARGET_PLATFORMS
+    # The platforms the old hardcoded {gh,lever,ashby,workday,sr} set dropped:
+    for p in ("paylocity", "workable", "rippling", "bamboohr", "breezy", "jazzhr", "icims"):
+        assert p in _TARGET_PLATFORMS
+    # The non-scannable stub stays out:
+    assert "jobvite" not in _TARGET_PLATFORMS
 
 
 # ---------------------------------------------------------------------------

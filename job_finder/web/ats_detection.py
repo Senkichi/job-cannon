@@ -128,9 +128,19 @@ _RIPPLING_HUMAN_URL = re.compile(
     re.IGNORECASE,
 )
 
+# iCIMS: tenant served on careers-{slug}.icims.com or jobs-{slug}.icims.com.
+# Capture the bare tenant after the prefix (exactly what _probe_icims / _board_url
+# wrap back into the host); require the careers-/jobs- prefix so the vendor's own
+# www.icims.com marketing host can never be mistaken for a tenant board.
+_ICIMS_URL = re.compile(
+    r"https?://(?:careers|jobs)-([a-z0-9][a-z0-9-]*)\.icims\.com",
+    re.IGNORECASE,
+)
+
 # Bump alongside material changes to the regex patterns above (contract tests).
 # m049-v4: + workable / jobvite / paylocity / rippling URL patterns (round 6 audit).
-ATS_EXTRACTOR_VERSION = "m049-v4"
+# m049-v5: + icims URL pattern (careers-/jobs- tenant host) (PR-A2).
+ATS_EXTRACTOR_VERSION = "m049-v5"
 
 # Relative pattern strength within a URL: API/canonical traces win ties in reconciliation.
 _SPECIFICITY_API = 10
@@ -237,6 +247,13 @@ def extract_ats_from_url_best(url: str) -> tuple[str, str, int] | None:
     m = _RIPPLING_HUMAN_URL.search(url)
     if m:
         return "rippling", m.group(1).lower(), _SPECIFICITY_BOARD
+
+    # iCIMS — JS-rendered board, served by the Playwright scanner. Tenant is the
+    # label after the careers-/jobs- host prefix; the captured slug is exactly
+    # what _probe_icims / _board_url wrap back into a host.
+    m = _ICIMS_URL.search(url)
+    if m:
+        return "icims", m.group(1).lower(), _SPECIFICITY_BOARD
 
     return None
 
