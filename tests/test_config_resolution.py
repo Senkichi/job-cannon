@@ -118,3 +118,60 @@ class TestWriteConfig:
     def test_config_not_found_error_is_filenotfounderror_subclass(self):
         """API guarantee — callers can ``except FileNotFoundError`` if they want."""
         assert issubclass(ConfigNotFoundError, FileNotFoundError)
+
+
+class TestDbPathResolution:
+    """create_app must anchor a RELATIVE ``db.path`` (the shipped default
+    ``jobs.db``) to the user-data root — NOT the process CWD. Otherwise a launch
+    from any other directory silently opens (and sqlite-auto-creates) an empty
+    jobs.db there with no error — the bug that made a ``serve`` instance launched
+    with a worktree CWD scan 0 companies.
+    """
+
+    _CFG = {
+        "scoring": {"min_score_threshold": 40, "daily_budget_usd": 25.0},
+        "profile": {
+            "target_titles": ["Staff Data Scientist"],
+            "target_locations": ["Remote"],
+            "min_salary": 150000,
+            "industries": [],
+            "exclusions": {"title_keywords": [], "companies": []},
+            "skills": [],
+        },
+        "sources": {},
+        "output": {"default_format": "cli", "max_results": 50},
+        "SKIP_SCHEDULER": True,
+    }
+
+    def test_relative_db_path_anchored_to_user_data_root(self, monkeypatch, tmp_path):
+        """Relative ``db.path`` resolves under JOB_CANNON_USER_DATA_DIR regardless
+        of CWD, and no empty DB is created at the (wrong) working directory."""
+        from job_finder.web import create_app
+
+        root = tmp_path / "dataroot"
+        root.mkdir()
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        monkeypatch.setenv("JOB_CANNON_USER_DATA_DIR", str(root))
+        monkeypatch.delenv("JOB_CANNON_CONFIG", raising=False)
+        monkeypatch.chdir(elsewhere)  # CWD deliberately != data root
+
+        app = create_app(config={"db": {"path": "jobs.db"}, **self._CFG})
+
+        assert app.config["DB_PATH"] == str(root / "jobs.db")
+        assert not (elsewhere / "jobs.db").exists(), "empty DB created at CWD — footgun not fixed"
+
+    def test_absolute_db_path_honored_verbatim(self, monkeypatch, tmp_path):
+        """An explicit absolute ``db.path`` is a deliberate override — used as-is."""
+        from job_finder.web import create_app
+
+        root = tmp_path / "dataroot"
+        root.mkdir()
+        abs_db = tmp_path / "custom" / "explicit.db"
+        abs_db.parent.mkdir()
+        monkeypatch.setenv("JOB_CANNON_USER_DATA_DIR", str(root))
+        monkeypatch.delenv("JOB_CANNON_CONFIG", raising=False)
+
+        app = create_app(config={"db": {"path": str(abs_db)}, **self._CFG})
+
+        assert app.config["DB_PATH"] == str(abs_db)
