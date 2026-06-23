@@ -33,6 +33,7 @@ from job_finder.web import user_data_dirs
 from job_finder.web._htmx import htmx_fragment
 from job_finder.web.autoheal.health_monitor import sources_needing_attention
 from job_finder.web.db_helpers import get_db, refresh_jf_config
+from job_finder.web.model_provider import is_supported_provider_name
 from job_finder.web.onboarding.inbox_check import run_inbox_check
 
 logger = logging.getLogger(__name__)
@@ -62,6 +63,34 @@ def _config_path() -> str:
     ``settings._CONFIG_PATH`` to pin an explicit path.
     """
     return _CONFIG_PATH or str(user_data_dirs.config_path())
+
+
+# AI cascade providers the Settings form can select as providers.primary. Curated
+# subset of model_provider._PROVIDER_DEFAULTS (every entry resolves to a real
+# model, so none raise "no model for workload"); the submitted value is still
+# validated against model_provider.is_supported_provider_name on save. (key, label).
+_SELECTABLE_PROVIDERS: tuple[tuple[str, str], ...] = (
+    ("ollama", "Ollama — $0 local inference"),
+    ("claude_code_cli", "Claude Code CLI — $0 (Claude.ai subscription)"),
+    ("gemini_cli", "Gemini CLI — $0 (Google AI Studio free tier)"),
+    ("gemini", "Gemini — BYO API key (free tier)"),
+    ("groq", "Groq — BYO API key"),
+    ("cerebras", "Cerebras — BYO API key"),
+    ("anthropic", "Anthropic — $0 (Claude.ai OAuth transport)"),
+    ("anthropic_api", "Anthropic API — paid, per-token"),
+    ("local_bundled", "Local bundled GGUF — $0 (requires [local-ai] extra)"),
+)
+
+# BYO-key providers whose API key the Settings form can set / rotate. Each maps to
+# the canonical SECRET_ENV_VARS name providers.api_keys.<name> and is routed to the
+# OS keyring in save() (mirrors the source-secret pattern). (key, label).
+_PROVIDER_KEY_FIELDS: tuple[tuple[str, str], ...] = (
+    ("anthropic", "Anthropic API key"),
+    ("gemini", "Gemini API key"),
+    ("groq", "Groq API key"),
+    ("cerebras", "Cerebras API key"),
+    ("openrouter", "OpenRouter API key"),
+)
 
 
 @settings_bp.route("/", strict_slashes=False)
@@ -112,6 +141,11 @@ def index():
             "sources.portal_search.adzuna.app_id",
             "sources.portal_search.adzuna.app_key",
             "sources.portal_search.jooble.api_key",
+            "providers.api_keys.anthropic",
+            "providers.api_keys.gemini",
+            "providers.api_keys.groq",
+            "providers.api_keys.cerebras",
+            "providers.api_keys.openrouter",
         )
     }
 
@@ -125,6 +159,8 @@ def index():
         secret_set=secret_set,
         inbox_status=inbox_status,
         source_attention=_safe_source_attention(),
+        selectable_providers=_SELECTABLE_PROVIDERS,
+        provider_key_fields=_PROVIDER_KEY_FIELDS,
     )
 
 
@@ -270,6 +306,15 @@ def save():
             ("sources", "portal_search", "jooble", "api_key"),
             "sources.portal_search.jooble.api_key",
         )
+        # Provider BYO API keys -> keyring (canonical providers.api_keys.<name>),
+        # so a user can rotate/correct a provider key from Settings (previously
+        # onboarding-only). Same keyring-or-plaintext-fallback semantics as above.
+        for _pkey, _plabel in _PROVIDER_KEY_FIELDS:
+            _move_secret_to_keyring(
+                form_config,
+                ("providers", "api_keys", _pkey),
+                f"providers.api_keys.{_pkey}",
+            )
 
         config = _deep_merge(existing, form_config)
 
@@ -556,6 +601,25 @@ def _parse_form_to_config(form) -> dict:
         portal_search["jooble"] = jooble
     if portal_search:
         config.setdefault("sources", {})["portal_search"] = portal_search
+
+    # --- Providers (AI cascade) ---
+    # providers.primary selects the head of the scoring/quick cascade; the
+    # per-provider BYO api_keys are routed to the OS keyring in save() (same
+    # (set)/(not set) placeholder + no-clobber-on-empty pattern as source
+    # secrets). fallback_chain / overrides / limits are preserved by _deep_merge
+    # — this block only writes the keys the form actually owns.
+    if _has("provider_primary"):
+        pname = form["provider_primary"].strip()
+        # Validate against the canonical registry; ignore anything unknown
+        # rather than writing a primary the cascade can't route.
+        if is_supported_provider_name(pname):
+            config.setdefault("providers", {})["primary"] = pname
+    for pkey, _label in _PROVIDER_KEY_FIELDS:
+        fk = f"provider_key_{pkey}"
+        # Only include when the user typed something — an empty submission means
+        # "leave the existing secret alone" (mirrors the source-key guard).
+        if _has(fk) and form[fk]:
+            config.setdefault("providers", {}).setdefault("api_keys", {})[pkey] = form[fk]
 
     # --- Scoring ---
     scoring = {}

@@ -202,6 +202,117 @@ class TestSettingsWorkArrangement:
         assert 'value="remote"' in body
 
 
+class TestSettingsProviderSection:
+    """The Settings page exposes the AI cascade head (providers.primary) and BYO
+    provider API keys, previously settable only during onboarding. Keys route to
+    the OS keyring with the same (set)/(not set) + no-clobber semantics as source
+    secrets."""
+
+    def test_save_provider_primary_persists(self, settings_client, settings_app):
+        """POST provider_primary=gemini → config.providers.primary updated."""
+        resp = settings_client.post(
+            "/settings/save",
+            data={
+                "target_titles": "Staff Data Scientist\nSenior Data Scientist",
+                "profile_skills": "Python\nSQL\nSpark",
+                "provider_primary": "gemini",
+            },
+        )
+        assert resp.status_code == 302
+
+        with open(settings_app._test_config_path, encoding="utf-8") as f:
+            config = yaml.safe_load(f)
+        assert config["providers"]["primary"] == "gemini"
+
+    def test_save_unsupported_provider_primary_ignored(self, settings_client, settings_app):
+        """An unknown provider name is not written (cascade can't route it)."""
+        # Seed an existing valid primary so we can prove it's preserved.
+        config_path = settings_app._test_config_path
+        with open(config_path, encoding="utf-8") as f:
+            existing = yaml.safe_load(f)
+        existing["providers"] = {"primary": "ollama"}
+        with open(config_path, "w", encoding="utf-8") as f:
+            yaml.dump(existing, f, default_flow_style=False)
+
+        resp = settings_client.post(
+            "/settings/save",
+            data={
+                "target_titles": "Staff Data Scientist\nSenior Data Scientist",
+                "profile_skills": "Python\nSQL\nSpark",
+                "provider_primary": "not-a-real-provider",
+            },
+        )
+        assert resp.status_code == 302
+
+        with open(config_path, encoding="utf-8") as f:
+            config = yaml.safe_load(f)
+        # Unknown name ignored; deep-merge preserves the existing valid primary.
+        assert config["providers"]["primary"] == "ollama"
+
+    def test_save_provider_api_key_routes_to_keyring(self, settings_client, settings_app):
+        """A provider key lands in the keyring; the config.yaml leaf is cleared."""
+        import keyring
+
+        from job_finder.secrets import _service_name
+
+        resp = settings_client.post(
+            "/settings/save",
+            data={
+                "target_titles": "Staff Data Scientist\nSenior Data Scientist",
+                "profile_skills": "Python\nSQL\nSpark",
+                "provider_primary": "gemini",
+                "provider_key_gemini": "gm-test-key-123",
+            },
+        )
+        assert resp.status_code == 302
+
+        assert (
+            keyring.get_password(_service_name(), "providers.api_keys.gemini") == "gm-test-key-123"
+        )
+        with open(settings_app._test_config_path, encoding="utf-8") as f:
+            saved = yaml.safe_load(f)
+        leaf = saved.get("providers", {}).get("api_keys", {}).get("gemini", "<missing>")
+        assert leaf == "", f"plaintext provider key should be cleared, got {leaf!r}"
+
+    def test_empty_provider_api_key_does_not_clobber(self, settings_client, settings_app):
+        """Empty key field (placeholder) → existing secret untouched."""
+        import keyring
+
+        from job_finder.secrets import _service_name
+
+        keyring.set_password(_service_name(), "providers.api_keys.groq", "gq-already-there")
+
+        resp = settings_client.post(
+            "/settings/save",
+            data={
+                "target_titles": "Staff Data Scientist\nSenior Data Scientist",
+                "profile_skills": "Python\nSQL\nSpark",
+                "provider_key_groq": "",
+            },
+        )
+        assert resp.status_code == 302
+        assert (
+            keyring.get_password(_service_name(), "providers.api_keys.groq") == "gq-already-there"
+        )
+
+    def test_settings_page_renders_provider_section(self, settings_client, settings_app):
+        """GET renders the provider select + BYO key fields with current primary."""
+        config_path = settings_app._test_config_path
+        with open(config_path, encoding="utf-8") as f:
+            existing = yaml.safe_load(f)
+        existing["providers"] = {"primary": "ollama"}
+        with open(config_path, "w", encoding="utf-8") as f:
+            yaml.dump(existing, f, default_flow_style=False)
+
+        resp = settings_client.get("/settings/")
+        assert resp.status_code == 200
+        body = resp.get_data(as_text=True)
+        assert 'name="provider_primary"' in body
+        assert 'name="provider_key_gemini"' in body
+        # current primary 'ollama' should be the selected option
+        assert '<option value="ollama" selected>' in body
+
+
 class TestSettingsKeyringWrite:
     """Commit 3.5: SerpAPI keys submitted via the Settings form
     land in the OS keyring; the plaintext field in config.yaml is cleared on
