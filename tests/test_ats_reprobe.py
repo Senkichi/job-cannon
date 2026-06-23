@@ -19,10 +19,31 @@ _NO_ATS_HTML = '<html><body><a href="https://acme.com/about">About us</a></body>
 _JOBVITE_ONLY_HTML = (
     '<html><body><a href="https://jobs.jobvite.com/acme/job/x">Jobs</a></body></html>'
 )
+# A bespoke server-rendered job list (no ATS embed): the generic static
+# extractor should pull the Data Scientist link, matching target_titles.
+_CUSTOM_LIST_HTML = (
+    "<html><body><ul>"
+    '<li><a href="/careers/data-scientist-ii">Data Scientist II</a></li>'
+    '<li><a href="/careers/warehouse-associate">Warehouse Associate</a></li>'
+    "</ul></body></html>"
+)
+# A marketing shell with listings but none matching target_titles.
+_CUSTOM_OFFTARGET_HTML = (
+    "<html><body><ul>"
+    '<li><a href="/careers/line-cook">Line Cook</a></li>'
+    '<li><a href="/careers/dishwasher">Dishwasher</a></li>'
+    "</ul></body></html>"
+)
 
 # identity_reconcile must be enabled for the promotion writer to fire; TESTING
 # skips the polite sleep so the suite stays fast.
 _CONFIG = {"TESTING": True, "ats": {"identity_reconcile": {"enabled": True, "shadow": False}}}
+# Config carrying a profile title filter, enabling the generic-extraction pass.
+_CONFIG_WITH_PROFILE = {
+    "TESTING": True,
+    "ats": {"identity_reconcile": {"enabled": True, "shadow": False}},
+    "profile": {"target_titles": ["Data Scientist"], "exclusions": {"title_keywords": []}},
+}
 
 
 @pytest.fixture()
@@ -207,3 +228,52 @@ def test_only_eligible_custom_miss_cohort_selected(mock_get, _verify, db):
     assert summary["checked"] == 1  # only the eligible company
     assert summary["promoted"] == 1
     assert _row(db, eligible)["ats_probe_status"] == "hit"
+
+
+@patch("job_finder.web.ats_reprobe.requests.get")
+def test_custom_extractable_reenables_scan(mock_get, db):
+    # No ATS embed, but the bespoke page server-renders a target-matching job.
+    # The generic static extractor pulls it -> re-enable scan (hand to crawl),
+    # WITHOUT claiming an ATS platform.
+    cid = _seed(db, "CustomCo", "https://customco.com/careers", scan_enabled=0)
+    mock_get.side_effect = _fake_get({"https://customco.com/careers": _CUSTOM_LIST_HTML})
+
+    summary = reprobe_custom_miss_cohort(db, _CONFIG_WITH_PROFILE)
+
+    assert summary["custom_extractable"] == 1
+    assert summary["promoted"] == 0
+    assert summary["no_candidate"] == 0
+    row = _row(db, cid)
+    assert row["scan_enabled"] == 1  # re-enabled for the daily careers crawl
+    assert row["ats_platform"] is None  # no platform claim — not an ATS hit
+    assert row["ats_probe_status"] == "miss"
+
+
+@patch("job_finder.web.ats_reprobe.requests.get")
+def test_offtarget_listing_stays_frozen(mock_get, db):
+    # Page lists jobs, but none match target_titles -> not a viable source for
+    # us; leave it frozen.
+    cid = _seed(db, "OffTargetCo", "https://offtarget.com/careers", scan_enabled=0)
+    mock_get.side_effect = _fake_get({"https://offtarget.com/careers": _CUSTOM_OFFTARGET_HTML})
+
+    summary = reprobe_custom_miss_cohort(db, _CONFIG_WITH_PROFILE)
+
+    assert summary["custom_extractable"] == 0
+    assert summary["no_candidate"] == 1
+    row = _row(db, cid)
+    assert row["scan_enabled"] == 0
+    assert row["ats_probe_status"] == "miss"
+
+
+@patch("job_finder.web.ats_reprobe.requests.get")
+def test_no_profile_disables_static_pass(mock_get, db):
+    # Same extractable page, but config carries no profile/target_titles -> the
+    # generic-extraction pass is disabled; company stays frozen (no_candidate).
+    cid = _seed(db, "CustomCo", "https://customco.com/careers", scan_enabled=0)
+    mock_get.side_effect = _fake_get({"https://customco.com/careers": _CUSTOM_LIST_HTML})
+
+    summary = reprobe_custom_miss_cohort(db, _CONFIG)  # no profile key
+
+    assert summary["custom_extractable"] == 0
+    assert summary["no_candidate"] == 1
+    assert _row(db, cid)["scan_enabled"] == 0
