@@ -23,7 +23,8 @@ Scenario modelled on the §2-S5 EY duplicate pair measured in production
 
 After _run_rekey_if_stale (v1→v2):
   - Both rows collapse to the v2 canonical key.
-  - merged row carries Hyderabad location (from Row B via _merge_locations).
+  - merged row carries Hyderabad location (from Row B, folded in through the D-5
+    apply_location_observation funnel).
   - merged row carries jd_full from Row A (canonical's jd_full is preserved;
     the duplicate had NULL so there is no better value to take — the update
     statement does not touch jd_full on the canonical).
@@ -204,10 +205,11 @@ class TestEyPairMerge:
     def test_merged_row_gets_hyderabad_location(self, migrated_db):
         """Hyderabad (from the duplicate row B) surfaces on the merged canonical.
 
-        _merge_locations collects unique locations across all rows, Remote/Hybrid
-        first, then others.  The canonical had location="" (empty — skipped as
-        falsy) while the duplicate had location="Hyderabad".  The merged canonical
-        therefore carries "Hyderabad" as its location string.
+        The re-key folds each duplicate's location segments through the D-5
+        apply_location_observation funnel, which set-unions them into the
+        canonical's existing locations_raw and rewrites all five canonical
+        location columns.  The canonical had location="" while the duplicate had
+        location="Hyderabad", so the merged canonical carries "Hyderabad".
         """
         _, conn = migrated_db
         self._setup_ey_pair(conn)

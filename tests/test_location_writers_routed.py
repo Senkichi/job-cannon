@@ -55,9 +55,6 @@ _EXEMPT_RELATIVE = {
     # Admin review "approve" clears the per-location `unresolved` flag — an
     # operator correction, not an ingestion observation.
     "job_finder/web/blueprints/admin.py",
-    # N-way dedup merge rewrites the whole canonical row (incl. dedup_key) when
-    # collapsing duplicate rows — a key-rewrite merge, not an observation.
-    "job_finder/web/dedup_normalizer.py",
     # One-time, sentinel-gated startup backfill (locations_raw = json_array(location)).
     "job_finder/web/startup_backfills.py",
 }

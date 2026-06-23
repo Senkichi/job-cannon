@@ -16,7 +16,6 @@ Design decisions:
 
 import json
 import logging
-import re
 import sqlite3
 
 from job_finder.json_utils import utc_now_iso
@@ -166,8 +165,11 @@ def run_retroactive_dedup(
     1. Computes normalized keys for all existing rows
     2. Groups rows by normalized key to find collision groups
     3. For each group with >1 row: keeps the earliest first_seen row as canonical
-    4. Merges sources, source_urls, location, description, notes, salary, scores,
-       and pipeline_status from all duplicates into the canonical row
+    4. Merges sources, source_urls, description, notes, salary, and
+       pipeline_status from all duplicates into the canonical row. The canonical
+       row's scoring tuple is kept as-is (a merge cannot fabricate a coherent
+       score) and the duplicates' locations are folded in through the D-5 funnel
+       (``apply_location_observation``) so all five location columns stay coherent.
     5. Updates all FK tables (pipeline_events, pipeline_detections, scoring_costs)
     6. Inserts merge_log entries for each merge
     7. Updates canonical row's dedup_key to the normalized format
@@ -242,32 +244,42 @@ def run_retroactive_dedup(
         if old_canonical_key != norm_key:
             _update_fk_tables(conn, old_canonical_key, norm_key)
 
+        # The scoring tuple (classification / sub_scores_json / fit_analysis /
+        # scoring_model) is INTENTIONALLY not written here. A merge cannot
+        # fabricate a coherent score: the canonical row already owns a tuple that
+        # ``persist_job_assessment`` wrote against its own jd_full, while the old
+        # element-wise-max merge produced a Frankenstein classification that no
+        # model emitted and that drifted from ``derive_classification`` — all
+        # while leaving ``scoring_model`` pointing at the canonical's original
+        # model (a latent m078 I-04/I-05 incoherence). We keep the canonical's own
+        # coherent tuple untouched; on the version-bump re-key path
+        # ``_run_rekey_if_stale`` NULLs the whole surface (incl. scoring_model)
+        # afterward to queue a clean re-score.
+        #
+        # The five canonical location columns are likewise NOT written here:
+        # writing only ``location`` / ``locations_raw`` left
+        # locations_structured / workplace_type / primary_country_code stale. The
+        # duplicates' locations are merged below through the single sanctioned
+        # funnel (``apply_location_observation``, D-5) so all five move together.
         conn.execute(
             """
             UPDATE jobs SET
                 dedup_key = ?,
                 sources = ?,
                 source_urls = ?,
-                location = ?,
-                locations_raw = ?,
                 description = ?,
                 notes = ?,
                 salary_min = ?,
                 salary_max = ?,
                 pipeline_status = ?,
                 posted_date = ?,
-                posted_date_precision = ?,
-                classification = ?,
-                sub_scores_json = ?,
-                fit_analysis = ?
+                posted_date_precision = ?
             WHERE dedup_key = ?
         """,
             (
                 norm_key,
                 json.dumps(merged_data["sources"]),
                 json.dumps(merged_data["source_urls"]),
-                merged_data["location"],
-                json.dumps(merged_data["locations_raw"]),
                 merged_data["description"],
                 merged_data["notes"],
                 merged_data["salary_min"],
@@ -275,12 +287,21 @@ def run_retroactive_dedup(
                 merged_data["pipeline_status"],
                 merged_data["posted_date"],
                 merged_data["posted_date_precision"],
-                merged_data["classification"],
-                merged_data["sub_scores_json"],
-                merged_data["fit_analysis"],
                 old_canonical_key,
             ),
         )
+
+        # D-5 location funnel: merge every duplicate's observed location segments
+        # into the (now re-keyed) canonical row. apply_location_observation reads
+        # the canonical's existing locations_raw, set-unions each segment, and
+        # rewrites all five canonical location columns atomically. It is
+        # idempotent and soft-failing, so a malformed segment can never abort the
+        # surrounding merge.
+        from job_finder.db._locations import apply_location_observation
+
+        for dup in duplicates:
+            for segment in _row_location_segments(dup):
+                apply_location_observation(conn, norm_key, segment, source="dedup_merge")
 
         conn.commit()
 
@@ -328,9 +349,9 @@ def _merge_job_data(canonical: dict, duplicates: list[dict]) -> dict:
         except (json.JSONDecodeError, TypeError):
             pass
 
-    # Merge locations (Remote/Hybrid first, then others)
-    locations_raw = _merge_locations(all_rows)
-    location = _build_location_string(locations_raw)
+    # Locations are NOT merged here — the caller folds each duplicate's location
+    # through the D-5 funnel (apply_location_observation) after the re-key so all
+    # five canonical location columns stay coherent (see run_retroactive_dedup).
 
     # Merge description: keep longer, append different content
     description = _merge_descriptions(all_rows)
@@ -370,17 +391,13 @@ def _merge_job_data(canonical: dict, duplicates: list[dict]) -> dict:
     if posted_date is not None and posted_date_precision is None:
         posted_date_precision = "proxy"
 
-    # v3.0 (Phase 34 Plan 3 Commit A): merge classification by priority
-    # (apply > consider > skip > reject), merge sub_scores element-wise max,
-    # keep the fit_analysis of whichever row contributed the winning
-    # classification (or the first non-null fallback).
-    classification, fit_analysis, sub_scores_json = _merge_v3_scoring(all_rows)
+    # The scoring tuple is deliberately absent: the canonical row keeps its own
+    # coherent (classification, sub_scores_json, fit_analysis, scoring_model)
+    # unit. See the UPDATE in run_retroactive_dedup for the rationale.
 
     return {
         "sources": sources,
         "source_urls": source_urls,
-        "locations_raw": locations_raw,
-        "location": location,
         "description": description,
         "notes": notes,
         "salary_min": salary_min,
@@ -388,132 +405,34 @@ def _merge_job_data(canonical: dict, duplicates: list[dict]) -> dict:
         "pipeline_status": pipeline_status,
         "posted_date": posted_date,
         "posted_date_precision": posted_date_precision,
-        "classification": classification,
-        "sub_scores_json": sub_scores_json,
-        "fit_analysis": fit_analysis,
     }
 
 
 # ---------------------------------------------------------------------------
-# v3.0 classification + sub-scores merge helpers (Phase 34 Plan 3 Commit A)
+# Location-merge helper (the segments fed into the D-5 funnel during a re-key)
 # ---------------------------------------------------------------------------
 
-_CLASSIFICATION_RANK: dict = {
-    "apply": 4,
-    "consider": 3,
-    "skip": 2,
-    "reject": 1,
-    None: 0,
-    "": 0,
-}
 
+def _row_location_segments(row: dict) -> list[str]:
+    """Return a row's raw location segments for the D-5 funnel.
 
-def _merge_classification(a, b):
-    """Pick the higher-priority classification. Ties prefer the left (a)."""
-    ra = _CLASSIFICATION_RANK.get(a, 0)
-    rb = _CLASSIFICATION_RANK.get(b, 0)
-    if ra >= rb:
-        return a or b
-    return b
-
-
-def _merge_sub_scores(a, b) -> dict:
-    """Element-wise max per key over two sub_scores dicts."""
-    a = a or {}
-    b = b or {}
-    keys = set(a) | set(b)
-    out = {}
-    for k in keys:
-        va = a.get(k, 0) or 0
-        vb = b.get(k, 0) or 0
-        out[k] = max(va, vb)
-    return out
-
-
-def _merge_v3_scoring(all_rows: list[dict]) -> tuple:
-    """Merge classification, fit_analysis, and sub_scores_json across rows.
-
-    Returns a 3-tuple (classification, fit_analysis, sub_scores_json).
-    classification is the highest-priority enum value across rows.
-    fit_analysis is the rationale payload from the row that contributed the
-    winning classification (or the first non-null rationale as fallback).
-    sub_scores_json is a JSON string with element-wise max sub-scores.
+    Prefers the structured ``locations_raw`` list (each entry is already a clean
+    single segment); falls back to the ``location`` display string when
+    ``locations_raw`` is absent or malformed. Empty entries are dropped. Each
+    returned segment is fed individually to ``apply_location_observation`` so the
+    funnel set-unions them into the canonical row's existing locations and
+    rewrites all five canonical location columns coherently.
     """
-    merged_class = None
-    winning_row = None
-    merged_sub_scores: dict = {}
-
-    for row in all_rows:
-        cls = row.get("classification")
-        new_merged = _merge_classification(merged_class, cls)
-        if new_merged != merged_class:
-            merged_class = new_merged
-            # Track which row contributed the winning classification (for fit_analysis).
-            if cls == new_merged:
-                winning_row = row
-
-        # Always merge sub_scores element-wise regardless of classification.
-        row_sub_scores_raw = row.get("sub_scores_json")
-        row_sub_scores: dict = {}
-        if row_sub_scores_raw:
-            if isinstance(row_sub_scores_raw, dict):
-                row_sub_scores = row_sub_scores_raw
-            elif isinstance(row_sub_scores_raw, str):
-                try:
-                    row_sub_scores = json.loads(row_sub_scores_raw)
-                except (json.JSONDecodeError, TypeError):
-                    row_sub_scores = {}
-        merged_sub_scores = _merge_sub_scores(merged_sub_scores, row_sub_scores)
-
-    # fit_analysis: prefer the winning classification's row; fall back to any row
-    # that has a non-null fit_analysis.
-    if winning_row is not None and winning_row.get("fit_analysis"):
-        fit_analysis = winning_row["fit_analysis"]
-    else:
-        fit_analysis = next(
-            (r.get("fit_analysis") for r in all_rows if r.get("fit_analysis")),
-            None,
-        )
-
-    # Serialize sub_scores_json only if we merged something; keep NULL otherwise
-    # so downstream ORDER BY json_extract reliably returns 0.
-    sub_scores_json = json.dumps(merged_sub_scores) if merged_sub_scores else None
-
-    return merged_class, fit_analysis, sub_scores_json
-
-
-def _merge_locations(rows: list[dict]) -> list[str]:
-    """Collect unique locations from all rows, Remote/Hybrid first."""
-    remote_hybrid: list[str] = []
-    other: list[str] = []
-    seen: set[str] = set()
-
-    for row in rows:
-        # Check locations_raw first, then fall back to location
-        locs_raw = row.get("locations_raw")
-        if locs_raw:
-            try:
-                locs = json.loads(locs_raw)
-            except (json.JSONDecodeError, TypeError):
-                locs = [row.get("location", "")]
-        else:
-            locs = [row.get("location", "")]
-
-        for loc in locs:
-            if not loc or loc in seen:
-                continue
-            seen.add(loc)
-            if re.search(r"\b(remote|hybrid)\b", loc, re.IGNORECASE):
-                remote_hybrid.append(loc)
-            else:
-                other.append(loc)
-
-    return remote_hybrid + other
-
-
-def _build_location_string(locations_raw: list[str]) -> str:
-    """Build a concatenated location string, deduplicating."""
-    return ", ".join(dict.fromkeys(locations_raw))
+    raw = row.get("locations_raw")
+    if raw:
+        try:
+            segs = json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            segs = None
+        if isinstance(segs, list):
+            return [s for s in segs if s]
+    loc = row.get("location")
+    return [loc] if loc else []
 
 
 def _merge_descriptions(rows: list[dict]) -> str | None:

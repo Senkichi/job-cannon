@@ -23,9 +23,18 @@ _JOB_FINDER_ROOT = Path(__file__).resolve().parents[1] / "job_finder"
 # writer); _persistence.py now only re-exports it.
 _ALLOWED_FILENAMES = {"_assessment_writer.py"}
 
+# Match a scoring-owned column ANYWHERE in an `UPDATE jobs SET ...` clause, not
+# just as the first column after SET. The earlier anchored form
+# (`SET\s+(<col>)`) was evaded by any multi-column UPDATE that led with a
+# different column (e.g. the dedup re-key UPDATE led with `dedup_key = ?` and
+# slipped `classification = ?` onto a later line). re.DOTALL lets `.` cross
+# newlines; the {0,600} bound keeps the match inside one statement's SET clause
+# (real SET clauses are < 500 chars) so it can't reach across to unrelated code.
+# The leading `\b` before the column alternation avoids matching suffixes like
+# `gold_classification`. Mirrors tests/test_location_writers_routed.py.
 _SCORING_WRITE_RE = re.compile(
-    r"UPDATE\s+jobs\s+SET\s+(sub_scores_json|classification|scoring_model|scoring_provider)\b",
-    re.IGNORECASE,
+    r"UPDATE\s+jobs\s+SET\b.{0,600}?\b(sub_scores_json|classification|scoring_model|scoring_provider)\s*=",
+    re.IGNORECASE | re.DOTALL,
 )
 
 

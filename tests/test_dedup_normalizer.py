@@ -62,6 +62,9 @@ def mem_db():
             jd_full TEXT DEFAULT NULL,
             is_stale INTEGER DEFAULT 0,
             locations_raw TEXT DEFAULT NULL,
+            locations_structured TEXT DEFAULT NULL,
+            workplace_type TEXT DEFAULT 'UNSPECIFIED',
+            primary_country_code TEXT DEFAULT NULL,
             description_reformatted INTEGER DEFAULT 0
         );
 
@@ -134,12 +137,17 @@ def _insert_job(
     salary_max=None,
     classification=None,
     sub_scores_json=None,
+    locations_raw=None,
 ):
     """Helper to insert a job row into the in-memory DB.
 
     v3.0 (Phase 34 Plan 3 Commit A): classification + sub_scores_json are the
     v3 scoring columns. Legacy haiku_score/sonnet_score kwargs still work
     because the schema retains those columns (Plan 2 shim keeps them populated).
+
+    ``locations_raw`` mirrors production's coherent location state (the display
+    ``location`` column is derived from it) so the D-5 funnel the re-key merge
+    feeds has a real base list to set-union against.
     """
     now = datetime.now().isoformat()
     if first_seen is None:
@@ -156,8 +164,8 @@ def _insert_job(
             (dedup_key, title, company, location, sources, source_urls,
              pipeline_status, first_seen, last_seen, description,
              haiku_score, sonnet_score, classification, sub_scores_json,
-             notes, salary_min, salary_max)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             notes, salary_min, salary_max, locations_raw)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """,
         (
             dedup_key,
@@ -177,6 +185,7 @@ def _insert_job(
             notes,
             salary_min,
             salary_max,
+            locations_raw,
         ),
     )
     conn.commit()
@@ -1144,3 +1153,96 @@ class TestRunRetroactiveDedupMergeSource:
 
         assert merged == 0
         assert mem_db.execute("SELECT COUNT(*) FROM jobs").fetchone()[0] == 2
+
+
+class TestRetroactiveDedupSingleWriterRouting:
+    """The merge never side-writes the scoring tuple or a subset of the five
+    canonical location columns — both route through their sanctioned single
+    writers (canonical-row score preserved; locations via the D-5 funnel)."""
+
+    def test_scoring_tuple_not_merged_keeps_canonical(self, mem_db):
+        """A duplicate's "higher" classification never overwrites the canonical's.
+
+        The old element-wise-max / priority merge fabricated an incoherent score
+        (a classification that drifted from the sub_scores and from the row's
+        scoring_model). The merge now leaves the canonical's own coherent tuple
+        untouched — the version-bump re-key path NULLs it separately to force a
+        clean re-score.
+        """
+        from job_finder.web.dedup_normalizer import run_retroactive_dedup
+
+        # Canonical (earliest) scored "consider"; the duplicate scored "apply".
+        _insert_job(
+            mem_db,
+            "old-key-1",
+            "Senior Engineer",
+            "Acme Inc.",
+            first_seen="2026-01-01T00:00:00",
+            classification="consider",
+            sub_scores_json='{"comp_fit": 3}',
+        )
+        _insert_job(
+            mem_db,
+            "old-key-2",
+            "Senior Engineer",
+            "Acme",
+            first_seen="2026-01-05T00:00:00",
+            classification="apply",
+            sub_scores_json='{"comp_fit": 5}',
+        )
+
+        run_retroactive_dedup(mem_db)
+
+        rows = mem_db.execute("SELECT classification, sub_scores_json FROM jobs").fetchall()
+        assert len(rows) == 1
+        # Canonical's own score is preserved verbatim — NOT merged up to "apply"
+        # and NOT element-wise-maxed to comp_fit=5.
+        assert rows[0]["classification"] == "consider"
+        assert rows[0]["sub_scores_json"] == '{"comp_fit": 3}'
+
+    def test_location_merge_routes_through_funnel(self, mem_db):
+        """All five canonical location columns stay coherent after a merge.
+
+        The old merge wrote only ``location`` + ``locations_raw``, leaving
+        ``locations_structured`` / ``workplace_type`` / ``primary_country_code``
+        stale. Routing each duplicate's segments through
+        ``apply_location_observation`` rewrites all five together.
+        """
+        from job_finder.web.dedup_normalizer import run_retroactive_dedup
+
+        # Canonical is Remote; the duplicate adds a physical city.
+        _insert_job(
+            mem_db,
+            "old-key-1",
+            "Senior Engineer",
+            "Acme Inc.",
+            first_seen="2026-01-01T00:00:00",
+            location="Remote",
+            locations_raw='["Remote"]',
+        )
+        _insert_job(
+            mem_db,
+            "old-key-2",
+            "Senior Engineer",
+            "Acme",
+            first_seen="2026-01-05T00:00:00",
+            location="New York",
+            locations_raw='["New York"]',
+        )
+
+        run_retroactive_dedup(mem_db)
+
+        row = mem_db.execute(
+            "SELECT location, locations_raw, locations_structured, workplace_type FROM jobs"
+        ).fetchall()
+        assert len(row) == 1
+        merged = row[0]
+        # Both locations folded in (Remote floats to the front).
+        assert "Remote" in merged["location"]
+        assert "New York" in merged["location"]
+        raw = json.loads(merged["locations_raw"])
+        assert "Remote" in raw and "New York" in raw
+        # The derived columns the old merge left stale are now populated by the
+        # funnel — proof all five moved together.
+        assert merged["workplace_type"] == "REMOTE"
+        assert merged["locations_structured"] is not None
