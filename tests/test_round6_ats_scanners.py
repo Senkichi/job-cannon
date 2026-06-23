@@ -476,10 +476,10 @@ class TestDispatcherWiring:
         from job_finder.web.ats_identity_reconcile import _verify_live
 
         for platform, probe_target in (
-            ("workable", "job_finder.web.ats_identity_reconcile._probe_workable"),
-            ("jobvite", "job_finder.web.ats_identity_reconcile._probe_jobvite"),
-            ("paylocity", "job_finder.web.ats_identity_reconcile._probe_paylocity"),
-            ("rippling", "job_finder.web.ats_identity_reconcile._probe_rippling"),
+            ("workable", "job_finder.web.ats_prober._probe_workable"),
+            ("jobvite", "job_finder.web.ats_prober._probe_jobvite"),
+            ("paylocity", "job_finder.web.ats_prober._probe_paylocity"),
+            ("rippling", "job_finder.web.ats_prober._probe_rippling"),
         ):
             with patch(probe_target, return_value=True):
                 assert _verify_live(platform, "any") is True

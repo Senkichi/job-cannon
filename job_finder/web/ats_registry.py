@@ -1,0 +1,229 @@
+"""Single source of truth for ATS platform capabilities.
+
+Historically, "which platforms can do X" was re-enumerated by hand in ~12
+places (the ``_verify_live`` if-ladder, ``_verify_fastpath_live``, ``_PROBES``,
+``_FP_PRONE_PLATFORMS``, ``_URL_FASTPATH_PLATFORMS``, ``_RECONCILABLE_PLATFORMS``,
+``_PLAYWRIGHT_SCANNERS``, ``NON_SCANNABLE_PLATFORMS``, posting-id patterns, ...).
+Adding a platform meant editing all of them, and missing one silently degraded
+behaviour with no error — which is exactly how iCIMS / oracle_cloud / ultipro
+ended up with working scanners + probes but a ``_verify_live`` that returned
+``False`` for them, failing promotion 89% of the time.
+
+This module collapses those facets into ONE :class:`PlatformSpec` per platform.
+Every scattered list becomes a comprehension over :data:`PLATFORMS`, and
+``tests/test_ats_registry_completeness.py`` turns any future half-wiring into a
+CI failure (a scannable platform with no probe, a scanner missing from dispatch,
+etc.), exemptable only via an explicit capability flag — never a hardcoded skip.
+
+Import layering (acyclic): this module sits ABOVE the leaves it imports
+(``ats_platforms``, ``ats_prober``) and BELOW its consumers
+(``ats_identity_reconcile``, ``ats_scanner/_probe``, ``ats_reconciler``, ...).
+No leaf imports ``ats_registry``.
+
+Probe dispatch resolves the probe function by NAME on the ``ats_prober`` module
+at CALL time (``getattr(ats_prober, spec.probe_attr)``) rather than capturing a
+reference at import. This preserves the documented test-patch semantics: a test
+that monkeypatches ``ats_prober._probe_lever`` still takes effect.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, replace
+
+import job_finder.web.ats_prober as _prober
+from job_finder.web.ats_platforms import SCANNERS_BY_NAME as _REQUESTS_SCANNERS
+from job_finder.web.ats_platforms._platforms_icims import SCANNER as _ICIMS_SCANNER
+from job_finder.web.ats_platforms._platforms_icims import PlaywrightPlatformScanner
+from job_finder.web.ats_platforms._registry import PlatformScanner
+
+
+@dataclass(frozen=True)
+class PlatformSpec:
+    """One platform's cross-facet capabilities. The dict key in :data:`PLATFORMS`.
+
+    Exactly one fetch transport is set for a scannable platform
+    (``requests_scanner`` xor ``playwright_scanner``); keyword adapters set
+    neither slug-probe nor URL form and declare ``keyword_adapter=True``.
+    """
+
+    name: str
+    # FETCH (attached from the scanner registries below)
+    requests_scanner: PlatformScanner | None = None
+    playwright_scanner: PlaywrightPlatformScanner | None = None
+    # LIVENESS — attribute name on ats_prober, resolved via getattr at call time.
+    probe_attr: str | None = None
+    # CAPABILITY FLAGS (each scattered list/ladder derives from one of these)
+    fp_prone: bool = False
+    speculative_safe: bool = False
+    speculative_order: int | None = None
+    url_fastpath: bool = False
+    reconcilable: bool = False
+    non_scannable: bool = False
+    keyword_adapter: bool = False
+
+
+# --- The registry. ONE entry per platform; capability flags only here. ---------
+# Fetch-scanner objects are attached from the scanner registries afterwards so
+# this table stays readable and cannot drift from SCANNERS_BY_NAME.
+_SPECS: tuple[PlatformSpec, ...] = (
+    # Speculative-ladder platforms (order is load-bearing: fastest JSON first).
+    PlatformSpec(
+        "lever",
+        probe_attr="_probe_lever",
+        speculative_safe=True,
+        speculative_order=0,
+        url_fastpath=True,
+        reconcilable=True,
+    ),
+    PlatformSpec(
+        "greenhouse",
+        probe_attr="_probe_greenhouse",
+        speculative_safe=True,
+        speculative_order=1,
+        url_fastpath=True,
+        reconcilable=True,
+    ),
+    PlatformSpec(
+        "ashby",
+        probe_attr="_probe_ashby",
+        speculative_safe=True,
+        speculative_order=2,
+        url_fastpath=True,
+        reconcilable=True,
+    ),
+    PlatformSpec(
+        "jazzhr",
+        probe_attr="_probe_jazzhr",
+        speculative_safe=True,
+        speculative_order=3,
+        url_fastpath=True,
+    ),
+    PlatformSpec(
+        "pinpoint",
+        probe_attr="_probe_pinpoint",
+        speculative_safe=True,
+        speculative_order=4,
+        url_fastpath=True,
+    ),
+    PlatformSpec(
+        "teamtailor",
+        probe_attr="_probe_teamtailor",
+        speculative_safe=True,
+        speculative_order=5,
+        url_fastpath=True,
+    ),
+    # Reconcile-only enterprise boards (POST APIs; not speculative-probed).
+    PlatformSpec("workday", probe_attr="_probe_workday", url_fastpath=True, reconcilable=True),
+    PlatformSpec(
+        "smartrecruiters",
+        probe_attr="_probe_smartrecruiters",
+        url_fastpath=True,
+        reconcilable=True,
+    ),
+    # FP-prone: evidence/URL-path promotable only (never speculative-guessed).
+    PlatformSpec("bamboohr", probe_attr="_probe_bamboohr", fp_prone=True, url_fastpath=True),
+    PlatformSpec("personio", probe_attr="_probe_personio", fp_prone=True, url_fastpath=True),
+    PlatformSpec("recruitee", probe_attr="_probe_recruitee", fp_prone=True, url_fastpath=True),
+    PlatformSpec("breezy", probe_attr="_probe_breezy", fp_prone=True, url_fastpath=True),
+    # Round-6 URL-fastpath additions.
+    PlatformSpec("workable", probe_attr="_probe_workable", url_fastpath=True),
+    PlatformSpec("paylocity", probe_attr="_probe_paylocity", url_fastpath=True),
+    PlatformSpec("rippling", probe_attr="_probe_rippling", url_fastpath=True),
+    # Probe exists but reconcile-only (not in the speculative fast-path today).
+    PlatformSpec("oracle_cloud", probe_attr="_probe_oracle_cloud"),
+    PlatformSpec("ultipro", probe_attr="_probe_ultipro"),
+    # Playwright-fetch (no requests API); promotable via reconcile.
+    PlatformSpec("icims", playwright_scanner=_ICIMS_SCANNER, probe_attr="_probe_icims"),
+    # Registered stub with a probe but kept at 'miss' (careers_crawler owns it).
+    PlatformSpec("jobvite", probe_attr="_probe_jobvite", non_scannable=True),
+    # Keyword-search adapters: scanner but no slug-probe and no URL form. The
+    # explicit capability that exempts them from the scannable-must-have-probe
+    # guard (never a hardcoded skip-list).
+    PlatformSpec("amazon", keyword_adapter=True),
+    PlatformSpec("microsoft", keyword_adapter=True),
+    PlatformSpec("eightfold", keyword_adapter=True),
+    # Registered stub, no public API (returns []).
+    PlatformSpec("google", non_scannable=True),
+)
+
+
+def _attach_scanners(specs: tuple[PlatformSpec, ...]) -> dict[str, PlatformSpec]:
+    """Bind each spec to its requests-scanner from SCANNERS_BY_NAME (the owner of
+    the scanner objects). iCIMS has no requests scanner (playwright only)."""
+    out: dict[str, PlatformSpec] = {}
+    for spec in specs:
+        rs = _REQUESTS_SCANNERS.get(spec.name)
+        out[spec.name] = replace(spec, requests_scanner=rs) if rs is not None else spec
+    return out
+
+
+PLATFORMS: dict[str, PlatformSpec] = _attach_scanners(_SPECS)
+
+
+# --- Liveness dispatch (call-time getattr preserves monkeypatch semantics) -----
+def _resolve_probe(probe_attr: str):
+    return getattr(_prober, probe_attr)
+
+
+def verify_live(platform: str, slug: str) -> bool:
+    """True if ``slug`` resolves to a live board on ``platform``.
+
+    Table lookup into the registry, replacing the former hand-maintained
+    if-ladder in ``ats_identity_reconcile``. Returns False for unknown platforms
+    or platforms with no probe (keyword adapters / pure stubs)."""
+    spec = PLATFORMS.get(platform)
+    if spec is None or spec.probe_attr is None:
+        return False
+    return bool(_resolve_probe(spec.probe_attr)(slug))
+
+
+def verify_fastpath_live(platform: str, slug: str) -> bool:
+    """Liveness gate for the speculative prober's B2 URL-evidence fast-path.
+
+    Same dispatch as :func:`verify_live` but gated on ``url_fastpath`` so only
+    the audited fast-path set is verifiable here."""
+    spec = PLATFORMS.get(platform)
+    if spec is None or not spec.url_fastpath or spec.probe_attr is None:
+        return False
+    return bool(_resolve_probe(spec.probe_attr)(slug))
+
+
+# --- Derived views (single source for every formerly-hand-maintained list) -----
+SCANNERS_BY_NAME: dict[str, PlatformScanner] = {
+    n: s.requests_scanner for n, s in PLATFORMS.items() if s.requests_scanner is not None
+}
+PLAYWRIGHT_SCANNERS: dict[str, PlaywrightPlatformScanner] = {
+    n: s.playwright_scanner for n, s in PLATFORMS.items() if s.playwright_scanner is not None
+}
+PLAYWRIGHT_PLATFORMS: frozenset[str] = frozenset(PLAYWRIGHT_SCANNERS)
+NON_SCANNABLE_PLATFORMS: frozenset[str] = frozenset(
+    n for n, s in PLATFORMS.items() if s.non_scannable
+)
+FP_PRONE_PLATFORMS: frozenset[str] = frozenset(n for n, s in PLATFORMS.items() if s.fp_prone)
+URL_FASTPATH_PLATFORMS: frozenset[str] = frozenset(
+    n for n, s in PLATFORMS.items() if s.url_fastpath
+)
+RECONCILABLE_PLATFORMS: frozenset[str] = frozenset(
+    n for n, s in PLATFORMS.items() if s.reconcilable
+)
+KEYWORD_ADAPTER_PLATFORMS: frozenset[str] = frozenset(
+    n for n, s in PLATFORMS.items() if s.keyword_adapter
+)
+
+# Speculative ladder: ordered (platform, probe_fn) pairs, fastest first. Probe
+# refs captured here (import-time) match the prior _PROBES behaviour exactly.
+SPECULATIVE_PROBES: list[tuple[str, object]] = [
+    (s.name, _resolve_probe(s.probe_attr))
+    for s in sorted(
+        (s for s in PLATFORMS.values() if s.speculative_safe and s.probe_attr is not None),
+        key=lambda s: s.speculative_order if s.speculative_order is not None else 1_000,
+    )
+]
+
+# The scannable population the completeness guard reasons over: anything with a
+# fetch transport (requests or playwright).
+SCANNABLE_PLATFORMS: frozenset[str] = frozenset(
+    n
+    for n, s in PLATFORMS.items()
+    if s.requests_scanner is not None or s.playwright_scanner is not None
+)
