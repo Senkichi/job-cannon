@@ -1,5 +1,6 @@
 """Jobs blueprint -- full Job Board routes with HTMX partials."""
 
+import json
 import logging
 import time as _time
 from datetime import UTC, datetime
@@ -680,15 +681,13 @@ def collapse(dedup_key: str):
     if job is None:
         return "", 404
 
-    import json as _json
-
     response = make_response(
         render_template(
             "jobs/_row_collapse_response.html",
             job=job,
         )
     )
-    response.headers["HX-Trigger-After-Settle"] = _json.dumps(
+    response.headers["HX-Trigger-After-Settle"] = json.dumps(
         {"job-collapsed": {"dedup_key": dedup_key}}
     )
     return response
@@ -736,13 +735,26 @@ def update_status(dedup_key: str):
 
     if new_status == "archived":
         # OOB update: refresh the archived count badge.
-        # Do NOT set HX-Trigger: jobs-updated — it causes tbody refetch
-        # that kills the in-flight archive fadeout animation.
         archived_count = conn.execute(
             "SELECT COUNT(*) FROM jobs WHERE pipeline_status = 'archived'"
         ).fetchone()[0]
         oob_counter = f'<span id="archived-count" hx-swap-oob="innerHTML">{archived_count}</span>'
         resp = make_response(status_html + oob_counter)
+
+        # Two After-Settle events, emitted as a JSON map so both can ride one
+        # header:
+        #   • archived-section-changed (bug #11): reveal #archived-section the
+        #     first time the count crosses 0→1. The section is now always in the
+        #     DOM (hidden when empty) so the #archived-count OOB target exists;
+        #     this event clears the `hidden` class. Fires for BOTH entry points.
+        #   • jobs-updated (bug #10): row removal for the inline status dropdown.
+        #     The Archive *button* removes the row via archiveRow(this)'s fadeout
+        #     and opts OUT via the archive_via_button sentinel — emitting
+        #     jobs-updated would refetch the tbody and kill the animation.
+        events: dict[str, object] = {"archived-section-changed": {"count": archived_count}}
+        if request.form.get("archive_via_button") != "1":
+            events["jobs-updated"] = True
+        resp.headers["HX-Trigger-After-Settle"] = json.dumps(events)
     elif new_status in ("dismissed", "withdrawn", "rejected"):
         # Trigger table re-fetch so the row disappears from the filtered view.
         # Unlike archived (which has a fadeout animation), these statuses

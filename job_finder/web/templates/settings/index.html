@@ -59,6 +59,7 @@
             <label class="block text-sm font-medium text-slate-300 mb-1">Target Locations <span class="text-slate-500 font-normal">(one per line)</span></label>
             <textarea name="target_locations" rows="5"
                       class="w-full bg-slate-900 border border-slate-600 rounded px-3 py-2 text-sm text-slate-100 focus:border-violet-500 focus:outline-none resize-y font-mono">{{ config.get('profile', {}).get('target_locations', []) | join('\n') }}</textarea>
+            <p class="text-xs text-slate-500 mt-1">Cities, regions, or countries only. To say you want remote roles, use the Work Arrangement toggle below &mdash; "Remote" typed here is stripped on save.</p>
           </div>
           <div>
             <label class="block text-sm font-medium text-slate-300 mb-1">Minimum Salary (USD/year)</label>
@@ -71,6 +72,30 @@
             <textarea name="industries" rows="4"
                       class="w-full bg-slate-900 border border-slate-600 rounded px-3 py-2 text-sm text-slate-100 focus:border-violet-500 focus:outline-none resize-y font-mono">{{ config.get('profile', {}).get('industries', []) | join('\n') }}</textarea>
           </div>
+        </div>
+
+        <div>
+          <label class="block text-sm font-medium text-slate-300 mb-1">Work Arrangement</label>
+          <p class="text-xs text-slate-500 mb-2">Your remote / hybrid / on-site preference (used for fit scoring). This is the canonical home for "remote" &mdash; it is a separate signal from the geographies above.</p>
+          {% set current_arrangement = config.get('profile', {}).get('work_arrangement', 'remote') %}
+          <div class="flex gap-4">
+            {% for opt in [('remote', 'Remote'), ('hybrid', 'Hybrid'), ('on-site', 'On-site')] %}
+            <label class="flex items-center gap-1.5 cursor-pointer">
+              <input type="radio" name="work_arrangement" value="{{ opt[0] }}"
+                     {% if current_arrangement == opt[0] %}checked{% endif %}
+                     class="accent-violet-500">
+              <span class="text-sm text-slate-200">{{ opt[1] }}</span>
+            </label>
+            {% endfor %}
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-sm font-medium text-slate-300 mb-1">Home Country <span class="text-slate-500 font-normal">(2-letter ISO code, e.g. US)</span></label>
+          <input type="text" name="home_country" maxlength="2"
+                 value="{{ config.get('profile', {}).get('home_country', '') }}"
+                 class="w-full md:w-1/2 bg-slate-900 border border-slate-600 rounded px-3 py-2 text-sm text-slate-100 focus:border-violet-500 focus:outline-none uppercase">
+          <p class="text-xs text-slate-500 mt-1">Used by location-fit scoring to distinguish remote-in-country from remote-abroad roles. Leave blank for no country preference.</p>
         </div>
 
         <div class="grid grid-cols-2 gap-4">
@@ -94,6 +119,50 @@
       </div>
     </div>
 
+    <!-- AI Provider section -->
+    <div class="bg-slate-800 rounded-lg overflow-hidden">
+      <button type="button" onclick="toggleSection(this)"
+              class="w-full flex items-center justify-between px-6 py-4 text-left hover:bg-slate-750 transition-colors">
+        <div class="flex items-center gap-3">
+          <svg class="w-5 h-5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+          </svg>
+          <span class="font-semibold text-slate-100">AI Provider</span>
+        </div>
+        <svg class="section-chevron w-4 h-4 text-slate-400 transition-transform duration-200 rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+        </svg>
+      </button>
+      <div class="section-body border-t border-slate-700 p-6 space-y-4">
+        <div>
+          <label class="block text-sm font-medium text-slate-300 mb-1">Primary provider</label>
+          <p class="text-xs text-slate-500 mb-2">Head of the scoring cascade (<code class="text-slate-400">providers.primary</code>). Fallback chain, per-provider model overrides, and daily limits remain config.yaml-only.</p>
+          {% set current_primary = config.get('providers', {}).get('primary', '') %}
+          <select name="provider_primary"
+                  class="w-full bg-slate-900 border border-slate-600 rounded px-3 py-2 text-sm text-slate-100 focus:border-violet-500 focus:outline-none">
+            {% if not current_primary %}<option value="" selected>— choose a provider —</option>{% endif %}
+            {% for pkey, plabel in selectable_providers %}
+            <option value="{{ pkey }}" {% if current_primary == pkey %}selected{% endif %}>{{ plabel }}</option>
+            {% endfor %}
+          </select>
+          {% if not current_primary %}
+          <p class="text-xs text-amber-400 mt-1">No provider configured — AI scoring is disabled until you pick one (and, for a BYO provider, add its key below).</p>
+          {% endif %}
+        </div>
+        <div class="grid grid-cols-2 gap-4">
+          {% for pkey, plabel in provider_key_fields %}
+          <div>
+            <label class="block text-sm font-medium text-slate-300 mb-1">{{ plabel }}</label>
+            <input type="password" name="provider_key_{{ pkey }}" autocomplete="off"
+                   class="w-full bg-slate-900 border border-slate-600 rounded px-3 py-2 text-sm text-slate-100 focus:border-violet-500 focus:outline-none"
+                   placeholder="{% if secret_set and secret_set.get('providers.api_keys.' ~ pkey) %}(set — type to replace){% else %}(not set){% endif %}">
+          </div>
+          {% endfor %}
+        </div>
+        <p class="text-xs text-slate-500">Keys are stored in your OS keyring, never written to config.yaml. Leave a field blank to keep the existing key. The $0 providers (Ollama, Claude Code CLI, Gemini CLI) need no key.</p>
+      </div>
+    </div>
+
     <!-- Sources section -->
     <div class="bg-slate-800 rounded-lg overflow-hidden">
       <button type="button" onclick="toggleSection(this)"
@@ -110,6 +179,26 @@
         </svg>
       </button>
       <div class="section-body border-t border-slate-700 p-6 space-y-6">
+        <!-- Ingestion cadence -->
+        <div>
+          <h3 class="text-sm font-semibold text-slate-200 mb-3 flex items-center gap-2">
+            <span class="w-2 h-2 rounded-full bg-violet-400 inline-block"></span>
+            Ingestion cadence
+          </h3>
+          {% set current_cadence = config.get('scheduler', {}).get('cadence_preset', 'standard') %}
+          <div class="flex gap-4">
+            {% for ckey, clabel in [('light', 'Light'), ('standard', 'Standard'), ('heavy', 'Heavy')] %}
+            <label class="flex items-center gap-1.5 cursor-pointer">
+              <input type="radio" name="cadence_preset" value="{{ ckey }}"
+                     {% if current_cadence == ckey %}checked{% endif %}
+                     class="accent-violet-500">
+              <span class="text-sm text-slate-200">{{ clabel }}</span>
+            </label>
+            {% endfor %}
+          </div>
+          <p class="text-xs text-slate-500 mt-1">How often sources are ingested and enrichment/backfill run. Takes effect after an app restart — cron jobs are registered at startup.</p>
+        </div>
+
         <!-- Gmail -->
         <div>
           <h3 class="text-sm font-semibold text-slate-200 mb-3 flex items-center gap-2">
@@ -655,6 +744,31 @@
                  value="{{ config.get('scoring', {}).get('min_score_threshold', DEFAULT_MIN_SCORE_THRESHOLD) }}"
                  class="w-24 bg-slate-900 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:border-violet-500 focus:outline-none text-right font-mono">
           <span class="text-xs text-slate-500">Jobs below this score are hidden</span>
+        </div>
+
+        <div class="pt-2 border-t border-slate-700 mt-2">
+          <span class="text-sm text-slate-300 font-medium">Apply-verdict thresholds</span>
+          <p class="text-xs text-slate-500 mb-2">Govern which scored jobs earn the "apply" verdict vs "low signal". The defaults suit most users; blank a field to keep its current value.</p>
+          <div class="grid grid-cols-3 gap-3">
+            <div>
+              <label class="block text-xs text-slate-400 mb-1">Low-signal JD chars</label>
+              <input type="number" name="low_signal_jd_chars" min="0" step="100"
+                     value="{{ config.get('scoring', {}).get('low_signal_jd_chars', 1500) }}"
+                     class="w-full bg-slate-900 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:border-violet-500 focus:outline-none text-right font-mono">
+            </div>
+            <div>
+              <label class="block text-xs text-slate-400 mb-1">Apply mean floor</label>
+              <input type="number" name="apply_mean_floor" min="1" max="5" step="0.1"
+                     value="{{ config.get('scoring', {}).get('apply_mean_floor', 3.5) }}"
+                     class="w-full bg-slate-900 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:border-violet-500 focus:outline-none text-right font-mono">
+            </div>
+            <div>
+              <label class="block text-xs text-slate-400 mb-1">Min strong axes</label>
+              <input type="number" name="apply_min_strong_axes" min="0" max="6" step="1"
+                     value="{{ config.get('scoring', {}).get('apply_min_strong_axes', 3) }}"
+                     class="w-full bg-slate-900 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:border-violet-500 focus:outline-none text-right font-mono">
+            </div>
+          </div>
         </div>
       </div>
     </div>

@@ -39,19 +39,6 @@ profile:
   skills:
     - Python
     - SQL
-  # Job archetype classification — keyword-based categorization for scoring context.
-  # Each archetype matches keywords against title+description (case-insensitive).
-  # weight_overrides can adjust scoring emphasis per archetype (empty = no override).
-  job_archetypes:
-    platform_engineering:
-      keywords: ["platform", "infrastructure", "kubernetes", "devops"]
-      weight_overrides: {}
-    ml_engineering:
-      keywords: ["machine learning", "ml", "model serving", "feature store"]
-      weight_overrides: {}
-    analytics_lead:
-      keywords: ["analytics", "experimentation", "stakeholder", "roadmap"]
-      weight_overrides: {}
 
 # --- Job sources ---
 sources:

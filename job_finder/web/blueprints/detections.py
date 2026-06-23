@@ -136,11 +136,17 @@ def dismiss(detection_id: int):
     if row is None:
         return "", 404
 
-    # Resolve the detection as dismissed (pipeline_status unchanged)
+    # Resolve the detection as dismissed (pipeline_status unchanged).
+    # Mirror confirm()'s error handling: on failure return a non-200 so HTMX
+    # does NOT perform the card-removal swap. Previously this swallowed the
+    # exception and still returned the removal response, so a failed dismiss
+    # silently dropped the card + decremented the badge while the row stayed
+    # 'pending' in the DB and reappeared on the next full page load.
     try:
         resolve_detection(conn, detection_id, "dismissed")
     except Exception as e:
         logger.error("Failed to dismiss detection %d: %s", detection_id, e)
+        return f"Error: could not dismiss detection — {e}", 500
 
     logger.info("Detection %d dismissed", detection_id)
     # Empty primary swap removes the card; OOB header re-renders the badge

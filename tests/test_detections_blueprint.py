@@ -6,6 +6,7 @@ including status updates, resolution tracking, and dashboard display.
 
 import json
 from datetime import datetime
+from unittest.mock import patch
 
 import pytest
 
@@ -249,6 +250,49 @@ class TestDismissAction:
         response = client.post("/detections/9999/dismiss")
 
         assert response.status_code == 404
+
+    def test_dismiss_resolve_failure_returns_500_and_keeps_pending(self, client_with_db):
+        """When resolve_detection raises, dismiss must return non-200 so HTMX does
+        NOT remove the card, and the detection must stay 'pending' in the DB.
+
+        Regression: the route previously swallowed the exception and still
+        returned the removal/OOB response (200), so a failed dismiss silently
+        dropped the card while the row reappeared on the next full page load.
+        """
+        client, db_path, conn = client_with_db
+        job_id = "stripe|senior data scientist|remote"
+        detection_id = _insert_pending_detection(conn, job_id, "rejection")
+
+        with patch(
+            "job_finder.web.blueprints.detections.resolve_detection",
+            side_effect=RuntimeError("boom"),
+        ):
+            response = client.post(f"/detections/{detection_id}/dismiss")
+
+        # Non-200 → HTMX skips the outerHTML swap (card not removed).
+        assert response.status_code == 500
+        # The detection is still pending — the dismiss did not commit.
+        row = conn.execute(
+            "SELECT status FROM pipeline_detections WHERE id = ?",
+            (detection_id,),
+        ).fetchone()
+        assert row is not None
+        assert row["status"] == "pending"
+
+    def test_dismiss_success_returns_200(self, client_with_db):
+        """The happy path still returns 200 (so HTMX performs the removal swap)."""
+        client, db_path, conn = client_with_db
+        job_id = "stripe|senior data scientist|remote"
+        detection_id = _insert_pending_detection(conn, job_id, "rejection")
+
+        response = client.post(f"/detections/{detection_id}/dismiss")
+
+        assert response.status_code == 200
+        row = conn.execute(
+            "SELECT status FROM pipeline_detections WHERE id = ?",
+            (detection_id,),
+        ).fetchone()
+        assert row["status"] == "dismissed"
 
     def test_dismiss_oob_badge_reflects_decremented_count(self, client_with_db):
         """Regression: the OOB header must report the new (decremented) count.

@@ -506,11 +506,18 @@ def imap_credentials():
             )
             return redirect(url_for("onboarding.done"))
 
+        # Bug #9: echo the submitted app_password back into the re-rendered form
+        # on every failure path so a retry doesn't force the user to re-type the
+        # full 16-char password. Deliberate tradeoff: the password lands at rest
+        # in the returned HTML, which is acceptable here because onboarding is a
+        # local-only, single-user wizard served on localhost (no shared session,
+        # no remote transit). Do NOT copy this pattern to multi-user contexts.
         if not email or not app_password:
             return render_template(
                 "onboarding/imap_credentials.html",
                 error="Both Gmail address and app password are required.",
                 email=email,
+                app_password=app_password,
                 **_step("imap_credentials"),
             )
 
@@ -521,6 +528,7 @@ def imap_credentials():
                 "onboarding/imap_credentials.html",
                 error="That doesn't look like a valid email address.",
                 email=email,
+                app_password=app_password,
                 **_step("imap_credentials"),
             )
 
@@ -528,11 +536,12 @@ def imap_credentials():
             host="imap.gmail.com", port=993, email=email, app_password=app_password
         )
         if not result.ok:
-            # D-08: re-render with error + preserved email; HTTP 200 (NOT 302)
+            # D-08: re-render with error + preserved email + password; HTTP 200 (NOT 302)
             return render_template(
                 "onboarding/imap_credentials.html",
                 error=result.message,
                 email=email,
+                app_password=app_password,
                 **_step("imap_credentials"),
             )
 

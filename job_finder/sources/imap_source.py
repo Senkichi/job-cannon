@@ -27,10 +27,10 @@ import job_finder.web.autoheal.override_loader as _override_loader
 from job_finder.models import Job
 from job_finder.parsers import extract_primary, extract_with_fallback
 from job_finder.sources.gmail_source import (
-    SENDER_LABEL,
-    SENDER_PARSERS,
     _archive_parse_failure,
     _should_archive_failure,
+    resolve_sender_label,
+    resolve_sender_parsers,
 )
 from job_finder.web.autoheal.recipe_extractor import RecipeExtractor
 
@@ -106,7 +106,10 @@ class ImapSource:
         self.extraction_records: list[dict] = []
 
     def fetch_jobs(
-        self, lookback_days: int = 7, processed_message_ids: set[str] | None = None
+        self,
+        lookback_days: int = 7,
+        processed_message_ids: set[str] | None = None,
+        config: dict | None = None,
     ) -> tuple[list[Job], list[str]]:
         r"""Fetch and parse job alert emails from IMAP.
 
@@ -115,6 +118,9 @@ class ImapSource:
                 IMAP uses UNSEEN flag for dedup, not time-based filtering.
             processed_message_ids: Ignored - kept for interface compatibility.
                 IMAP uses \Seen flag for dedup, not external ID tracking.
+            config: Full config dict (or None). Used to resolve user-overridden
+                sender FROM addresses (``sources.gmail.senders``); None uses the
+                built-in defaults unchanged.
 
         Returns:
             Tuple of (list of Job objects, list of processed UID strings).
@@ -122,8 +128,13 @@ class ImapSource:
         all_jobs: list[Job] = []
         processed_uids: list[str] = []
 
-        # Build scoped sender list once — keyed identically to SENDER_PARSERS.
-        known_senders = list(SENDER_PARSERS.keys())
+        # Resolve sender maps once so the FROM scope, parser match, and label
+        # lookup all agree on the user-overridden addresses (sources.gmail.senders).
+        sender_parsers = resolve_sender_parsers(config)
+        sender_label = resolve_sender_label(config)
+
+        # Build scoped sender list once — keyed identically to the resolved parsers.
+        known_senders = list(sender_parsers.keys())
         search_criteria = _build_from_search_criteria(known_senders)
 
         try:
@@ -168,7 +179,7 @@ class ImapSource:
                     # Find matching parser
                     sender_lower = sender.lower()
                     parser_fn = None
-                    for sender_key, parser in SENDER_PARSERS.items():
+                    for sender_key, parser in sender_parsers.items():
                         if sender_key in sender_lower:
                             parser_fn = parser
                             break
@@ -190,7 +201,7 @@ class ImapSource:
                         # From header: a display-name From ("LinkedIn <jobalerts-…>")
                         # previously missed the SENDER_LABEL lookup, so the gate never
                         # fired and records landed under a different key than gmail's.
-                        _label = SENDER_LABEL.get(sender_key, sender_key)
+                        _label = sender_label.get(sender_key, sender_key)
                         _recipe = _override_loader.html_recipe(_label)
                         _legacy_count = None
                         _extractor = "legacy"

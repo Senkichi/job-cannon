@@ -32,6 +32,7 @@ import threading
 from collections.abc import Callable
 
 from job_finder.db import JobAssessment, persist_job_assessment
+from job_finder.web import user_data_dirs
 
 logger = logging.getLogger(__name__)
 
@@ -64,17 +65,23 @@ def load_scoring_profile(config: dict) -> dict:
     profile_path = (
         config.get("scoring", {}).get("profile_path")
         or config.get("profile_path")
-        or "experience_profile.json"
+        or str(user_data_dirs.profile_path())
     )
     return load_profile(profile_path)
 
 
 def _profile_path(config: dict) -> str:
-    """Single source of truth for the profile file path."""
+    """Single source of truth for the profile file path.
+
+    Defaults to user_data_dirs.profile_path() — the same absolute location the
+    onboarding wizard writes and the Profile editor reads — instead of a bare
+    CWD-relative string, so a packaged/pipx install doesn't score against an
+    empty file that lives somewhere other than where onboarding saved it.
+    """
     return (
         config.get("scoring", {}).get("profile_path")
         or config.get("profile_path")
-        or "experience_profile.json"
+        or str(user_data_dirs.profile_path())
     )
 
 

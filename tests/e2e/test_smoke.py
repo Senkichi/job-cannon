@@ -16,8 +16,10 @@ def test_jobs_page_loads(page: Page, live_server: str):
     """Jobs page renders with the job table and sample data."""
     page.goto(f"{live_server}/jobs")
     expect(page).to_have_title("Job Board — Job Cannon")
-    # Job table should be present
-    table = page.locator("table")
+    # Active job board table should be present. Scope to #jobs-table specifically:
+    # the page also contains the (possibly hidden) archived-jobs table, so a bare
+    # locator("table") matches 2 elements under Playwright strict mode.
+    table = page.locator("#jobs-table")
     expect(table).to_be_visible()
     # Sample job should appear
     expect(page.get_by_text("Senior Data Scientist")).to_be_visible()

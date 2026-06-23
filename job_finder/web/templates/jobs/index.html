@@ -264,7 +264,7 @@
 
   <!-- Job table — DESIGN DECISION #4: stays a dense <table>, wrapped + rounded. -->
   <div class="overflow-x-auto rounded-xl border border-slate-700 bg-slate-800">
-    <table class="text-xs text-left border-collapse w-full" style="table-layout: fixed;">
+    <table id="jobs-table" class="text-xs text-left border-collapse w-full" style="table-layout: fixed;">
       <colgroup>
         <col style="width: 8%;">
         <col style="width: 26%;">
@@ -315,9 +315,12 @@
     </table>
   </div>
 
-  {% if archived_count > 0 %}
-  <!-- Archived section — UNCHANGED behavior (lazy-load on first expand). -->
-  <div id="archived-section" class="mt-6">
+  {# Archived section — ALWAYS rendered (bug #11): the #archived-count OOB target
+     must exist even at 0 so archiving the first-ever job (0→1) reveals it. Hidden
+     via `hidden` when empty; the update_status archived branch clears `hidden` via
+     an OOB swap on #archived-section when the count crosses to > 0. Body still
+     lazy-loads on first expand. #}
+  <div id="archived-section" class="mt-6{% if archived_count == 0 %} hidden{% endif %}">
     <button type="button" onclick="toggleArchived()"
             aria-label="Toggle archived jobs section" aria-expanded="false" aria-controls="archived-body" id="archived-toggle-btn"
             class="w-full flex items-center gap-3 px-4 py-3 bg-slate-800/70 hover:bg-slate-800 border border-slate-700 rounded-lg transition-colors cursor-pointer">
@@ -348,7 +351,6 @@
       </div>
     </div>
   </div>
-  {% endif %}
 
 </div>
 {% endblock %}
@@ -577,6 +579,19 @@ function restoreFilters() {
 }
 document.getElementById('filter-form').addEventListener('change', saveFilters);
 document.addEventListener('DOMContentLoaded', restoreFilters);
+
+/* Reveal/hide the Archived Jobs section as its count crosses 0 (bug #11).
+   The section is always in the DOM (so the #archived-count OOB target exists),
+   but is `hidden` while empty. update_status' archived branch emits this event
+   after settling the OOB count swap, so archiving the first-ever job reveals
+   the section without a full reload. */
+document.body.addEventListener('archived-section-changed', function (evt) {
+  var section = document.getElementById('archived-section');
+  if (!section) return;
+  var count = evt.detail && typeof evt.detail.count === 'number' ? evt.detail.count : null;
+  if (count === null) return;
+  section.classList.toggle('hidden', count === 0);
+});
 
 /* Smooth-scroll back to the compact row when its expanded view collapses. UNCHANGED. */
 document.body.addEventListener('job-collapsed', function (evt) {

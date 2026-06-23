@@ -63,6 +63,21 @@ def db_path() -> Path:
     return user_data_root() / "jobs.db"
 
 
+def profile_path() -> Path:
+    """Return the path to the experience_profile.json file.
+
+    Single source of truth for the candidate experience profile, mirroring
+    config_path()/db_path(). The onboarding wizard writes here, and both the
+    Profile editor and the scorer resolve the same location, so a packaged /
+    pipx install (where launch-CWD != user-data root) no longer splits the
+    profile across two files. Respects JOB_CANNON_USER_DATA_DIR.
+
+    Returns:
+        Path to experience_profile.json under the user data root.
+    """
+    return user_data_root() / "experience_profile.json"
+
+
 def logs_path() -> Path:
     """Return the path to the app.log file.
 

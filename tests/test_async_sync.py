@@ -221,11 +221,20 @@ class TestAsyncSync:
         assert "text-red-400" in body
 
     def test_sync_dismiss_returns_sync_button(self, app_with_db):
-        """GET /dashboard/sync/dismiss returns HTML containing the Sync Now button form."""
+        """GET /dashboard/sync/dismiss (HX-Request) returns the Sync Now button fragment."""
         app, db_path = app_with_db
         with app.test_client() as client:
-            resp = client.get("/dashboard/sync/dismiss")
+            resp = client.get("/dashboard/sync/dismiss", headers={"HX-Request": "true"})
         assert resp.status_code == 200
         body = resp.data.decode()
         assert "sync-status" in body
         assert "sync/start" in body
+
+    def test_sync_dismiss_non_htmx_redirects(self, app_with_db):
+        """Bug #12: a header-less GET (direct browser hit / prefetch) redirects to the
+        dashboard instead of rendering the bare, unstyled fragment (@htmx_fragment guard)."""
+        app, db_path = app_with_db
+        with app.test_client() as client:
+            resp = client.get("/dashboard/sync/dismiss")
+        assert resp.status_code == 302
+        assert "/dashboard" in resp.headers["Location"]
