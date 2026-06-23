@@ -129,13 +129,20 @@ def test_limit_flags_include_kill_on_job_close(win32_mod):
     assert info["BasicLimitInformation"]["LimitFlags"] & _JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
 
 
-def test_limit_flags_include_silent_breakaway_ok(win32_mod):
-    """SILENT_BREAKAWAY_OK flag must be set via SetInformationJobObject."""
+def test_limit_flags_exclude_silent_breakaway_ok(win32_mod):
+    """SILENT_BREAKAWAY_OK must NOT be set (PR4 regression guard).
+
+    The flag let spawned children (Ollama) silently leave the job, so
+    KILL_ON_JOB_CLOSE never reaped them on the owner's death — the root of the
+    accumulating-orphan bug. Children must stay in the job to be reaped.
+    """
     mod, win32job, _win32api, _job_handle = win32_mod
     mod.install_kill_on_exit()
     _, args, _ = win32job.SetInformationJobObject.mock_calls[0]
     info = args[2]
-    assert info["BasicLimitInformation"]["LimitFlags"] & _JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK
+    assert not (
+        info["BasicLimitInformation"]["LimitFlags"] & _JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK
+    )
 
 
 def test_assign_process_to_job_object_uses_get_current_process(win32_mod):

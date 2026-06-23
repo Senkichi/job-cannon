@@ -16,6 +16,7 @@ from pathlib import Path
 
 import pytest
 
+import job_finder.web._pidfile as _pidfile_mod
 from job_finder.web._pidfile import (
     _claim_slug,
     _lock_handles,
@@ -23,6 +24,8 @@ from job_finder.web._pidfile import (
     acquire_pidfile,
     claim_paths,
     holds_claim,
+    read_owned_pids,
+    record_owned_pid,
 )
 
 
@@ -30,6 +33,23 @@ from job_finder.web._pidfile import (
 def tmp_lock_dir(tmp_path):
     """Provide a fresh temp directory for lock + meta files."""
     return tmp_path
+
+
+@pytest.fixture
+def isolated_pidfile_state():
+    """Snapshot/clear/restore the process-global pidfile state (``_lock_handles``
+    and ``_active_meta_path``) so claim/owned-pid assertions are not polluted by
+    locks other tests left held, and so leaked state cannot leak back out."""
+    saved_handles = dict(_lock_handles)
+    saved_meta = _pidfile_mod._active_meta_path
+    _lock_handles.clear()
+    _pidfile_mod._active_meta_path = None
+    try:
+        yield
+    finally:
+        _lock_handles.clear()
+        _lock_handles.update(saved_handles)
+        _pidfile_mod._active_meta_path = saved_meta
 
 
 def _make_paths(base: Path):
@@ -224,27 +244,15 @@ class TestHoldsClaim:
     """holds_claim() is the single fact the scheduler consults: does THIS
     process hold a liveness lock?"""
 
-    @pytest.fixture
-    def isolated_handles(self):
-        """Snapshot/clear/restore the process-global _lock_handles so these
-        assertions are not polluted by locks other tests left held."""
-        saved = dict(_lock_handles)
-        _lock_handles.clear()
-        try:
-            yield
-        finally:
-            _lock_handles.clear()
-            _lock_handles.update(saved)
-
-    def test_false_when_no_lock_held(self, isolated_handles):
+    def test_false_when_no_lock_held(self, isolated_pidfile_state):
         assert holds_claim() is False
 
-    def test_true_after_acquire(self, isolated_handles, tmp_path):
+    def test_true_after_acquire(self, isolated_pidfile_state, tmp_path):
         lock, meta = claim_paths(tmp_path, "127.0.0.1", 5000)
         acquire_pidfile(lock, meta, {"pid": os.getpid()})
         assert holds_claim() is True
 
-    def test_false_after_failed_acquire(self, isolated_handles, tmp_path):
+    def test_false_after_failed_acquire(self, isolated_pidfile_state, tmp_path):
         """A contended (failed) acquire must NOT make holds_claim() true — the
         loser is not the live instance and must not start a scheduler."""
         import portalocker
@@ -261,6 +269,76 @@ class TestHoldsClaim:
             assert holds_claim() is False
         finally:
             foreign.close()
+
+
+class TestRecordOwnedPid:
+    """record_owned_pid() persists spawned-child identity to the sidecar so a
+    later launch can reap a reparented orphan (PR4)."""
+
+    def test_noop_when_not_lock_holder(self, isolated_pidfile_state, tmp_path):
+        """With no claim held, recording must NOT write anything — a test or
+        secondary process never scribbles owned PIDs."""
+        # _active_meta_path is None (fixture cleared it).
+        record_owned_pid(4242, name="ollama.exe", create_time=123.0)
+        assert not list(tmp_path.glob("server*.json"))
+
+    def test_records_pid_with_identity(self, isolated_pidfile_state, tmp_path):
+        lock, meta = claim_paths(tmp_path, "127.0.0.1", 5000)
+        acquire_pidfile(lock, meta, {"pid": os.getpid()})  # sets _active_meta_path
+
+        record_owned_pid(4242, name="ollama.exe", create_time=987.5)
+
+        owned = read_owned_pids(meta)
+        assert owned == [{"pid": 4242, "name": "ollama.exe", "create_time": 987.5}]
+
+    def test_dedups_repeated_pid(self, isolated_pidfile_state, tmp_path):
+        lock, meta = claim_paths(tmp_path, "127.0.0.1", 5000)
+        acquire_pidfile(lock, meta, {"pid": os.getpid()})
+
+        record_owned_pid(4242, name="ollama.exe", create_time=1.0)
+        record_owned_pid(4242, name="ollama.exe", create_time=1.0)
+        record_owned_pid(5151, name="ollama.exe", create_time=2.0)
+
+        pids = [o["pid"] for o in read_owned_pids(meta)]
+        assert pids == [4242, 5151]
+
+    def test_preserves_existing_metadata_fields(self, isolated_pidfile_state, tmp_path):
+        lock, meta = claim_paths(tmp_path, "127.0.0.1", 5000)
+        acquire_pidfile(lock, meta, {"pid": 111, "url": "http://127.0.0.1:5000"})
+
+        record_owned_pid(4242, name="ollama.exe", create_time=1.0)
+
+        data = json.loads(meta.read_text(encoding="utf-8"))
+        assert data["pid"] == 111
+        assert data["url"] == "http://127.0.0.1:5000"
+        assert data["owned_pids"][0]["pid"] == 4242
+
+
+class TestReadOwnedPids:
+    def test_empty_for_missing_sidecar(self, tmp_path):
+        assert read_owned_pids(tmp_path / "server-x.json") == []
+
+    def test_empty_when_no_owned_pids_key(self, tmp_path):
+        p = tmp_path / "server-x.json"
+        p.write_text(json.dumps({"pid": 1}), encoding="utf-8")
+        assert read_owned_pids(p) == []
+
+    def test_filters_malformed_entries(self, tmp_path):
+        p = tmp_path / "server-x.json"
+        p.write_text(
+            json.dumps(
+                {
+                    "owned_pids": [
+                        {"pid": 1, "name": "a"},
+                        "garbage",
+                        {"name": "no pid"},
+                        {"pid": "x"},
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+        assert read_owned_pids(p) == [{"pid": 1, "name": "a"}]
 
 
 class TestReadMetadata:

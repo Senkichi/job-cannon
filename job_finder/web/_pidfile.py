@@ -45,6 +45,12 @@ logger = logging.getLogger(__name__)
 # Never close handles stored here during normal operation.
 _lock_handles: dict[Path, object] = {}
 
+# The metadata-sidecar path of the claim THIS process holds (set on a successful
+# acquire). It lets record_owned_pid() amend the same sidecar as children are
+# spawned. None means "this process is not the lock holder" — record_owned_pid
+# then no-ops, so a test / secondary process never scribbles owned PIDs.
+_active_meta_path: Path | None = None
+
 
 def _claim_slug(host: str, port: int) -> str:
     """Filesystem-safe ``(host, port)`` identifier for the lock/metadata names.
@@ -134,17 +140,68 @@ def acquire_pidfile(lock_path: Path, meta_path: Path, metadata: dict) -> Acquire
             pass
         return AcquireResult(acquired=False, existing=_read_metadata(meta_path))
 
-    # Lock acquired: write metadata atomically (write-temp + rename).
-    # Path.replace() is atomic on POSIX and atomic on Windows for same-volume
-    # moves (Python 3.3+ guarantee). The .tmp suffix ensures the in-progress
-    # write is never mistaken for a complete record.
-    tmp = meta_path.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(metadata), encoding="utf-8")
-    tmp.replace(meta_path)
+    # Lock acquired: write metadata atomically, then remember the sidecar path
+    # so record_owned_pid() can amend it as children are spawned.
+    global _active_meta_path
+    _write_metadata_atomic(meta_path, metadata)
+    _active_meta_path = meta_path
 
     _lock_handles[lock_path] = fh  # keep alive for process lifetime
     logger.info("Main process: acquired lock at %s (PID %s)", lock_path, metadata.get("pid"))
     return AcquireResult(acquired=True, fh=fh)
+
+
+def _write_metadata_atomic(meta_path: Path, data: dict) -> None:
+    """Write ``data`` to ``meta_path`` via write-temp + atomic rename.
+
+    Path.replace() is atomic on POSIX and atomic on Windows for same-volume
+    moves (Python 3.3+ guarantee). The .tmp suffix ensures an in-progress write
+    is never mistaken for a complete record.
+    """
+    meta_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = meta_path.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(data), encoding="utf-8")
+    tmp.replace(meta_path)
+
+
+def record_owned_pid(pid: int, *, name: str = "", create_time: float | None = None) -> None:
+    """Append a spawned child's identity to *this* instance's metadata sidecar.
+
+    Called when the launcher spawns a child it owns (e.g. Ollama) so that, after
+    an unclean death that left the child reparented — the one case the Job
+    Object / process-group reap can miss — a later launch's port reclaim can
+    still find and terminate the orphan. No-ops unless this process holds the
+    claim (``_active_meta_path`` set), so tests and secondary processes never
+    write owned PIDs.
+
+    ``create_time`` (psutil epoch seconds) is the PID-reuse guard: the reaper
+    re-validates it before killing, so a recycled PID is never mistaken for our
+    child. ``name`` is a human-readable hint (e.g. ``ollama.exe``).
+    """
+    if _active_meta_path is None:
+        return
+    data = _read_metadata(_active_meta_path) or {}
+    owned = list(data.get("owned_pids", []))
+    if any(isinstance(o, dict) and o.get("pid") == pid for o in owned):
+        return
+    owned.append({"pid": pid, "name": name, "create_time": create_time})
+    _write_metadata_atomic(_active_meta_path, {**data, "owned_pids": owned})
+    logger.info("Recorded owned child PID %s (%s) in %s", pid, name or "?", _active_meta_path)
+
+
+def read_owned_pids(meta_path: Path) -> list[dict]:
+    """Return the ``owned_pids`` list from a (possibly stale) metadata sidecar.
+
+    Each entry is ``{"pid": int, "name": str, "create_time": float | None}``.
+    Returns ``[]`` when the sidecar is missing, unparseable, or has no list —
+    the reaper still re-validates every entry against the live process table
+    before terminating anything.
+    """
+    data = _read_metadata(meta_path) or {}
+    owned = data.get("owned_pids")
+    if not isinstance(owned, list):
+        return []
+    return [o for o in owned if isinstance(o, dict) and isinstance(o.get("pid"), int)]
 
 
 def _read_metadata(meta_path: Path) -> dict | None:
