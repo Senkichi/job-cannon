@@ -24,7 +24,9 @@ from job_finder.web.location_canonical import JobLocation
 logger = logging.getLogger(__name__)
 
 _PAGE_SIZE = 100
-_MAX_RESULTS = 500
+# Per-board pagination budget. Raised 500 -> 2000 (matching Workday's effective
+# budget) so large enterprise boards (e.g. AbbVie ~1460) are fully discovered.
+_MAX_RESULTS = 2000
 _DETAIL_FETCH_SLEEP_S = 0.1
 # Pacing for the LIST endpoint between successive page fetches. Pre-F1
 # (commit b99e1d9) the list-endpoint cadence was incidentally paced by
@@ -86,14 +88,20 @@ def _fetch_postings_with_completeness(slug: str) -> tuple[list[dict], bool]:
         saw_total = True
 
         if total_found > _MAX_RESULTS:
+            # Over budget: log and mark incomplete, but DO NOT break before
+            # collecting. Pre-fix this `break` fired before `out.extend`, so a
+            # board with >cap postings returned ZERO jobs (AbbVie 1460 -> 0),
+            # not even the first page. Mirror the Workday #216 treatment:
+            # collect the first `_MAX_RESULTS` (the `while offset < _MAX_RESULTS`
+            # bound caps it) and leave completeness False so the reconciler
+            # declines expiry for this tenant.
             logger.warning(
-                "scan_smartrecruiters('%s') board has %d postings (cap %d) — incomplete; "
-                "reconciliation will skip this company",
+                "scan_smartrecruiters('%s') board has %d postings; fetching first %d "
+                "(cap) — discovery partial, reconciliation will skip this company",
                 slug,
                 total_found,
                 _MAX_RESULTS,
             )
-            break
 
         postings = data.get("content", [])
         if not postings:

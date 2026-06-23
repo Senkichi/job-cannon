@@ -409,21 +409,30 @@ class TestSmartRecruitersCompleteness:
         assert len(postings) == 2
 
     @patch("job_finder.web.ats_platforms._platforms_smartrecruiters.requests.get")
-    def test_over_cap_board_is_incomplete(self, mock_get):
-        """totalFound > 500 cap → complete=False; the 501+ tail is unfetchable."""
+    def test_over_cap_board_is_incomplete_but_non_empty(self, mock_get):
+        """totalFound > cap → complete=False AND the first `_MAX_RESULTS` are returned.
+
+        Regression guard: pre-fix, an over-cap board hit a `break` BEFORE
+        `out.extend`, so discovery returned ZERO postings (AbbVie 1460 -> 0).
+        Now it returns the first `_MAX_RESULTS` (the tail is unfetchable) with
+        completeness False.
+        """
         from job_finder.web.ats_platforms._platforms_smartrecruiters import (
+            _MAX_RESULTS,
             _fetch_postings_with_completeness,
         )
 
         resp = MagicMock(status_code=200)
         resp.json.return_value = {
-            "totalFound": 600,
+            "totalFound": _MAX_RESULTS + 500,
             "content": [{"id": str(i), "name": f"Job {i}"} for i in range(100)],
         }
         mock_get.return_value = resp
 
-        _, complete = _fetch_postings_with_completeness("TestCo")
+        postings, complete = _fetch_postings_with_completeness("TestCo")
         assert complete is False
+        # Discovery is NOT zeroed: the first _MAX_RESULTS postings came back.
+        assert len(postings) == _MAX_RESULTS
 
     @patch("job_finder.web.ats_platforms._platforms_smartrecruiters.requests.get")
     def test_empty_board_is_complete(self, mock_get):
