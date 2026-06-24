@@ -1,12 +1,11 @@
-"""Unit tests for ``job_finder.config.load_config`` and ``write_config``.
+"""Unit tests for ``job_finder.config.load_config``.
 
-Covers the new platformdirs-based config loading with allow_missing support,
-plus the atomic write_config function.
+Covers the platformdirs-based config loading with allow_missing support.
 """
 
 import pytest
 
-from job_finder.config import ConfigNotFoundError, load_config, write_config
+from job_finder.config import ConfigNotFoundError, load_config
 
 
 class TestLoadConfig:
@@ -77,43 +76,8 @@ class TestLoadConfig:
         }
 
 
-class TestWriteConfig:
-    """Tests for atomic write_config function."""
-
-    def test_write_config_creates_file_in_user_data_dir(self, monkeypatch, tmp_path):
-        """write_config creates config.yaml under JOB_CANNON_USER_DATA_DIR."""
-        monkeypatch.setenv("JOB_CANNON_USER_DATA_DIR", str(tmp_path))
-
-        data = {
-            "server": {"port": 5050},
-            "profile": {},
-            "sources": {},
-            "scoring": {},
-            "db": {},
-        }
-        result_path = write_config(data)
-
-        assert result_path == tmp_path / "config.yaml"
-        assert result_path.exists()
-
-    def test_write_config_roundtrip(self, monkeypatch, tmp_path):
-        """Config written by write_config can be read by load_config."""
-        monkeypatch.setenv("JOB_CANNON_USER_DATA_DIR", str(tmp_path))
-
-        # allow_unfiltered_scan opts out of validate_target_titles -- this
-        # roundtrip is about write/read fidelity, not validation.
-        data = {
-            "server": {"port": 5050},
-            "profile": {"allow_unfiltered_scan": True},
-            "sources": {},
-            "scoring": {},
-            "db": {},
-        }
-        write_config(data)
-
-        loaded = load_config()
-
-        assert loaded == data
+class TestConfigErrors:
+    """Error-type guarantees for the config loader."""
 
     def test_config_not_found_error_is_filenotfounderror_subclass(self):
         """API guarantee — callers can ``except FileNotFoundError`` if they want."""

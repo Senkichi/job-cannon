@@ -165,45 +165,6 @@ def test_set_and_get_secret_roundtrip(monkeypatch):
     assert get_secret("sources.serpapi.api_key") == "sk-stored"
 
 
-def test_delete_secret_removes_keyring_entry(monkeypatch):
-    """delete_secret removes a previously written entry."""
-    from job_finder.secrets import delete_secret, get_secret, set_secret
-
-    monkeypatch.delenv("SERPAPI_API_KEY", raising=False)
-    set_secret("sources.serpapi.api_key", "sk-stored")
-    delete_secret("sources.serpapi.api_key")
-
-    assert get_secret("sources.serpapi.api_key") is None
-
-
-def test_delete_secret_idempotent_on_missing_entry():
-    """delete_secret does not raise when no entry exists."""
-    from job_finder.secrets import delete_secret
-
-    # Should not raise.
-    delete_secret("sources.serpapi.api_key")
-
-
-def test_list_secrets_returns_canonical_names_present_in_keyring(monkeypatch):
-    """list_secrets enumerates canonical names with non-empty keyring values."""
-    from job_finder.secrets import list_secrets, set_secret
-
-    monkeypatch.delenv("SERPAPI_API_KEY", raising=False)
-
-    set_secret("sources.serpapi.api_key", "sk-1")
-
-    found = set(list_secrets())
-    assert "sources.serpapi.api_key" in found
-
-
-def test_list_secrets_empty_when_keyring_unavailable(monkeypatch):
-    """list_secrets returns an empty list when no backend is reachable."""
-    from job_finder import secrets as secrets_mod
-
-    monkeypatch.setattr(secrets_mod, "_KEYRING_UNAVAILABLE", True)
-    assert secrets_mod.list_secrets() == []
-
-
 # ---------------------------------------------------------------------------
 # _walk_config edge cases
 # ---------------------------------------------------------------------------
@@ -340,18 +301,3 @@ def test_namespaced_value_wins_over_legacy(isolated_keyring, monkeypatch, tmp_pa
     set_secret("sources.serpapi.api_key", "namespaced-value")
 
     assert get_secret("sources.serpapi.api_key") == "namespaced-value"
-
-
-def test_delete_clears_legacy_so_it_cannot_resurface(isolated_keyring, monkeypatch, tmp_path):
-    """delete_secret must remove the legacy entry too, or the fallback resurrects it."""
-    from job_finder.secrets import _LEGACY_SERVICE, delete_secret, get_secret, set_secret
-
-    monkeypatch.delenv("SERPAPI_API_KEY", raising=False)
-    monkeypatch.setenv("JOB_CANNON_USER_DATA_DIR", str(tmp_path / "install_a"))
-
-    isolated_keyring.set_password(_LEGACY_SERVICE, "sources.serpapi.api_key", "legacy-value")
-    set_secret("sources.serpapi.api_key", "namespaced-value")
-
-    delete_secret("sources.serpapi.api_key")
-
-    assert get_secret("sources.serpapi.api_key") is None

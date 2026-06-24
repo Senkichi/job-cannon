@@ -137,17 +137,6 @@ def _resolve_candidate_context(config: dict) -> str:
     return ctx
 
 
-def clear_candidate_context_cache() -> None:
-    """Drop all memoized candidate contexts.
-
-    Test seam and an escape hatch for callers that need to force a rebuild
-    after mutating config in place (the normal path — settings save or
-    profile-file rewrite — invalidates automatically via fingerprint).
-    """
-    with _CONTEXT_CACHE_LOCK:
-        _CONTEXT_CACHE.clear()
-
-
 def _apply_location_fit_override(
     assessment: JobAssessment,
     job: dict,

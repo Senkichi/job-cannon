@@ -62,7 +62,6 @@ class JobSlot:
         depends_on: job_id of a predecessor. If set, this job is scheduled as a
             one-shot when the predecessor finishes (completion-chaining) instead
             of on its own cron slot.
-        misfire_grace_time: seconds; see module constants.
         day: CronTrigger day-of-month for monthly jobs (e.g. 1), else None.
         day_of_week: CronTrigger day-of-week for weekly jobs (e.g. "sun"), else
             None.
@@ -76,7 +75,6 @@ class JobSlot:
     minute: int | None
     heavy_writer: bool = False
     depends_on: str | None = None
-    misfire_grace_time: int = HEAVY_MISFIRE_GRACE_S
     day: int | None = None
     day_of_week: str | None = None
     interval: bool = False
@@ -140,12 +138,8 @@ SCHEDULE: dict[str, JobSlot] = {
     "orphan_cleanup": JobSlot(hour=3, minute=0, day=1),
     "registry_hygiene": JobSlot(hour=3, minute=30, day=1),
     # Frequent interval jobs (no fixed cron slot; trigger built in the registrar).
-    "pipeline_detection": JobSlot(
-        hour=None, minute=None, misfire_grace_time=LIGHT_MISFIRE_GRACE_S, interval=True
-    ),
-    "heartbeat": JobSlot(
-        hour=None, minute=None, misfire_grace_time=LIGHT_MISFIRE_GRACE_S, interval=True
-    ),
+    "pipeline_detection": JobSlot(hour=None, minute=None, interval=True),
+    "heartbeat": JobSlot(hour=None, minute=None, interval=True),
 }
 
 

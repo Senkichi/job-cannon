@@ -17,6 +17,7 @@ the Flask request thread.
 import logging
 from datetime import datetime
 
+from job_finder.config import DEFAULT_LOOKBACK_DAYS
 from job_finder.db import log_run
 from job_finder.scoring.scorer import JobScorer
 from job_finder.web.db_helpers import standalone_connection
@@ -226,6 +227,15 @@ def run_ingestion(
                 )
             except Exception as e:
                 logger.warning("Failed to log portal_search run: %s", e)
+
+        # --- Prune stale maintenance rows (same connection, end of run) ---
+        # Bounds unbounded growth of the runs + email_parse_log tables. Shares
+        # runner_conn and runs last so a fresh run is logged before old rows are
+        # trimmed. Internally error-isolated: a prune failure logs and is ignored.
+        lookback_days = (
+            config.get("sources", {}).get("gmail", {}).get("lookback_days", DEFAULT_LOOKBACK_DAYS)
+        )
+        _prune_stale_data(runner_conn, lookback_days)
 
     # --- AI scoring (runs after DB connection is closed) ---
     # v3.0 unified scoring is the only path (Plan 4 Commit E removed the

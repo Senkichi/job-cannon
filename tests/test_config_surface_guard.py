@@ -41,9 +41,8 @@ REPO = Path(__file__).parent.parent
 EXAMPLE_YAML = REPO / "config.example.yaml"
 JOB_FINDER = REPO / "job_finder"
 SETTINGS_HTML = JOB_FINDER / "web" / "templates" / "settings" / "index.html"
-# The settings BLUEPRINT is the writer (form → config dict).  We exclude only
-# this file from reader checks, not job_finder/settings.py (the Settings
-# dataclass, which IS a reader).
+# The settings BLUEPRINT is the writer (form → config dict).  We exclude it
+# from reader checks because writing a key is not reading it.
 SETTINGS_BLUEPRINT = JOB_FINDER / "web" / "blueprints" / "settings.py"
 SOURCES_DIR = JOB_FINDER / "sources"
 
@@ -238,8 +237,7 @@ def test_inv1_example_yaml_keys_have_readers():
     leaf_keys = _get_example_yaml_leaf_keys()
     skip = _INV1_UNREAD_ALLOWLIST
 
-    # Exclude only the settings blueprint (the writer), NOT job_finder/settings.py
-    # (the Settings dataclass, which IS a reader).
+    # Exclude the settings blueprint (the writer); writing a key is not reading it.
     files = _py_files_in_job_finder(exclude_paths={SETTINGS_BLUEPRINT})
     source_text = _all_source_text(files)
 

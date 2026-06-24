@@ -65,11 +65,6 @@ class LiveEventBus:
             except queue.Full:
                 logger.debug("live bus: subscriber backlog full, dropped %s", event)
 
-    @property
-    def subscriber_count(self) -> int:
-        with self._lock:
-            return len(self._subscribers)
-
 
 # Module-level singleton — reachable from both request and scheduler threads
 # without threading it through the Flask app object.

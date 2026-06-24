@@ -50,7 +50,6 @@ class Job:
     # the upsert boundary treats a dated job without a marker as 'proxy'
     # (lowest trust), so only sources audited as exact need to say so.
     posted_date_precision: str | None = None
-    fetched_date: datetime = field(default_factory=datetime.now)
 
     # Scoring (populated by scorer)
     score: float = 0.0
