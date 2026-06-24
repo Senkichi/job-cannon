@@ -252,7 +252,7 @@ def _coerce_assessment(
                 f"assessment missing required axis {key!r} "
                 f"(present axes: {sorted(k for k in _SUB_SCORE_KEYS if data.get(k) is not None)})"
             )
-        # Variant v4d2 emits each axis as {"evidence": "...", "score": <int>}.
+        # Some prompts/LLMs emit each axis as {"evidence": "...", "score": <int>}.
         # Unwrap the score; everything downstream (derive_classification,
         # persistence) only needs the integer.
         if isinstance(raw, dict) and "score" in raw:
