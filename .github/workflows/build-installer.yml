@@ -59,7 +59,7 @@ jobs:
           echo "TAG=$TAG" >> "$GITHUB_ENV"
           echo "Building installer for $TAG"
 
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ env.TAG }}
 
