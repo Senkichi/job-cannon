@@ -39,6 +39,7 @@ from defusedxml import ElementTree as DefusedET
 
 from job_finder.web._http_constants import _HEADERS, _TIMEOUT
 from job_finder.web.ats_platforms import _title_matches
+from job_finder.web.http_fetch import fetch_with_deadline
 
 logger = logging.getLogger(__name__)
 
@@ -104,7 +105,7 @@ def _fetch_xml(url: str) -> Any | None:
     the orchestrator can fall through to the next candidate URL or tier.
     """
     try:
-        resp = requests.get(url, timeout=_TIMEOUT, headers=_HEADERS)
+        resp = fetch_with_deadline(url, getter=requests.get, timeout=_TIMEOUT, headers=_HEADERS)
     except Exception as e:
         logger.debug("sitemap_tier: HTTP error for %s: %s", url, e)
         return None

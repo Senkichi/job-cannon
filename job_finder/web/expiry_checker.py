@@ -36,6 +36,7 @@ import requests
 from job_finder.db import persist_job_expiry_state, update_pipeline_status
 from job_finder.json_utils import utc_now_iso
 from job_finder.web.db_helpers import standalone_connection
+from job_finder.web.http_fetch import fetch_with_deadline
 
 logger = logging.getLogger(__name__)
 
@@ -118,7 +119,7 @@ def _check_ats_api(slug: str, posting_id: str, ats_platform: str, timeout: int =
         return INCONCLUSIVE
 
     try:
-        resp = requests.get(url, timeout=timeout, headers=_HEADERS)
+        resp = fetch_with_deadline(url, getter=requests.get, timeout=timeout, headers=_HEADERS)
         if resp.status_code in (404, 410):
             return EXPIRED
         if resp.status_code == 200:
@@ -291,7 +292,9 @@ def quick_liveness_check(url: str, timeout: int = 8) -> str:
         return EXPIRED
 
     try:
-        resp = requests.get(url, timeout=timeout, allow_redirects=True, headers=_HEADERS)
+        resp = fetch_with_deadline(
+            url, getter=requests.get, timeout=timeout, allow_redirects=True, headers=_HEADERS
+        )
         if resp.status_code in (404, 410):
             return EXPIRED
         if resp.status_code == 200:
