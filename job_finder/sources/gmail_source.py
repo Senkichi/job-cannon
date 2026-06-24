@@ -179,11 +179,6 @@ def resolve_sender_label(config: dict | None = None) -> dict:
 TOKEN_PATH: str = _resolve_token_path()
 SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
 
-# Parse-failure archives live in the user-data directory so they're always
-# co-located with other user data regardless of CWD.  Override by passing
-# a different directory to _archive_parse_failure if needed.
-PARSE_FAILURES_DIR: str = str(parse_failures_dir())
-
 # Meta-email indicator phrases (checked against lowercased first 200 chars of body)
 _ARCHIVE_META_INDICATORS = [
     "job alert digest",

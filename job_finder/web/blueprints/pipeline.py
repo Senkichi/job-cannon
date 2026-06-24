@@ -19,9 +19,6 @@ CORE_COLUMNS = ["discovered", "reviewing", "applied", "phone_screen", "rejected"
 # Columns that only appear when they have jobs.
 DYNAMIC_COLUMNS = ["technical", "onsite", "offer", "accepted"]
 
-# Columns always hidden in the Kanban (they clutter the board).
-HIDDEN_COLUMNS = ["archived", "withdrawn"]
-
 
 def _build_columns(conn) -> list[dict]:
     """Build the ordered Kanban column list.

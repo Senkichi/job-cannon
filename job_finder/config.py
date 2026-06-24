@@ -5,12 +5,9 @@ codebase.  Import the constant you need rather than hard-coding a number.
 """
 
 import os
-import tempfile
 from pathlib import Path
 
 import yaml
-
-DEFAULT_CONFIG_PATH = "config.yaml"
 
 
 class ConfigNotFoundError(FileNotFoundError):
@@ -84,9 +81,6 @@ DEFAULT_AGENTIC_BATCH_LIMIT = 50
 # full-JD display on job-row expand. Was 8000 (which truncated readable JDs
 # mid-token and sat below the 10k the scorer would have accepted).
 JD_STORAGE_MAX_CHARS = 50_000
-
-# --- Profile ---
-DEFAULT_PROFILE_PATH = "experience_profile.json"
 
 # --- Company denylist (single source of truth) ---
 # Company names that should not produce company records and should be excluded
@@ -253,41 +247,6 @@ def validate_required_sections(config: dict) -> None:
         )
 
     validate_target_titles(config)
-
-
-def write_config(data: dict) -> Path:
-    """Write config dict to user-data config.yaml atomically.
-
-    Creates the user-data directory if needed, writes to a temp file in the
-    same directory, then swaps with os.replace() for atomicity.
-
-    Args:
-        data: Configuration dictionary to write.
-
-    Returns:
-        Path to the written config file.
-    """
-    from job_finder.web import user_data_dirs
-
-    user_data_dirs.ensure_user_data_dir()
-    config_path = user_data_dirs.config_path()
-
-    # Write to a temp file in the same directory for atomic swap
-    fd, temp_path = tempfile.mkstemp(dir=config_path.parent, suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            yaml.safe_dump(data, f, default_flow_style=False)
-        # Atomic swap
-        os.replace(temp_path, config_path)
-    except Exception:
-        # Clean up temp file on error
-        try:
-            os.unlink(temp_path)
-        except OSError:
-            pass
-        raise
-
-    return config_path
 
 
 def normalize_profile_work_arrangement(cfg: dict) -> dict:

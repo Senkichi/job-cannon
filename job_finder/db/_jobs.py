@@ -128,7 +128,6 @@ class IngestionRejected(Exception):
 
     def __init__(self, invariant: str, message: str | None = None) -> None:
         self.invariant = invariant
-        self.db_message = message
         detail = f": {message}" if message else ""
         super().__init__(f"Ingestion rejected: invariant {invariant!r} violated{detail}")
 
@@ -249,8 +248,6 @@ def _reconcile_salary_pair_for_upsert(
     incoming_provenance: str | None,
     stored_min: int | None,
     stored_max: int | None,
-    stored_period: str | None,
-    stored_currency: str | None,
     stored_provenance: str | None,
 ) -> tuple[dict[str, object | None], bool]:
     """Trust-ranked, pair-atomic salary reconciliation for the upsert UPDATE branch (D-4).
@@ -594,8 +591,6 @@ def upsert_job(
             parsed.salary_provenance,
             existing["salary_min"],
             existing["salary_max"],
-            existing["salary_period"],
-            existing["salary_currency"],
             existing["salary_provenance"],
         )
         if salary_canonical_changed:

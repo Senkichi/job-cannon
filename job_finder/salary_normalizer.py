@@ -75,9 +75,6 @@ _ANNUALIZE_FACTORS: dict[str, int] = {
 # Valid source periods an observation may carry.
 VALID_PERIODS: frozenset[str] = frozenset(_ANNUALIZE_FACTORS)
 
-# Valid provenance labels.
-VALID_PROVENANCES: frozenset[str] = frozenset(PROVENANCE_RANK)
-
 # m081 CHECK allowlist for the salary_period column. weekly/daily collapse to
 # 'unknown' in the column; their true period lives in the observation log.
 _COLUMN_PERIODS: frozenset[str] = frozenset({"annual", "hourly", "monthly", "unknown"})
@@ -158,7 +155,7 @@ class SalaryObservation:
         max_value: Upper bound the source asserted (per ``period``), or None.
         period: Source period the posting stated. One of ``VALID_PERIODS``.
         currency: Source currency (ISO-ish code). Recorded, never converted.
-        provenance: Writer class, one of ``VALID_PROVENANCES``; drives trust ranking.
+        provenance: Writer class, one of the ``PROVENANCE_RANK`` keys; drives trust ranking.
         raw_text: Verbatim source string/JSON fragment, retained for healing + debug.
     """
 

@@ -187,35 +187,6 @@ def set_secret(name: str, value: str) -> None:
     keyring.set_password(_service_name(), name, value)
 
 
-def delete_secret(name: str) -> None:
-    """Remove a secret from the OS keyring. Idempotent.
-
-    No-ops when the keyring backend is unavailable or when no entry
-    exists for `name`.
-    """
-    if _KEYRING_UNAVAILABLE:
-        return
-    # Delete from both the namespaced and legacy services so a removed secret
-    # can't resurface through the legacy read-fallback in get_secret().
-    for service in (_service_name(), _LEGACY_SERVICE):
-        try:
-            keyring.delete_password(service, name)
-        except keyring.errors.PasswordDeleteError:
-            pass
-
-
-def list_secrets() -> list[str]:
-    """Return canonical names of secrets currently present in the keyring."""
-    if _KEYRING_UNAVAILABLE:
-        return []
-    service = _service_name()
-    return [
-        name
-        for name in SECRET_ENV_VARS
-        if keyring.get_password(service, name) or keyring.get_password(_LEGACY_SERVICE, name)
-    ]
-
-
 def _walk_config(config: dict, dotted_path: str) -> str | None:
     """Walk a dotted path through a config dict. Returns a non-empty str or None."""
     node: object = config

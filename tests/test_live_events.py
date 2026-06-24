@@ -38,7 +38,7 @@ class TestLiveEventBus:
         bus.publish(JOBS_CHANGED)
         with pytest.raises(queue.Empty):
             q.get_nowait()
-        assert bus.subscriber_count == 0
+        assert len(bus._subscribers) == 0
 
     def test_unsubscribe_is_idempotent(self):
         bus = LiveEventBus()

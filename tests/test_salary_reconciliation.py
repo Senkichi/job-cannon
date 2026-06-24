@@ -115,8 +115,6 @@ class TestPairAtomicReconciler:
             "ats_structured",
             3_000,
             251_000,
-            "unknown",
-            "USD",
             "feed_string",
         )
         assert changed is True
@@ -137,8 +135,6 @@ class TestPairAtomicReconciler:
             "feed_string",
             150_000,
             200_000,
-            "annual",
-            "USD",
             "ats_structured",
         )
         assert changed is False
@@ -154,8 +150,6 @@ class TestPairAtomicReconciler:
             "ats_structured",
             150_000,
             200_000,
-            "annual",
-            "USD",
             "ats_structured",
         )
         assert changed is True
@@ -172,8 +166,6 @@ class TestPairAtomicReconciler:
             "ats_structured",
             150_000,
             200_000,
-            "annual",
-            "USD",
             "ats_structured",
         )
         assert changed is False
@@ -191,8 +183,6 @@ class TestPairAtomicReconciler:
             None,
             None,
             None,
-            None,
-            None,
         )
         assert changed is True
         assert cols["salary_min"] == 120_000
@@ -206,8 +196,6 @@ class TestPairAtomicReconciler:
             "feed_string",
             150_000,
             200_000,
-            "annual",
-            "USD",
             "ats_structured",
         )
         assert changed is False
@@ -224,8 +212,6 @@ class TestPairAtomicReconciler:
             "feed_string",
             9_000,
             338_000,
-            "unknown",
-            "USD",
             None,
         )
         assert changed is True

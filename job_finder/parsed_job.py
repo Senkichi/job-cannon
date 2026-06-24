@@ -71,7 +71,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
 
 from job_finder.config import get_company_denylist, load_config
 from job_finder.db._jd_content_contract import jd_content_reject
@@ -87,61 +87,6 @@ from job_finder.web.url_canonical import canonicalize_url
 
 if TYPE_CHECKING:
     from job_finder.models import Job
-
-# ---------------------------------------------------------------------------
-# Typed source and scoring-provider aliases (§2 Glossary)
-# ---------------------------------------------------------------------------
-
-# 25 distinct ingestion-source labels that appear in the DB.
-# Declared as a Literal so type checkers catch string typos at call sites.
-SourceTag = Literal[
-    # Gmail / email alert parsers
-    "linkedin",
-    "glassdoor",
-    "ziprecruiter",
-    "indeed",
-    "monster",
-    "greenhouse",
-    # Search APIs
-    "serpapi",
-    "dataforseo",
-    "thordata",
-    # Portal scrapers
-    "portal_jooble",
-    "portal_adzuna",
-    "wellfound",
-    "builtin",
-    "google_cse",
-    # ATS platform scanners (lowercase, matching ats_detection.py output)
-    "workday",
-    "ashby",
-    "lever",
-    "smartrecruiters",
-    "jobvite",
-    "pinpoint",
-    # Web crawlers
-    "careers_crawl",
-    "careers_page",
-    # Pipeline-detector / IMAP / resume paths
-    "off_platform_email",
-    "imap",
-    "resume",
-]
-
-# Scoring providers — cross-checked against claude_client.FREE_PROVIDERS
-ScoringProvider = Literal[
-    "ollama",
-    "groq",
-    "cerebras",
-    "gemini",
-    "anthropic",
-    "heuristic",
-    "claude_cli",
-    "claude_code_cli",
-    "gemini_cli",
-    "local_bundled",
-    "google_cse",
-]
 
 # ---------------------------------------------------------------------------
 # Exception types
@@ -214,21 +159,6 @@ def _has_title_cross_field_bleed(title: str, locations_raw: list[str]) -> bool:
             if token.lower() in after_paren:
                 return True
     return False
-
-
-# ---------------------------------------------------------------------------
-# SalaryRange
-# ---------------------------------------------------------------------------
-
-
-@dataclass(frozen=True)
-class SalaryRange:
-    """Structured salary range with currency and billing period."""
-
-    min: int | None
-    max: int | None
-    currency: str = "USD"
-    period: str = "unknown"
 
 
 # ---------------------------------------------------------------------------

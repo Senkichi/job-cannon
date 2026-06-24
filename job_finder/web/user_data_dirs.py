@@ -138,15 +138,6 @@ def credentials_path() -> Path:
     return user_data_root() / "credentials.json"
 
 
-def backups_path() -> Path:
-    """Return the path to the automatic DB backups directory.
-
-    Returns:
-        Path to backups/ under the user data root.
-    """
-    return user_data_root() / "backups"
-
-
 def parse_failures_dir() -> Path:
     """Return the path to the Gmail parse-failures archive directory.
 

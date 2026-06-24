@@ -163,14 +163,13 @@ def test_orchestrator_passes_candidate_context_through(monkeypatch, tmp_path):
 
     monkeypatch.setattr("job_finder.web.job_scorer.call_model", fake_call_model)
 
-    from job_finder.web.scoring_orchestrator import (
-        clear_candidate_context_cache,
-        score_and_persist_job,
-    )
+    from job_finder.web import scoring_orchestrator
+    from job_finder.web.scoring_orchestrator import score_and_persist_job
 
     # Force the resolver to rebuild against this test's tmp profile path
     # (otherwise an unrelated prior test could leave a cached entry).
-    clear_candidate_context_cache()
+    with scoring_orchestrator._CONTEXT_CACHE_LOCK:
+        scoring_orchestrator._CONTEXT_CACHE.clear()
 
     # Minimal in-memory jobs schema that satisfies persist_job_assessment's
     # UPDATE-by-dedup-key contract. The UPDATE is a no-op when the row is

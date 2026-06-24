@@ -23,7 +23,6 @@ from job_finder.parsed_job import (
     DenylistedCompanyError,
     LocationShapeError,
     ParsedJob,
-    SalaryRange,
     UnresolvedParsedJob,
     _has_title_cross_field_bleed,
     _is_jd_junk,
@@ -471,12 +470,6 @@ class TestImportAndConstruction:
     def test_parsed_job_import(self):
         """ParsedJob and UnresolvedParsedJob are importable."""
         from job_finder.parsed_job import ParsedJob, UnresolvedParsedJob  # noqa: F401
-
-    def test_salary_range_construction(self):
-        """SalaryRange is a frozen dataclass."""
-        sr = SalaryRange(min=80_000, max=120_000, currency="USD", period="annual")
-        assert sr.min == 80_000
-        assert sr.currency == "USD"
 
     def test_denylisted_company_error_is_value_error(self):
         """DenylistedCompanyError is a subclass of ValueError."""
