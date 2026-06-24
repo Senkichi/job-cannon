@@ -41,6 +41,7 @@ from job_finder.web.careers_crawler._title_filters import (
     _is_metadata_blob,
     _is_nav_path,
 )
+from job_finder.web.http_fetch import fetch_with_deadline
 
 logger = logging.getLogger(__name__)
 
@@ -421,7 +422,7 @@ def _try_static_extract(
         None — page appears JS-heavy, caller should try Playwright
     """
     try:
-        resp = requests.get(url, timeout=_TIMEOUT, headers=_HEADERS)
+        resp = fetch_with_deadline(url, getter=requests.get, timeout=_TIMEOUT, headers=_HEADERS)
         resp.raise_for_status()
     except Exception as e:
         logger.debug("Static fetch failed for '%s': %s", url, e)

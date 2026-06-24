@@ -23,6 +23,7 @@ from ddgs import DDGS
 from job_finder.config import JD_STORAGE_MAX_CHARS
 from job_finder.web.direct_link import resolve_primary_posting
 from job_finder.web.domain_policy import domain_priority, is_blocked_domain
+from job_finder.web.http_fetch import fetch_with_deadline
 from job_finder.web.model_provider import call_model
 from job_finder.web.platform_extractor import extract_clean_jd
 
@@ -122,7 +123,9 @@ def fetch_direct_jd(url: str) -> str | None:
         Cleaned text up to 8000 chars, or None on any error.
     """
     try:
-        response = requests.get(url, headers=_HEADERS, timeout=_TIMEOUT)
+        response = fetch_with_deadline(
+            url, getter=requests.get, headers=_HEADERS, timeout=_TIMEOUT
+        )
         response.raise_for_status()
 
         # Single chokepoint (JD Layer 2): platform-scoped extraction (e.g.
@@ -747,7 +750,9 @@ def fetch_linkedin_jd(url: str) -> str | None:
         Cleaned JD text up to _MAX_JD_CHARS, or None if extraction fails.
     """
     try:
-        response = requests.get(url, headers=_BROWSER_HEADERS, timeout=_TIMEOUT)
+        response = fetch_with_deadline(
+            url, getter=requests.get, headers=_BROWSER_HEADERS, timeout=_TIMEOUT
+        )
         response.raise_for_status()
 
         # LinkedIn scoping now lives in the single chokepoint (extract_clean_jd

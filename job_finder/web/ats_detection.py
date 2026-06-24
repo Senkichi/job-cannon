@@ -335,8 +335,11 @@ def _default_http_get(url: str, timeout: float) -> Any:
     import requests
 
     from job_finder.web._http_constants import _HEADERS
+    from job_finder.web.http_fetch import fetch_with_deadline
 
-    return requests.get(url, headers=_HEADERS, timeout=timeout, allow_redirects=True)
+    return fetch_with_deadline(
+        url, getter=requests.get, headers=_HEADERS, timeout=timeout, allow_redirects=True
+    )
 
 
 def careers_url_is_live(

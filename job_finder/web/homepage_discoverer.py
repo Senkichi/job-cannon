@@ -23,6 +23,7 @@ import requests
 
 from job_finder.secrets import get_secret
 from job_finder.web.db_helpers import standalone_connection
+from job_finder.web.http_fetch import fetch_with_deadline
 
 # Lazy import of careers-page resolver (ImportError guard — mirrors
 # _run_html.py and enrichment_tiers.py). Keeps homepage_discoverer
@@ -360,7 +361,9 @@ def _try_slug_heuristic(ats_slug: str) -> str | None:
             final_url = None
 
         # Fetch body to check for parked domain signatures (first 5000 chars)
-        get_resp = requests.get(url, timeout=_TIMEOUT, headers=_HEADERS)
+        get_resp = fetch_with_deadline(
+            url, getter=requests.get, timeout=_TIMEOUT, headers=_HEADERS
+        )
 
         # Bot-blocking codes (403, 405, 406) prove the domain is active —
         # parked domains never return these. Accept the URL directly.

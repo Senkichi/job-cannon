@@ -17,6 +17,7 @@ import requests
 
 from job_finder.web._http_constants import _HEADERS, _TIMEOUT
 from job_finder.web.db_helpers import standalone_connection
+from job_finder.web.http_fetch import fetch_with_deadline
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +36,9 @@ def _try_cached_api(
     from job_finder.web.careers_page_interactions import parse_api_response
 
     try:
-        resp = requests.get(api_endpoint, timeout=_TIMEOUT, headers=_HEADERS)
+        resp = fetch_with_deadline(
+            api_endpoint, getter=requests.get, timeout=_TIMEOUT, headers=_HEADERS
+        )
         if resp.status_code >= 400:
             logger.debug(
                 "Cached API endpoint returned %d: %s",

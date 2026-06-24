@@ -37,6 +37,7 @@ from job_finder.web.careers_crawler._static_tier import (
     _extract_jobs_from_soup,
     _filter_candidates,
 )
+from job_finder.web.http_fetch import fetch_with_deadline
 
 logger = logging.getLogger(__name__)
 
@@ -221,8 +222,9 @@ def _try_playwright_active(
             page_urls = follow_pagination(page, url, max_pages=max_pages)
             for page_url in page_urls:
                 try:
-                    resp = requests.get(
+                    resp = fetch_with_deadline(
                         page_url,
+                        getter=requests.get,
                         timeout=_TIMEOUT,
                         headers=_HEADERS,
                     )
@@ -262,8 +264,9 @@ def _try_playwright_active(
         if captured_apis:
             for api_url in captured_apis:
                 try:
-                    resp = requests.get(
+                    resp = fetch_with_deadline(
                         api_url,
+                        getter=requests.get,
                         timeout=_TIMEOUT,
                         headers=_HEADERS,
                     )

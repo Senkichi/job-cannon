@@ -37,8 +37,14 @@ logger = logging.getLogger(__name__)
 _DEFAULT_TOTAL_DEADLINE_S = 30.0
 
 
-class FetchDeadlineError(Exception):
-    """A fetch exceeded its hard total wall-clock deadline and was abandoned."""
+class FetchDeadlineError(requests.exceptions.Timeout):
+    """A fetch exceeded its hard total wall-clock deadline and was abandoned.
+
+    Subclasses ``requests.exceptions.Timeout`` so a deadline breach slots
+    transparently into any existing ``except requests.exceptions.Timeout`` /
+    ``except requests.exceptions.RequestException`` handler at a call site — a
+    deadline breach is, semantically, a timeout. (Plain ``except Exception``
+    handlers catch it too.)"""
 
 
 def fetch_with_deadline(
