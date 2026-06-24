@@ -203,6 +203,7 @@ def _run_batch_bg(db_path: str, session_id: int, config: dict) -> None:
         config: Application config dict.
     """
     try:
+        from job_finder.web.job_scorer import scoring_precheck
         from job_finder.web.scoring_orchestrator import score_and_persist_job
     except ImportError as e:
         _mark_session_error(db_path, session_id, f"Import error: {e}")
@@ -270,6 +271,19 @@ def _run_batch_bg(db_path: str, session_id: int, config: dict) -> None:
                             source="exclusion_filter",
                             evidence=reason,
                         )
+                    continue
+
+                # Completeness gate (jd_full + P3.2 location) — a row score_job
+                # would no-op (awaiting_jd / awaiting_location) is NOT scorable
+                # and was never counted in `total` (count_scorable applies the
+                # identical scoring_precheck gates). Skip WITHOUT counting it
+                # toward scored/skipped so `processed` (scored + skipped) can
+                # never exceed `total` — the "205/174 processed" overrun. The
+                # row stays classification IS NULL and self-heals into the next
+                # run once enrichment fills jd_full / location. The coarse SELECT
+                # above still surfaces these rows so the exclusion auto-dismiss
+                # above keeps firing on them; only the counting changes.
+                if scoring_precheck(job_row) is not None:
                     continue
 
                 try:

@@ -8,9 +8,42 @@ and a configurable salary floor.
 import logging
 
 from job_finder.config import COMPANY_DENYLIST, get_company_denylist
+from job_finder.db._classification import _TERMINAL_ENRICHMENT_TIERS
 from job_finder.normalizers import normalize_company
 
 logger = logging.getLogger(__name__)
+
+# Scoring-terminal enrichment tiers as plain strings for SQL binding. A row at
+# one of these tiers is location-ready even with an empty location (its location
+# is as good as it will ever get), matching job_scorer.scoring_precheck's P3.2
+# gate. Derived from the single-source frozenset so the two never drift.
+_TERMINAL_TIER_VALUES: tuple[str, ...] = tuple(sorted(str(t) for t in _TERMINAL_ENRICHMENT_TIERS))
+
+
+def _location_ready_sql() -> tuple[str, list]:
+    """SQL fragment + params asserting a row is location-READY for scoring.
+
+    The negative of job_scorer.scoring_precheck's ``awaiting_location`` branch:
+    a row is location-ready UNLESS it has no structured locations, no flat
+    ``location`` string, AND is still enrichable (non-terminal tier).
+
+    Within the count_scorable candidate set ``unresolved_reasons`` is always
+    ``'[]'`` (the quarantine condition runs first), so scoring_precheck's
+    ``"location_missing" not in reasons`` term is vacuously true and is omitted
+    here. ``COALESCE(enrichment_tier, '')`` reproduces Python's ``None not in
+    {...}`` (a NULL tier is non-terminal → still enrichable → gated). The parity
+    test ``TestCountScorable.test_matches_scoring_precheck`` pins this
+    translation to the Python source so it cannot silently drift again.
+    """
+    placeholders = ",".join("?" * len(_TERMINAL_TIER_VALUES))
+    clause = (
+        "NOT ("
+        "COALESCE(locations_structured, '') IN ('', '[]') "
+        "AND TRIM(COALESCE(location, '')) = '' "
+        f"AND COALESCE(enrichment_tier, '') NOT IN ({placeholders})"
+        ")"
+    )
+    return clause, list(_TERMINAL_TIER_VALUES)
 
 
 def _normalize_company_sql(company: str | None) -> str:
@@ -98,12 +131,17 @@ def count_scorable(conn, config: dict) -> int:
     populates `classification` on every row it processes, so unclassified rows
     are the correct "unscored" set.
 
-    Also requires non-empty ``jd_full`` because the v3 unified scorer skips
-    rows without a job description (job_scorer.score_job returns
-    status="skipped" on empty jd_full and never persists classification).
-    Without this filter, the dashboard "Score N unscored jobs" button would
-    advertise rows that the worker silently no-ops, producing the symptom
-    where the count never decreases after clicking.
+    Mirrors EVERY pre-call completeness gate ``job_scorer.scoring_precheck``
+    enforces, because any gate the scorer applies but this count omits produces
+    the same desync bug: the dashboard "Score N unscored jobs" button advertises
+    rows the worker silently no-ops, the count never decrements after clicking,
+    and the batch progress counter overruns its total. The two gates:
+
+    1. non-empty ``jd_full`` (SCORER-05 / ``awaiting_jd``) — the scorer returns
+       status="skipped" on empty jd_full and never persists classification.
+    2. location resolvability (P3.2 / ``awaiting_location``, issue #391) — via
+       ``_location_ready_sql``; a row with no structured/flat location that is
+       still enrichable is skipped without a model call.
 
     Replicates the three exclusion checks from should_exclude() in SQL so the
     count matches what the batch scorer will actually attempt to score:
@@ -141,6 +179,17 @@ def count_scorable(conn, config: dict) -> int:
             "COALESCE(unresolved_reasons, '[]') = '[]'",
         ]
         params: list = []
+
+        # P3.2 location gate (issue #391): a row whose location is still
+        # awaiting enrichment is skipped by job_scorer.score_job
+        # (reason='awaiting_location') WITHOUT a model call, so it never gets a
+        # classification and stays "unscored" forever. Mirror that gate here —
+        # otherwise the Score-Now button advertises jobs the worker silently
+        # no-ops and its count never decrements (the recurrence of the
+        # jd_full-gate desync this function originally fixed, one gate later).
+        loc_clause, loc_params = _location_ready_sql()
+        conditions.append(loc_clause)
+        params.extend(loc_params)
 
         exclusions = config.get("profile", {}).get("exclusions", {})
 

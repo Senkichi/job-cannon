@@ -290,6 +290,130 @@ class TestDeferredCounters:
                 os.remove(path)
 
 
+class TestPrecheckNotCounted:
+    """Issue 1 regression — rows score_job would no-op (awaiting_jd /
+    awaiting_location) must be skipped WITHOUT counting toward scored/skipped,
+    so the progress counter (scored + skipped) can never exceed `total`. This is
+    the "205/174 processed" overrun: the loop's coarse SELECT surfaces jd-absent
+    and location-gated rows that count_scorable (and therefore `total`) excludes;
+    counting them as 'skipped' overran the denominator.
+    """
+
+    def _make_gated(self, conn, dedup_key, *, kind):
+        """Insert a row that score_job's scoring_precheck would skip.
+
+        kind='location' → jd present, but empty location + non-terminal tier.
+        kind='jd'        → jd_full empty (the m078 I-13 write-boundary trigger
+                           forbids empty jd_full, so drop contract triggers to
+                           stage this legacy-shaped row, as TestCountScorable does).
+        """
+        _insert_unscored_job(conn, dedup_key)
+        if kind == "location":
+            conn.execute(
+                "UPDATE jobs SET location='', locations_structured=NULL, "
+                "enrichment_tier=NULL WHERE dedup_key=?",
+                (dedup_key,),
+            )
+        elif kind == "jd":
+            from tests.helpers.contract_triggers import drop_contract_triggers
+
+            drop_contract_triggers(conn)
+            conn.execute("UPDATE jobs SET jd_full='' WHERE dedup_key=?", (dedup_key,))
+        conn.commit()
+
+    def test_gated_rows_skipped_without_counting(self):
+        """2 scorable + 2 location-gated + 1 jd-absent → only the 2 scorable
+        reach the scorer; processed (scored+skipped) == 2 and never exceeds total."""
+        from job_finder.web.blueprints.batch_scoring import _run_batch_bg
+
+        path, conn = _make_db()
+        try:
+            _insert_unscored_job(conn, "scorable-1")
+            _insert_unscored_job(conn, "scorable-2")
+            self._make_gated(conn, "loc-gated-1", kind="location")
+            self._make_gated(conn, "loc-gated-2", kind="location")
+            self._make_gated(conn, "jd-absent-1", kind="jd")
+
+            # total mirrors count_scorable == 2 (the two scorable rows).
+            session_id = _insert_session(conn, status="running", session_type="scoring", total=2)
+
+            ok_env = MagicMock()
+            ok_env.status = "ok"
+            score_mock = MagicMock(return_value=ok_env)
+
+            with (
+                patch(_SCORE_JOB_PATCH, score_mock),
+                patch(_LOAD_PROFILE_PATCH, return_value={}),
+                patch(_SHOULD_EXCLUDE_PATCH, return_value=(False, "")),
+                patch("job_finder.web.activity_tracker.log_activity"),
+            ):
+                _run_batch_bg(path, session_id, _MOCK_CONFIG)
+
+            # The 3 gated rows are skipped BEFORE the scorer — never counted.
+            assert score_mock.call_count == 2, (
+                f"scorer called {score_mock.call_count}x; expected 2 (gated rows "
+                "must be skipped before reaching score_and_persist_job)"
+            )
+
+            session = _get_session(conn, session_id)
+            assert session["status"] == "done"
+            assert session["scored"] == 2
+            assert session["skipped"] == 0
+            processed = session["scored"] + session["skipped"]
+            assert processed <= session["total"], (
+                f"processed ({processed}) must never exceed total ({session['total']}) "
+                "— the 205/174 overrun"
+            )
+        finally:
+            conn.close()
+            if os.path.exists(path):
+                os.remove(path)
+
+    def test_excluded_gated_row_still_auto_dismissed(self):
+        """A row that is BOTH excluded and jd-absent must still be auto-dismissed.
+
+        The precheck-skip is placed AFTER should_exclude, so the exclusion
+        auto-dismiss side effect keeps firing on rows the scorer would no-op.
+        """
+        from job_finder.web.blueprints.batch_scoring import _run_batch_bg
+
+        path, conn = _make_db()
+        try:
+            self._make_gated(conn, "excluded-jd-absent", kind="jd")
+            conn.execute(
+                "UPDATE jobs SET pipeline_status='discovered' WHERE dedup_key=?",
+                ("excluded-jd-absent",),
+            )
+            conn.commit()
+            session_id = _insert_session(conn, status="running", session_type="scoring", total=0)
+
+            score_mock = MagicMock(return_value=MagicMock(status="ok"))
+
+            with (
+                patch(_SCORE_JOB_PATCH, score_mock),
+                patch(_LOAD_PROFILE_PATCH, return_value={}),
+                # This row matches an exclusion rule.
+                patch(_SHOULD_EXCLUDE_PATCH, return_value=(True, "excluded company")),
+                patch("job_finder.web.activity_tracker.log_activity"),
+            ):
+                _run_batch_bg(path, session_id, _MOCK_CONFIG)
+
+            # Excluded → dismissed (side effect preserved); never scored.
+            assert score_mock.call_count == 0
+            status = conn.execute(
+                "SELECT pipeline_status FROM jobs WHERE dedup_key=?",
+                ("excluded-jd-absent",),
+            ).fetchone()[0]
+            assert status == "dismissed", (
+                f"excluded discovered row must be auto-dismissed even when jd-absent; "
+                f"got pipeline_status={status!r}"
+            )
+        finally:
+            conn.close()
+            if os.path.exists(path):
+                os.remove(path)
+
+
 # ---------------------------------------------------------------------------
 # Dead code removal
 # ---------------------------------------------------------------------------

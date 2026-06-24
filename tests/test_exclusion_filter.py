@@ -395,3 +395,78 @@ class TestCountScorable:
         assert result == 2
         warning_records = [r for r in caplog.records if r.levelno == logging.WARNING]
         assert not warning_records, "no WARNING should be emitted on a successful query"
+
+    # --- P3.2 location gate (issue #391) ---
+    #
+    # Regression guard for the SECOND occurrence of the Score-Now desync: after
+    # the jd_full gate was added, score_job grew a location gate (awaiting_location)
+    # that count_scorable did NOT mirror, so the button again advertised jobs the
+    # worker silently no-ops (all 52 "unscored" jobs were location-gated; 0 truly
+    # scorable). These tests pin count_scorable to score_job's actual gate.
+
+    def test_excludes_location_gated_rows(self, migrated_db):
+        """A row with no structured/flat location AND a non-terminal enrichment
+        tier is awaiting_location — score_job skips it, so it must NOT count."""
+        _, conn = migrated_db
+        self._insert_job(conn, "scorable")  # default location='Remote' → scorable
+        self._insert_job(
+            conn, "gated", location="", locations_structured=None, enrichment_tier=None
+        )
+        assert count_scorable(conn, {}) == 1
+
+    def test_counts_terminal_tier_with_empty_location(self, migrated_db):
+        """An empty-location row at a TERMINAL enrichment tier is NOT gated —
+        its location is as good as it will get, so score_job scores it."""
+        _, conn = migrated_db
+        self._insert_job(conn, "terminal", location="", enrichment_tier="exhausted")
+        assert count_scorable(conn, {}) == 1
+
+    def test_counts_structured_location_only(self, migrated_db):
+        """A row with structured locations but an empty flat string is location-ready."""
+        _, conn = migrated_db
+        self._insert_job(
+            conn,
+            "structured",
+            location="",
+            locations_structured='[{"city": "Austin", "region": "TX"}]',
+        )
+        assert count_scorable(conn, {}) == 1
+
+    def test_matches_scoring_precheck(self, migrated_db):
+        """PARITY GUARD — count_scorable (SQL) must equal the count of candidate
+        rows for which job_scorer.scoring_precheck returns None and should_exclude
+        is False. Pins the SQL jd_full + P3.2 location gates to their single Python
+        source so they can never silently drift apart again (the recurring
+        desync that produced "205/174 processed" and a button stuck at 52)."""
+        from job_finder.web.job_scorer import scoring_precheck
+
+        _, conn = migrated_db
+        # Representative matrix spanning every gate axis.
+        self._insert_job(conn, "ok-flat-loc")  # jd + flat location → scorable
+        self._insert_job(
+            conn, "ok-structured", location="", locations_structured='[{"city": "Austin"}]'
+        )  # structured-only → scorable
+        self._insert_job(
+            conn, "ok-terminal-noloc", location="", enrichment_tier="agentic"
+        )  # terminal tier, empty loc → scorable
+        self._insert_job(
+            conn, "gated-noloc", location="", enrichment_tier=None
+        )  # empty loc, non-terminal → awaiting_location
+        self._insert_job(conn, "gated-nojd", jd_full=None)  # → awaiting_jd
+        self._insert_job(conn, "gated-ws-jd", jd_full="   ")  # whitespace → awaiting_jd
+        self._insert_job(conn, "already-classified", classification="apply")
+        self._insert_job(conn, "dismissed-row", pipeline_status="dismissed")
+
+        rows = [dict(r) for r in conn.execute("SELECT * FROM jobs").fetchall()]
+        expected = sum(
+            1
+            for r in rows
+            if r["classification"] is None
+            and r["pipeline_status"] not in ("dismissed", "archived")
+            and (r["unresolved_reasons"] or "[]") == "[]"
+            and scoring_precheck(r) is None
+            and not should_exclude(r, {}, None, {})[0]
+        )
+        assert count_scorable(conn, {}) == expected
+        # Exactly the three scorable rows above; the rest are gated/excluded.
+        assert expected == 3
