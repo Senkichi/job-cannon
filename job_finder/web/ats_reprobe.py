@@ -56,6 +56,7 @@ from job_finder.web.ats_identity_reconcile import promote_from_careers_link
 from job_finder.web.careers_crawler._ats_link_discovery import best_ats_candidate
 from job_finder.web.careers_crawler._static_tier import _extract_jobs_from_soup
 from job_finder.web.db_helpers import standalone_connection
+from job_finder.web.http_fetch import fetch_with_deadline
 
 logger = logging.getLogger(__name__)
 
@@ -113,8 +114,9 @@ def _fetch_careers_html(url: str, timeout: int = _FETCH_TIMEOUT_S) -> str | None
     (the company is simply left frozen for this pass). No exception escapes.
     """
     try:
-        resp = requests.get(
+        resp = fetch_with_deadline(
             url,
+            getter=requests.get,
             timeout=timeout,
             allow_redirects=True,
             headers={"User-Agent": _USER_AGENT, "Accept": "text/html,*/*"},

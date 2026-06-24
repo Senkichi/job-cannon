@@ -27,6 +27,7 @@ from bs4 import BeautifulSoup
 from job_finder.config import JD_STORAGE_MAX_CHARS
 from job_finder.web.careers_crawler._title_filters import clean_title
 from job_finder.web.claude_client import call_claude
+from job_finder.web.http_fetch import fetch_with_deadline
 from job_finder.web.model_provider import ProviderCascadeExhaustedError, call_model
 from job_finder.web.platform_extractor import extract_clean_jd
 
@@ -248,7 +249,7 @@ def _fetch_job_description(url: str) -> str:
         Cleaned description text, or empty string on failure.
     """
     try:
-        resp = requests.get(url, timeout=_TIMEOUT, headers=_HEADERS)
+        resp = fetch_with_deadline(url, timeout=_TIMEOUT, headers=_HEADERS)
         resp.raise_for_status()
         # Route through the single chokepoint so any platform-scoped pages and
         # trailing page chrome are handled identically to the other fetch tiers.
@@ -408,7 +409,7 @@ def find_careers_url(
         Absolute URL to the careers page, or None if not found / ATS redirect.
     """
     try:
-        resp = requests.get(homepage_url, timeout=_TIMEOUT, headers=_HEADERS)
+        resp = fetch_with_deadline(homepage_url, timeout=_TIMEOUT, headers=_HEADERS)
     except Exception as e:
         logger.debug("find_careers_url('%s') request failed: %s", homepage_url, e)
         return None
@@ -608,7 +609,7 @@ def scrape_careers_page(
         return []
 
     try:
-        resp = requests.get(careers_url, timeout=_TIMEOUT, headers=_HEADERS)
+        resp = fetch_with_deadline(careers_url, timeout=_TIMEOUT, headers=_HEADERS)
     except Exception as e:
         logger.debug("scrape_careers_page('%s') request failed: %s", careers_url, e)
         return []
