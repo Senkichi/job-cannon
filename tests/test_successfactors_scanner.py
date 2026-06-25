@@ -16,7 +16,7 @@ Covers:
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pytest
 
@@ -25,12 +25,11 @@ from job_finder.web.ats_detection import (
     extract_ats_from_url_best,
 )
 from job_finder.web.ats_platforms._platforms_successfactors import (
+    SCANNER,
     _parse_posted_date,
     _posting_to_job,
     _resolve_facet,
-    SCANNER,
 )
-
 
 # ---------------------------------------------------------------------------
 # Extractor version bump
@@ -84,7 +83,9 @@ class TestUrlDetection:
 class TestFixtureParsing:
     def test_parse_real_fixture_extracts_at_least_two_jobs(self):
         """The real Swiss Re fixture has 2 jobs (truncated from 309)."""
-        fixture_path = Path(__file__).parent / "fixtures" / "successfactors_job_listing_summary.xml"
+        fixture_path = (
+            Path(__file__).parent / "fixtures" / "successfactors_job_listing_summary.xml"
+        )
         content = fixture_path.read_bytes()
 
         import defusedxml.ElementTree as ET
@@ -95,7 +96,9 @@ class TestFixtureParsing:
 
     def test_first_job_title_and_req_id_extracted(self):
         """First job in fixture: (Senior) Aktuar/in & Client Manager/in L&H, ReqId 137248."""
-        fixture_path = Path(__file__).parent / "fixtures" / "successfactors_job_listing_summary.xml"
+        fixture_path = (
+            Path(__file__).parent / "fixtures" / "successfactors_job_listing_summary.xml"
+        )
         content = fixture_path.read_bytes()
 
         import defusedxml.ElementTree as ET
@@ -120,7 +123,9 @@ class TestFixtureParsing:
 
     def test_facet_resolution_by_label(self):
         """Facets resolved by label text, not element index."""
-        fixture_path = Path(__file__).parent / "fixtures" / "successfactors_job_listing_summary.xml"
+        fixture_path = (
+            Path(__file__).parent / "fixtures" / "successfactors_job_listing_summary.xml"
+        )
         content = fixture_path.read_bytes()
 
         import defusedxml.ElementTree as ET
@@ -153,7 +158,9 @@ class TestFixtureParsing:
 class TestSuccessFactorsScanner:
     def test_fetch_postings_from_fixture(self):
         """Parse the real fixture and extract jobs."""
-        fixture_path = Path(__file__).parent / "fixtures" / "successfactors_job_listing_summary.xml"
+        fixture_path = (
+            Path(__file__).parent / "fixtures" / "successfactors_job_listing_summary.xml"
+        )
         content = fixture_path.read_bytes()
 
         with patch(
@@ -165,6 +172,8 @@ class TestSuccessFactorsScanner:
         assert len(postings) >= 2
         first = postings[0]
         assert "(Senior) Aktuar/in" in first["title"]
+        assert "& Client Manager/in L&H" in first["title"]
+        assert "&amp;" not in first["title"]
         assert first["req_id"] == "137248"
         assert first["posted_date"] == "2026-04-03"
         assert first["location"] == "Germany"  # Country fallback
@@ -218,14 +227,17 @@ class TestSuccessFactorsScanner:
             postings = SCANNER.fetch_postings("invalid-slug")
         assert postings == []
 
-    def test_404_returns_empty_list(self):
-        """404/410 from feed URL returns []."""
+    def test_404_raises_board_gone(self):
+        """404/410 from the feed URL raises BoardGoneError (enables stale-hit demotion)."""
+        from job_finder.web.ats_platforms._registry import BoardGoneError
+
+        fake = Mock(status_code=404, content=b"")
         with patch(
-            "job_finder.web.ats_platforms._platforms_successfactors._fetch_xml",
-            return_value=None,
+            "job_finder.web.ats_platforms._platforms_successfactors.requests.get",
+            return_value=fake,
         ):
-            postings = SCANNER.fetch_postings("career2.successfactors.eu|NonExistent")
-        assert postings == []
+            with pytest.raises(BoardGoneError):
+                SCANNER.fetch_postings("career2.successfactors.eu|NonExistent")
 
 
 # ---------------------------------------------------------------------------

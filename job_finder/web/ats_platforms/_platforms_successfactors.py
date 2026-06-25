@@ -19,13 +19,18 @@ returns a clean ``[]``.
 
 from __future__ import annotations
 
+import html
 import logging
 from datetime import datetime
 
 import defusedxml.ElementTree as ET
 import requests
 
-from job_finder.web.ats_platforms._registry import PlatformScanner
+from job_finder.web.ats_platforms._registry import (
+    BOARD_GONE_STATUSES,
+    BoardGoneError,
+    PlatformScanner,
+)
 from job_finder.web.ats_prober import _PROBE_TIMEOUT
 from job_finder.web.location_parser import parse_locations
 
@@ -44,8 +49,7 @@ def _fetch_xml(slug: str) -> bytes | None:
         return None
 
     url = (
-        f"https://{host}/career?company={company_id}"
-        "&career_ns=job_listing_summary&resultType=XML"
+        f"https://{host}/career?company={company_id}&career_ns=job_listing_summary&resultType=XML"
     )
     try:
         resp = requests.get(url, timeout=_PROBE_TIMEOUT)
@@ -56,10 +60,9 @@ def _fetch_xml(slug: str) -> bytes | None:
     if resp.status_code == 200 and resp.content:
         return resp.content
 
-    if resp.status_code in (404, 410):
-        logger.debug("_fetch_xml('%s') returned HTTP %d", slug, resp.status_code)
-    else:
-        logger.warning("_fetch_xml('%s') returned HTTP %d", slug, resp.status_code)
+    if resp.status_code in BOARD_GONE_STATUSES:
+        raise BoardGoneError(resp.status_code, slug)
+    logger.warning("_fetch_xml('%s') returned HTTP %d", slug, resp.status_code)
     return None
 
 
@@ -76,7 +79,7 @@ def _resolve_facet(job_elem: ET.Element, target_label: str) -> str | None:
             if label == target_label:
                 value = facet.findtext("value")
                 if value:
-                    return value.strip()
+                    return html.unescape(value).strip()
     return None
 
 
@@ -108,7 +111,7 @@ def _fetch_postings(slug: str) -> list[dict]:
     postings: list[dict] = []
     for job in root.iter("Job"):
         title_elem = job.find("JobTitle")
-        title = (title_elem.text if title_elem is not None else "").strip()
+        title = html.unescape(title_elem.text if title_elem is not None else "").strip()
 
         desc_elem = job.find("Job-Description")
         description_raw = (desc_elem.text if desc_elem is not None else "").strip()
