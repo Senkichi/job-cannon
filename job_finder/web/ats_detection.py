@@ -160,12 +160,26 @@ _ICIMS_URL = re.compile(
     re.IGNORECASE,
 )
 
+# SuccessFactors: regional TLDs (.com, .eu), slug packs host|company_id.
+# Pattern matches career{N}.successfactors.{com,eu} with company= query param.
+_SUCCESSFACTORS_URL = re.compile(
+    r"https?://(career\d*\.successfactors\.(?:com|eu))\b.*company=([^&]+)",
+    re.IGNORECASE,
+)
+
+# SAP SuccessFactors demo / SAP internal jobs (alternative domains).
+_SUCCESSFACTORS_SAP_URL = re.compile(
+    r"https?://(?:sapsfdemojobs\.com|jobs\.hr\.cloud\.sap\.com)",
+    re.IGNORECASE,
+)
+
 # Bump alongside material changes to the regex patterns above (contract tests).
 # m049-v4: + workable / jobvite / paylocity / rippling URL patterns (round 6 audit).
 # m049-v5: + icims URL pattern (careers-/jobs- tenant host) (PR-A2).
 # m049-v6: + oracle_cloud URL pattern (Fusion CE pod host + site number).
 # m049-v7: + ultipro URL pattern (UKG Pro Recruiting host/tenant/board GUID).
-ATS_EXTRACTOR_VERSION = "m049-v7"
+# m049-v8: + successfactors URL pattern (regional TLDs + host|company_id slug).
+ATS_EXTRACTOR_VERSION = "m049-v8"
 
 # Relative pattern strength within a URL: API/canonical traces win ties in reconciliation.
 _SPECIFICITY_API = 10
@@ -296,6 +310,20 @@ def extract_ats_from_url_best(url: str) -> tuple[str, str, int] | None:
     m = _ICIMS_URL.search(url)
     if m:
         return "icims", m.group(1).lower(), _SPECIFICITY_BOARD
+
+    # SuccessFactors — regional TLDs (.com, .eu), slug packs host|company_id.
+    m = _SUCCESSFACTORS_URL.search(url)
+    if m:
+        host = m.group(1).lower()
+        company_id = m.group(2)
+        return "successfactors", f"{host}|{company_id}", _SPECIFICITY_BOARD
+
+    # SAP SuccessFactors demo / SAP internal jobs (alternative domains).
+    m = _SUCCESSFACTORS_SAP_URL.search(url)
+    if m:
+        # These domains don't expose the public feed format; return None
+        # for now (TODO(followup): custom vanity domain mapping).
+        return None
 
     return None
 

@@ -96,7 +96,7 @@ _SIMPLE_POSTING_ID_PATTERNS: dict[str, re.Pattern] = {
 # of run_platform_scan, so boards too large to fully paginate are skipped rather
 # than falsely expiring unseen postings (#216 / #217).
 _RECONCILABLE_PLATFORMS: frozenset[str] = frozenset(
-    {"lever", "ashby", "smartrecruiters", "greenhouse", "workday"}
+    {"lever", "ashby", "smartrecruiters", "greenhouse", "workday", "successfactors"}
 )
 
 
