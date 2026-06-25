@@ -102,29 +102,29 @@
       color: #AAA;
   	font-family: "Arial,Helvetica,sans-serif";
   }
-  
+
   .swissre_jobtemplate {
   	width: 970px;
       max-width: 100%;
       height: auto;
   }
-  
+
   .jobDisplay .job {
   font-family: "Arial" !important;
   font-size: 12px !important;
   }
-  
+
   .joqReqDescription {
       max-width: 100%;
       height: auto;
       align: center;
   }
-  
+
   .joqReqDescription ul {
       width: 787px;
       max-width: 100%;
   }
-  
+
   .joqReqDescription p {
       width: 827px;
       max-width: 100%;
@@ -219,29 +219,29 @@
       color: #AAA;
   	font-family: "Arial,Helvetica,sans-serif";
   }
-  
+
   .swissre_jobtemplate {
   	width: 970px;
       max-width: 100%;
       height: auto;
   }
-  
+
   .jobDisplay .job {
   font-family: "Arial" !important;
   font-size: 12px !important;
   }
-  
+
   .joqReqDescription {
       max-width: 100%;
       height: auto;
       align: center;
   }
-  
+
   .joqReqDescription ul {
       width: 787px;
       max-width: 100%;
   }
-  
+
   .joqReqDescription p {
       width: 827px;
       max-width: 100%;
