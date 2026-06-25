@@ -31,9 +31,11 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 
 import job_finder.web.ats_prober as _prober
+from job_finder.web.ats_platforms import PLAYWRIGHT_SCANNERS as _PLAYWRIGHT_SCANNERS
 from job_finder.web.ats_platforms import SCANNERS_BY_NAME as _REQUESTS_SCANNERS
 from job_finder.web.ats_platforms._platforms_icims import SCANNER as _ICIMS_SCANNER
 from job_finder.web.ats_platforms._platforms_icims import PlaywrightPlatformScanner
+from job_finder.web.ats_platforms._platforms_phenom import SCANNER as _PHENOM_SCANNER
 from job_finder.web.ats_platforms._registry import PlatformScanner
 
 
@@ -138,6 +140,8 @@ _SPECS: tuple[PlatformSpec, ...] = (
     ),
     # Playwright-fetch (no requests API); promotable via reconcile.
     PlatformSpec("icims", playwright_scanner=_ICIMS_SCANNER, probe_attr="_probe_icims"),
+    # Phenom — Playwright scanner via sitemap, no public JSON API.
+    PlatformSpec("phenom", playwright_scanner=_PHENOM_SCANNER, probe_attr="_probe_phenom"),
     # Registered stub with a probe but kept at 'miss' (careers_crawler owns it).
     PlatformSpec("jobvite", probe_attr="_probe_jobvite", non_scannable=True),
     # Keyword-search adapters: scanner but no slug-probe and no URL form. The
@@ -153,11 +157,17 @@ _SPECS: tuple[PlatformSpec, ...] = (
 
 def _attach_scanners(specs: tuple[PlatformSpec, ...]) -> dict[str, PlatformSpec]:
     """Bind each spec to its requests-scanner from SCANNERS_BY_NAME (the owner of
-    the scanner objects). iCIMS has no requests scanner (playwright only)."""
+    the scanner objects). iCIMS and Phenom have no requests scanner (playwright only)."""
     out: dict[str, PlatformSpec] = {}
     for spec in specs:
         rs = _REQUESTS_SCANNERS.get(spec.name)
-        out[spec.name] = replace(spec, requests_scanner=rs) if rs is not None else spec
+        ps = _PLAYWRIGHT_SCANNERS.get(spec.name)
+        if rs is not None:
+            out[spec.name] = replace(spec, requests_scanner=rs)
+        elif ps is not None:
+            out[spec.name] = replace(spec, playwright_scanner=ps)
+        else:
+            out[spec.name] = spec
     return out
 
 
