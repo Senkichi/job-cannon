@@ -50,6 +50,9 @@ from job_finder.web.ats_platforms._platforms_rippling import SCANNER as _RIPPLIN
 from job_finder.web.ats_platforms._platforms_smartrecruiters import (
     SCANNER as _SMARTRECRUITERS_SCANNER,
 )
+from job_finder.web.ats_platforms._platforms_successfactors import (
+    SCANNER as _SUCCESSFACTORS_SCANNER,
+)
 from job_finder.web.ats_platforms._platforms_teamtailor import SCANNER as _TEAMTAILOR_SCANNER
 from job_finder.web.ats_platforms._platforms_ultipro import SCANNER as _ULTIPRO_SCANNER
 from job_finder.web.ats_platforms._platforms_workable import SCANNER as _WORKABLE_SCANNER
@@ -91,6 +94,7 @@ SCANNERS_BY_NAME: dict[str, PlatformScanner] = {
         _RECRUITEE_SCANNER,
         _RIPPLING_SCANNER,
         _SMARTRECRUITERS_SCANNER,
+        _SUCCESSFACTORS_SCANNER,
         _TEAMTAILOR_SCANNER,
         _ULTIPRO_SCANNER,
         _WORKABLE_SCANNER,
@@ -328,6 +332,17 @@ def scan_oracle_cloud(slug: str, target_titles: list[str], exclusions: list[str]
     return run_platform_scan(_ORACLE_CLOUD_SCANNER, slug, target_titles, exclusions)
 
 
+def scan_successfactors(slug: str, target_titles: list[str], exclusions: list[str]) -> list[dict]:
+    """Scan a SuccessFactors job board for matched postings.
+
+    API: GET https://{host}/career?company={company_id}&career_ns=job_listing_summary&resultType=XML
+    Slug packs "{host}|{company_id}" (e.g. "career2.successfactors.eu|SwissRe").
+    Single-shot XML feed (no pagination). Facets are tenant-variable — resolved
+    by label text, not element index. Description is raw HTML (kept for jd_full).
+    """
+    return run_platform_scan(_SUCCESSFACTORS_SCANNER, slug, target_titles, exclusions)
+
+
 def scan_amazon(slug: str, target_titles: list[str], exclusions: list[str]) -> list[dict]:
     """Scan Amazon Jobs (single global board) for keyword-matched postings.
 
@@ -372,6 +387,7 @@ __all__ = [
     "scan_recruitee",
     "scan_rippling",
     "scan_smartrecruiters",
+    "scan_successfactors",
     "scan_teamtailor",
     "scan_ultipro",
     "scan_workable",

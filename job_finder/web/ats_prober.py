@@ -278,6 +278,31 @@ def probe_single_company(
                 except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
                     _handle_scan_error(conn, company_id, company_name, str(e), now)
                     return {"status": "error", "detail": str(e)}
+            elif platform == "successfactors":
+                # SuccessFactors XML feed — delegate to the probe function.
+                try:
+                    if _probe_successfactors(slug):
+                        conn.execute(
+                            "UPDATE companies SET ats_probe_status = 'hit' WHERE id = ?",
+                            (company_id,),
+                        )
+                        _reset_retry_state(conn, company_id, now)
+                        logger.info(
+                            "probe_single_company: %s -> hit (successfactors)", company_name
+                        )
+                        return {"status": "hit", "jobs_found": 0}
+                    conn.execute(
+                        """UPDATE companies
+                           SET ats_probe_status = 'miss',
+                               miss_reason = 'platform_slug_404'
+                           WHERE id = ?""",
+                        (company_id,),
+                    )
+                    conn.commit()
+                    return {"status": "miss"}
+                except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
+                    _handle_scan_error(conn, company_id, company_name, str(e), now)
+                    return {"status": "error", "detail": str(e)}
             else:
                 # B4: platform value is set but not one we know how to probe —
                 # ATS catalog drift (probably the company's platform was
@@ -988,4 +1013,37 @@ def _probe_rippling(slug: str) -> bool:
         return isinstance(items, list) and len(items) > 0
     except Exception as e:
         logger.debug("_probe_rippling('%s') failed: %s", slug, e)
+        return False
+
+
+def _probe_successfactors(slug: str) -> bool:
+    """Return True if slug resolves to a live SuccessFactors job board.
+
+    Slug format: ``"{host}|{company_id}"`` (e.g. ``"career2.successfactors.eu|SwissRe"``).
+    Fetches the public XML feed at
+    ``https://{host}/career?company={company_id}&career_ns=job_listing_summary&resultType=XML``
+    and returns True only if the body contains ``<Job-Listing>`` AND at least one
+    ``<Job>`` (or ``<JobTitle>``). This avoids false positives on plain SEO sitemaps.
+
+    Args:
+        slug: SuccessFactors slug in "host|company_id" format.
+    """
+    try:
+        host, company_id = slug.split("|")
+    except ValueError:
+        logger.debug("_probe_successfactors('%s'): invalid slug format", slug)
+        return False
+
+    url = (
+        f"https://{host}/career?company={company_id}&career_ns=job_listing_summary&resultType=XML"
+    )
+    try:
+        r = requests.get(url, timeout=_PROBE_TIMEOUT)
+        if r.status_code != 200:
+            return False
+        # Check for job-bearing content, not just "valid XML"
+        content = r.text
+        return "<Job-Listing" in content and ("<Job>" in content or "<JobTitle>" in content)
+    except Exception as e:
+        logger.debug("_probe_successfactors('%s') failed: %s", slug, e)
         return False

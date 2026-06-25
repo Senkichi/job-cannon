@@ -117,6 +117,8 @@ _URL_FASTPATH_PLATFORMS: frozenset[str] = frozenset(
         "workable",
         "paylocity",
         "rippling",
+        # SuccessFactors -- public XML feed
+        "successfactors",
     }
 )
 
