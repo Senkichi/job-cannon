@@ -133,7 +133,9 @@ _SPECS: tuple[PlatformSpec, ...] = (
     PlatformSpec("oracle_cloud", probe_attr="_probe_oracle_cloud"),
     PlatformSpec("ultipro", probe_attr="_probe_ultipro"),
     # SuccessFactors — public XML feed, URL-fastpath eligible.
-    PlatformSpec("successfactors", probe_attr="_probe_successfactors", url_fastpath=True, reconcilable=True),
+    PlatformSpec(
+        "successfactors", probe_attr="_probe_successfactors", url_fastpath=True, reconcilable=True
+    ),
     # Playwright-fetch (no requests API); promotable via reconcile.
     PlatformSpec("icims", playwright_scanner=_ICIMS_SCANNER, probe_attr="_probe_icims"),
     # Registered stub with a probe but kept at 'miss' (careers_crawler owns it).

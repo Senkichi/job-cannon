@@ -287,7 +287,9 @@ def probe_single_company(
                             (company_id,),
                         )
                         _reset_retry_state(conn, company_id, now)
-                        logger.info("probe_single_company: %s -> hit (successfactors)", company_name)
+                        logger.info(
+                            "probe_single_company: %s -> hit (successfactors)", company_name
+                        )
                         return {"status": "hit", "jobs_found": 0}
                     conn.execute(
                         """UPDATE companies
@@ -1033,8 +1035,7 @@ def _probe_successfactors(slug: str) -> bool:
         return False
 
     url = (
-        f"https://{host}/career?company={company_id}"
-        "&career_ns=job_listing_summary&resultType=XML"
+        f"https://{host}/career?company={company_id}&career_ns=job_listing_summary&resultType=XML"
     )
     try:
         r = requests.get(url, timeout=_PROBE_TIMEOUT)
