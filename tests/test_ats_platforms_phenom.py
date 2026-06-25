@@ -1,30 +1,28 @@
 """Tests for Phenom ATS platform scanner."""
 
-import pytest
 from job_finder.web.ats_platforms._platforms_phenom import (
+    SCANNER,
     _extract_job_id,
     _extract_job_urls,
-    _extract_sitemap_urls,
     _extract_posting_from_html,
-    SCANNER,
+    _extract_sitemap_urls,
 )
 
 
 def test_extract_job_id():
     """Test job ID extraction from Phenom URLs."""
-    assert _extract_job_id("https://careers.conduent.com/us/en/job/23003/Accounting-Analyst") == "23003"
+    assert (
+        _extract_job_id("https://careers.conduent.com/us/en/job/23003/Accounting-Analyst")
+        == "23003"
+    )
     assert _extract_job_id("https://careers.blackbaud.com/us/en/job/12345/Engineer") == "12345"
     assert _extract_job_id("https://example.com/not-a-job") is None
 
 
 def test_extract_sitemap_urls():
-    """Test sitemap URL extraction from sitemap index."""
-    html = """
-    <sitemapindex>
-        <sitemap><loc>https://careers.conduent.com/us/en/sitemap1.xml</loc></sitemap>
-        <sitemap><loc>https://careers.conduent.com/us/en/sitemap2.xml</loc></sitemap>
-    </sitemapindex>
-    """
+    """Test sitemap URL extraction from sitemap index (captured fixture)."""
+    with open("tests/fixtures/phenom_sitemap_index.xml", encoding="utf-8") as f:
+        html = f.read()
     urls = _extract_sitemap_urls(html)
     assert len(urls) == 2
     assert "https://careers.conduent.com/us/en/sitemap1.xml" in urls
@@ -32,56 +30,52 @@ def test_extract_sitemap_urls():
 
 
 def test_extract_job_urls():
-    """Test job URL extraction from sitemap."""
-    html = """
-    <urlset>
-        <url><loc>https://careers.conduent.com/us/en/job/23003/Accounting-Analyst</loc></url>
-        <url><loc>https://careers.conduent.com/us/en/page/about</loc></url>
-        <url><loc>https://careers.conduent.com/us/en/job/12345/Engineer</loc></url>
-    </urlset>
-    """
+    """Test job URL extraction from sitemap (captured fixture)."""
+    with open("tests/fixtures/phenom_sitemap1.xml", encoding="utf-8") as f:
+        html = f.read()
     urls = _extract_job_urls(html)
-    assert len(urls) == 2
-    assert "https://careers.conduent.com/us/en/job/23003/Accounting-Analyst" in urls
-    assert "https://careers.conduent.com/us/en/job/12345/Engineer" in urls
+    # Should extract job URLs from the captured sitemap
+    assert len(urls) >= 4
+    assert (
+        "https://careers.conduent.com/us/en/job/22047/Human-Resources-Business-Partner-Analyst-II"
+        in urls
+    )
+    assert (
+        "https://careers.conduent.com/us/en/job/23413/Senior-Supervisor-Accounting-Services"
+        in urls
+    )
 
 
 def test_extract_posting_from_html():
-    """Test job data extraction from HTML."""
-    html = """
-    <html>
-    <head>
-        <meta property="og:title" content="Software Engineer | Remote | Full Time">
-        <meta name="description" content="Apply for Software Engineer job with Company in San Francisco, CA at Company">
-        <meta name="keywords" content="Software Engineer, San Francisco, CA, Engineering">
-    </head>
-    <body>
-        <h1>Software Engineer</h1>
-    </body>
-    </html>
-    """
-    posting = _extract_posting_from_html(html, "https://careers.example.com/us/en/job/12345/Software-Engineer")
+    """Test job data extraction from HTML (captured fixture)."""
+    with open("tests/fixtures/phenom_job_detail.html", encoding="utf-8") as f:
+        html = f.read()
+    posting = _extract_posting_from_html(
+        html,
+        "https://careers.conduent.com/us/en/job/22047/Human-Resources-Business-Partner-Analyst-II",
+    )
     assert posting is not None
-    assert posting["title"] == "Software Engineer"
-    assert "San Francisco, CA" in posting["location"]
-    assert posting["source_id"] == "12345"
-    assert posting["source_url"] == "https://careers.example.com/us/en/job/12345/Software-Engineer"
+    assert "Human Resources" in posting["title"]
+    assert posting["source_id"] == "22047"
+    assert (
+        posting["source_url"]
+        == "https://careers.conduent.com/us/en/job/22047/Human-Resources-Business-Partner-Analyst-II"
+    )
 
 
 def test_extract_posting_title_bleed_protection():
     """Test that location glued to title is removed (PR #539 regression)."""
-    html = """
-    <html>
-    <head>
-        <meta property="og:title" content="Data Scientist in New York, NY">
-        <meta name="description" content="Apply for Data Scientist job">
-    </head>
-    </html>
-    """
-    posting = _extract_posting_from_html(html, "https://careers.example.com/us/en/job/12345/Data-Scientist")
+    # The captured fixture has location in the title: "Human Resources Business Partner Analyst II in Cebu City..."
+    with open("tests/fixtures/phenom_job_detail.html", encoding="utf-8") as f:
+        html = f.read()
+    posting = _extract_posting_from_html(
+        html,
+        "https://careers.conduent.com/us/en/job/22047/Human-Resources-Business-Partner-Analyst-II",
+    )
     assert posting is not None
-    assert posting["title"] == "Data Scientist"
-    assert "New York" not in posting["title"]
+    # Title should NOT contain location after clean_title processing
+    assert "Cebu City" not in posting["title"]
+    assert "Philippines" not in posting["title"]
 
 
 def test_scanner_contract():

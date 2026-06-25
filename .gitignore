@@ -108,3 +108,6 @@ orchestrator-state/
 /evals/cascade_audit/artifacts/round_*/html/
 /evals/cascade_audit/artifacts/round_*/descriptions/
 /evals/cascade_audit/artifacts/reports/
+
+# Live sanity check orchestration artifact (regenerable, not product code)
+live_sanity.json

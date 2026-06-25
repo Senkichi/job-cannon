@@ -359,8 +359,30 @@ def scan_phenom(slug: str, target_titles: list[str], exclusions: list[str]) -> l
     sitemaps (sitemap_index.xml → sitemapN.xml → job URLs). Individual job
     detail pages are fetched via Playwright to extract full job data.
     Slug is the careers host (e.g. "careers.conduent.com").
+
+    Note: This is a Playwright-class scanner. The public function exists for
+    live_sanity.json validation, but production scans use the Playwright
+    registry path in ats_scanner/_run_playwright.py.
     """
-    return run_platform_scan(_PHENOM_SCANNER, slug, target_titles, exclusions)
+    from playwright.sync_api import sync_playwright
+
+    with sync_playwright() as pw:
+        browser = pw.chromium.launch(headless=True)
+        try:
+            postings = _PHENOM_SCANNER.fetch_postings(browser, slug)
+            # Apply title gate manually for the public function
+            from job_finder.web.ats_platforms import _title_matches
+
+            results = []
+            for posting in postings:
+                title = _PHENOM_SCANNER.title_of(posting)
+                if _title_matches(title, target_titles, exclusions):
+                    job_dict = _PHENOM_SCANNER.posting_to_job(posting, slug)
+                    if job_dict is not None:
+                        results.append(job_dict)
+            return results
+        finally:
+            browser.close()
 
 
 def scan_amazon(slug: str, target_titles: list[str], exclusions: list[str]) -> list[dict]:

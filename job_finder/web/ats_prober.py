@@ -803,6 +803,7 @@ def _probe_phenom(slug: str) -> bool:
 
     Phenom does not expose a public JSON API. The probe checks if the
     sitemap index exists and contains at least one sitemap with job URLs.
+    Uses the locale-aware sitemap discovery from the scanner module.
 
     Args:
         slug: Phenom careers host (e.g. 'careers.conduent.com').
@@ -812,10 +813,10 @@ def _probe_phenom(slug: str) -> bool:
     """
     from bs4 import BeautifulSoup
 
-    host = slug.strip().replace("https://", "").replace("http://", "").split("/")[0]
-    sitemap_index_url = f"https://{host}/us/en/sitemap_index.xml"
+    from job_finder.web.ats_platforms._platforms_phenom import _sitemap_index_url
 
     try:
+        sitemap_index_url = _sitemap_index_url(slug)
         r = requests.get(sitemap_index_url, timeout=_PROBE_TIMEOUT)
         if r.status_code != 200:
             return False

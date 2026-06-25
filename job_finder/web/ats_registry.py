@@ -31,8 +31,8 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 
 import job_finder.web.ats_prober as _prober
-from job_finder.web.ats_platforms import SCANNERS_BY_NAME as _REQUESTS_SCANNERS
 from job_finder.web.ats_platforms import PLAYWRIGHT_SCANNERS as _PLAYWRIGHT_SCANNERS
+from job_finder.web.ats_platforms import SCANNERS_BY_NAME as _REQUESTS_SCANNERS
 from job_finder.web.ats_platforms._platforms_icims import SCANNER as _ICIMS_SCANNER
 from job_finder.web.ats_platforms._platforms_icims import PlaywrightPlatformScanner
 from job_finder.web.ats_platforms._platforms_phenom import SCANNER as _PHENOM_SCANNER

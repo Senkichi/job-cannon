@@ -173,11 +173,11 @@ _SUCCESSFACTORS_SAP_URL = re.compile(
     re.IGNORECASE,
 )
 
-# Phenom: various subdomain patterns (careers.*, jobs.*, www.*). The slug is the full host.
-# Phenom sites don't have a single consistent subdomain pattern, so we match
-# common careers/jobs subdomains and the full host as the slug.
+# Phenom: careers/jobs subdomain patterns. The slug is the full host.
+# Phenom sites typically use careers.* or jobs.* subdomains.
+# We avoid www.* to prevent false positives on marketing sites (e.g., www.oracle.com/careers).
 _PHENOM_URL = re.compile(
-    r"https?://(?:careers|jobs|www)\.([a-z0-9.-]+)",
+    r"https?://(?:careers|jobs)\.([a-z0-9.-]+)",
     re.IGNORECASE,
 )
 
@@ -187,8 +187,9 @@ _PHENOM_URL = re.compile(
 # m049-v6: + oracle_cloud URL pattern (Fusion CE pod host + site number).
 # m049-v7: + ultipro URL pattern (UKG Pro Recruiting host/tenant/board GUID).
 # m049-v8: + successfactors URL pattern (regional TLDs + host|company_id slug).
-# m049-v9: + phenom URL pattern (careers subdomain host).
-ATS_EXTRACTOR_VERSION = "m049-v9"
+# m049-v9: + phenom URL pattern (careers/jobs subdomain host).
+# m049-v10: refine phenom URL pattern to exclude www.* (marketing sites).
+ATS_EXTRACTOR_VERSION = "m049-v10"
 
 # Relative pattern strength within a URL: API/canonical traces win ties in reconciliation.
 _SPECIFICITY_API = 10
@@ -339,6 +340,7 @@ def extract_ats_from_url_best(url: str) -> tuple[str, str, int] | None:
     if m:
         # Extract the full host from the URL
         from urllib.parse import urlparse
+
         parsed = urlparse(url)
         host = parsed.netloc  # Full host (e.g., "careers.conduent.com")
         return "phenom", host.lower(), _SPECIFICITY_BOARD
