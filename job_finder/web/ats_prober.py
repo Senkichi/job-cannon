@@ -798,6 +798,49 @@ def _probe_jazzhr(slug: str) -> bool:
         return False
 
 
+def _probe_phenom(slug: str) -> bool:
+    """Return True if Phenom slug has a valid sitemap with job URLs.
+
+    Phenom does not expose a public JSON API. The probe checks if the
+    sitemap index exists and contains at least one sitemap with job URLs.
+
+    Args:
+        slug: Phenom careers host (e.g. 'careers.conduent.com').
+
+    Returns:
+        True if the slug resolves to a valid Phenom site with job listings.
+    """
+    from bs4 import BeautifulSoup
+
+    host = slug.strip().replace("https://", "").replace("http://", "").split("/")[0]
+    sitemap_index_url = f"https://{host}/us/en/sitemap_index.xml"
+
+    try:
+        r = requests.get(sitemap_index_url, timeout=_PROBE_TIMEOUT)
+        if r.status_code != 200:
+            return False
+
+        soup = BeautifulSoup(r.text, "xml")
+        sitemap_locs = [loc.get_text(strip=True) for loc in soup.find_all("loc")]
+
+        # Check first sitemap for job URLs
+        for sitemap_url in sitemap_locs[:3]:  # Check first 3 sitemaps
+            try:
+                sr = requests.get(sitemap_url, timeout=_PROBE_TIMEOUT)
+                if sr.status_code == 200:
+                    ssoup = BeautifulSoup(sr.text, "xml")
+                    job_locs = [loc.get_text(strip=True) for loc in ssoup.find_all("loc")]
+                    if any("/job/" in url for url in job_locs):
+                        return True
+            except Exception:
+                continue
+
+        return False
+    except Exception as e:
+        logger.debug("_probe_phenom('%s') failed: %s", slug, e)
+        return False
+
+
 def _probe_pinpoint(slug: str) -> bool:
     """Return True if slug has at least one active Pinpoint posting.
 

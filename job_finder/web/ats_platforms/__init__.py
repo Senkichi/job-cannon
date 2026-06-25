@@ -37,6 +37,8 @@ from job_finder.web.ats_platforms._platforms_breezy import SCANNER as _BREEZY_SC
 from job_finder.web.ats_platforms._platforms_eightfold import SCANNER as _EIGHTFOLD_SCANNER
 from job_finder.web.ats_platforms._platforms_google import SCANNER as _GOOGLE_SCANNER
 from job_finder.web.ats_platforms._platforms_greenhouse import SCANNER as _GREENHOUSE_SCANNER
+from job_finder.web.ats_platforms._platforms_icims import SCANNER as _ICIMS_SCANNER
+from job_finder.web.ats_platforms._platforms_icims import PlaywrightPlatformScanner
 from job_finder.web.ats_platforms._platforms_jazzhr import SCANNER as _JAZZHR_SCANNER
 from job_finder.web.ats_platforms._platforms_jobvite import SCANNER as _JOBVITE_SCANNER
 from job_finder.web.ats_platforms._platforms_lever import SCANNER as _LEVER_SCANNER
@@ -44,6 +46,7 @@ from job_finder.web.ats_platforms._platforms_microsoft import SCANNER as _MICROS
 from job_finder.web.ats_platforms._platforms_oracle_cloud import SCANNER as _ORACLE_CLOUD_SCANNER
 from job_finder.web.ats_platforms._platforms_paylocity import SCANNER as _PAYLOCITY_SCANNER
 from job_finder.web.ats_platforms._platforms_personio import SCANNER as _PERSONIO_SCANNER
+from job_finder.web.ats_platforms._platforms_phenom import SCANNER as _PHENOM_SCANNER
 from job_finder.web.ats_platforms._platforms_pinpoint import SCANNER as _PINPOINT_SCANNER
 from job_finder.web.ats_platforms._platforms_recruitee import SCANNER as _RECRUITEE_SCANNER
 from job_finder.web.ats_platforms._platforms_rippling import SCANNER as _RIPPLING_SCANNER
@@ -100,6 +103,12 @@ SCANNERS_BY_NAME: dict[str, PlatformScanner] = {
         _WORKABLE_SCANNER,
         _WORKDAY_SCANNER,
     )
+}
+
+# Playwright scanners are registered separately in ats_registry.py
+PLAYWRIGHT_SCANNERS: dict[str, PlaywrightPlatformScanner] = {
+    "icims": _ICIMS_SCANNER,
+    "phenom": _PHENOM_SCANNER,
 }
 
 
@@ -343,6 +352,17 @@ def scan_successfactors(slug: str, target_titles: list[str], exclusions: list[st
     return run_platform_scan(_SUCCESSFACTORS_SCANNER, slug, target_titles, exclusions)
 
 
+def scan_phenom(slug: str, target_titles: list[str], exclusions: list[str]) -> list[dict]:
+    """Scan Phenom careers site for matched postings.
+
+    Phenom does not expose a public JSON API. Job URLs are discovered via
+    sitemaps (sitemap_index.xml → sitemapN.xml → job URLs). Individual job
+    detail pages are fetched via Playwright to extract full job data.
+    Slug is the careers host (e.g. "careers.conduent.com").
+    """
+    return run_platform_scan(_PHENOM_SCANNER, slug, target_titles, exclusions)
+
+
 def scan_amazon(slug: str, target_titles: list[str], exclusions: list[str]) -> list[dict]:
     """Scan Amazon Jobs (single global board) for keyword-matched postings.
 
@@ -383,6 +403,7 @@ __all__ = [
     "scan_oracle_cloud",
     "scan_paylocity",
     "scan_personio",
+    "scan_phenom",
     "scan_pinpoint",
     "scan_recruitee",
     "scan_rippling",

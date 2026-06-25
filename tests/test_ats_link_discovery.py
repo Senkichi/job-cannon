@@ -146,14 +146,14 @@ def test_target_platforms_derived_from_scanner_registry():
     iCIMS, so adding a scanner automatically makes its embeds promotable and a
     stub (jobvite) can never be promoted to.
     """
-    from job_finder.web.ats_platforms import SCANNERS_BY_NAME
+    from job_finder.web.ats_platforms import SCANNERS_BY_NAME, PLAYWRIGHT_SCANNERS
     from job_finder.web.ats_registry import NON_SCANNABLE_PLATFORMS
     from job_finder.web.careers_crawler._ats_link_discovery import _TARGET_PLATFORMS
 
-    expected = (frozenset(SCANNERS_BY_NAME) - NON_SCANNABLE_PLATFORMS) | {"icims"}
+    expected = (frozenset(SCANNERS_BY_NAME) - NON_SCANNABLE_PLATFORMS) | frozenset(PLAYWRIGHT_SCANNERS.keys())
     assert expected == _TARGET_PLATFORMS
     # The platforms the old hardcoded {gh,lever,ashby,workday,sr} set dropped:
-    for p in ("paylocity", "workable", "rippling", "bamboohr", "breezy", "jazzhr", "icims"):
+    for p in ("paylocity", "workable", "rippling", "bamboohr", "breezy", "jazzhr", "icims", "phenom"):
         assert p in _TARGET_PLATFORMS
     # The non-scannable stub stays out:
     assert "jobvite" not in _TARGET_PLATFORMS

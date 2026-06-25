@@ -1,0 +1,1 @@
+{"cmd": "from job_finder.web.ats_platforms._platforms_phenom import SCANNER; from playwright.sync_api import sync_playwright; browser = sync_playwright().start().chromium.launch(headless=True); print(len(SCANNER.fetch_postings(browser, 'careers.conduent.com'))); browser.close()", "min_count": 1}
