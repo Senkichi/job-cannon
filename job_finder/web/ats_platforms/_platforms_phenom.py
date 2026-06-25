@@ -143,28 +143,36 @@ def _extract_posting_from_html(html: str, url: str) -> dict | None:
     """Extract job data from a Phenom job detail page."""
     soup = BeautifulSoup(html, "html.parser")
 
-    # Try to find title in meta tags first
+    # Priority 1: Extract title from JSON-LD JobPosting object (structural source)
     title = ""
-    meta_title = soup.find("meta", property="og:title")
-    if meta_title:
-        title = meta_title.get("content", "").split("|")[0].strip()
+    json_ld_scripts = soup.find_all("script", type="application/ld+json")
+    for script in json_ld_scripts:
+        try:
+            import json
 
+            data = json.loads(script.string)
+            if isinstance(data, dict) and data.get("@type") == "JobPosting":
+                title = data.get("title", "")
+                if title:
+                    break
+        except Exception:
+            continue
+
+    # Priority 2: Fallback to meta tags (og:title)
     if not title:
-        # Fallback to h1
+        meta_title = soup.find("meta", property="og:title")
+        if meta_title:
+            title = meta_title.get("content", "").split("|")[0].strip()
+
+    # Priority 3: Fallback to h1
+    if not title:
         h1 = soup.find("h1")
         if h1:
             title = h1.get_text(strip=True)
 
     # Apply title isolation to remove location/date glued to title (PR #539)
-    # Use the structural isolation from clean_title, but also handle Phenom's " in " pattern
     if title:
         title = clean_title(title)
-        # Phenom-specific: handle " in " separator which clean_title doesn't cover
-        if " in " in title.lower():
-            # Split on " in " (case-insensitive) and keep the title part
-            parts = re.split(r"\s+in\s+", title, flags=re.IGNORECASE)
-            if parts:
-                title = parts[0].strip()
 
     # Extract location from meta description or keywords
     location = ""
