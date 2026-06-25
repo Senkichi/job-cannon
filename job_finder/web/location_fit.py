@@ -150,6 +150,32 @@ def _target_loc_matches(loc: dict[str, Any], target_locations: list[str]) -> boo
 # ---------------------------------------------------------------------------
 
 
+def resolve_targets_and_home(config: dict) -> tuple[list[str], str | None]:
+    """Resolve ``(target_locations, home_country)`` from config for compute_location_fit.
+
+    Single source of truth for the candidate-side inputs the rule table reads:
+    ``profile.target_locations`` (with the ``work_arrangement == "remote"``
+    adaptation that synthesizes the "remote" sentinel so Row 1/2 fire) and
+    ``profile.home_country``. Both the orchestrator's post-LLM override
+    (``_apply_location_fit_override``) and the v3.1 prompt's pre-LLM
+    ``Location facts`` block (``scoring_prompts.location_facts``) call this so
+    the geography verdict asserted to the LLM and the one applied afterward are
+    computed identically (D-6 — facts beat judgment, consistently).
+
+    The synthesis is a call-site adaptation only — ``compute_location_fit``'s
+    rule table is unchanged.
+    """
+    cfg_profile = config.get("profile") or {}
+    target_locations: list[str] = list(cfg_profile.get("target_locations") or [])
+    home_country: str | None = cfg_profile.get("home_country") or None
+    work_arrangement: str | None = cfg_profile.get("work_arrangement") or None
+    if work_arrangement == "remote" and not any(
+        (t or "").strip().lower() == "remote" for t in target_locations
+    ):
+        target_locations = ["remote", *target_locations]
+    return target_locations, home_country
+
+
 def compute_location_fit(
     locations_structured: list[dict[str, Any]],
     workplace_type: str | None,

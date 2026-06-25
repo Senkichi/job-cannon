@@ -158,12 +158,87 @@ def _build_system_prompt(
     return header + "\n\n" + field_reinforcement + "\n\n" + candidate_context + "\n\n" + fewshot
 
 
-def _build_user_message(job: dict) -> str:
+def _maybe_location_facts_line(
+    job: dict,
+    config: dict | None,
+    conn: sqlite3.Connection | None,
+) -> str | None:
+    """Render the v3.1 ``Location facts`` line, or None for other variants.
+
+    Returns None unless ``config["scoring"]["prompt_variant"] == "v3_1"`` — so
+    every other variant (including baseline) keeps the byte-identical
+    ``Location: <string>`` user-message line.
+
+    For v3_1, resolves the three location columns (``locations_structured``,
+    ``workplace_type``, ``primary_country_code``) from the jobs row by
+    dedup_key — they are not all carried on the job dict (workplace_type /
+    primary_country_code are absent from JOBS_ALL_COLUMNS), the same reason
+    ``_apply_location_fit_override`` reads them straight from the DB. Degrades
+    gracefully to the job dict's ``locations_structured`` (and an "unknown"
+    geography match) when the DB is unavailable. Never raises — a facts-block
+    failure must not block scoring.
+    """
+    if _variant_name(config) != "v3_1":
+        return None
+
+    from job_finder.web.location_fit import resolve_targets_and_home
+    from job_finder.web.scoring_prompts.location_facts import render_location_facts_line
+
+    def _decode_locs(raw) -> list:
+        if not raw:
+            return []
+        try:
+            parsed = json.loads(raw) if isinstance(raw, str) else raw
+        except (json.JSONDecodeError, TypeError):
+            return []
+        return parsed if isinstance(parsed, list) else []
+
+    locations_structured: list = []
+    workplace_type = None
+    primary_country_code = None
+
+    dedup_key = job.get("dedup_key")
+    if conn is not None and dedup_key:
+        try:
+            row = conn.execute(
+                "SELECT locations_structured, workplace_type, primary_country_code "
+                "FROM jobs WHERE dedup_key = ?",
+                (dedup_key,),
+            ).fetchone()
+            if row is not None:
+                locations_structured = _decode_locs(row[0])
+                workplace_type = row[1]
+                primary_country_code = row[2]
+        except Exception:
+            log.warning(
+                "_maybe_location_facts_line: DB read failed for dedup_key=%s; "
+                "falling back to job dict",
+                dedup_key,
+            )
+
+    if not locations_structured:
+        locations_structured = _decode_locs(job.get("locations_structured"))
+
+    target_locations, home_country = resolve_targets_and_home(config or {})
+    return render_location_facts_line(
+        locations_structured=locations_structured,
+        workplace_type=workplace_type,
+        primary_country_code=primary_country_code,
+        target_locations=target_locations,
+        home_country=home_country,
+    )
+
+
+def _build_user_message(job: dict, location_line: str | None = None) -> str:
     """User-side assembly: title + company + location + comp + JD.
 
     Keeps the request shape stable across candidates so the LLM sees a
     consistent prompt.
 
+    - Location: defaults to ``Location: <string>``. The v3.1 variant passes a
+      pre-rendered ``location_line`` (the deterministic ``Location facts: …``
+      block, D-6) via ``_maybe_location_facts_line``; all other variants pass
+      None and keep the byte-identical legacy line.
     - JD: the cleaned ``jd_full`` is sent WHOLE. Real JD prose is short and
       the local model has ample context headroom, so truncation is almost
       never needed — and a silent truncation that drops the requirements /
@@ -179,6 +254,7 @@ def _build_user_message(job: dict) -> str:
     title = job.get("title") or "(no title)"
     company = job.get("company_canonical") or job.get("company") or "(no company)"
     location = job.get("location") or "(no location)"
+    loc_section = location_line if location_line is not None else f"Location: {location}"
     salary_min = job.get("salary_min")
     salary_max = job.get("salary_max")
     comp = ""
@@ -201,9 +277,7 @@ def _build_user_message(job: dict) -> str:
         jd = jd_full[:_MAX_JD_CHARS]
     else:
         jd = jd_full
-    return (
-        f"Title: {title}\nCompany: {company}\nLocation: {location}{comp}\n\nJob Description:\n{jd}"
-    )
+    return f"Title: {title}\nCompany: {company}\n{loc_section}{comp}\n\nJob Description:\n{jd}"
 
 
 class _IncompleteAssessmentError(ValueError):
@@ -408,7 +482,8 @@ def score_job(
         return ScoringResult(status="skipped", data=None, reason=_skip_reason)
 
     system = _build_system_prompt(candidate_context=candidate_context, config=config)
-    user_content = _build_user_message(job)
+    location_line = _maybe_location_facts_line(job, config, conn)
+    user_content = _build_user_message(job, location_line=location_line)
     output_schema = _resolve_schema(config)
 
     try:

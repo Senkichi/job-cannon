@@ -162,7 +162,7 @@ def _apply_location_fit_override(
     D-6 (facts beat judgment), P3.1.
     """
     from job_finder.web.location_canonical import from_json as _locs_from_json
-    from job_finder.web.location_fit import compute_location_fit
+    from job_finder.web.location_fit import compute_location_fit, resolve_targets_and_home
 
     dedup_key = job.get("dedup_key")
     if not dedup_key:
@@ -197,17 +197,10 @@ def _apply_location_fit_override(
     workplace_type = row[1]
     primary_country_code = row[2]
 
-    cfg_profile = config.get("profile") or {}
-    target_locations: list[str] = list(cfg_profile.get("target_locations") or [])
-    home_country: str | None = cfg_profile.get("home_country") or None
-    work_arrangement: str | None = cfg_profile.get("work_arrangement") or None
-    # When the candidate targets remote work, synthesize the "remote" sentinel so
-    # compute_location_fit's Row 1/2 remote-eligibility checks still fire correctly.
-    # This is a call-site adaptation: the rule table in compute_location_fit is unchanged.
-    if work_arrangement == "remote" and not any(
-        (t or "").strip().lower() == "remote" for t in target_locations
-    ):
-        target_locations = ["remote"] + target_locations
+    # Single source of truth for target_locations (+ remote synthesis) and
+    # home_country — shared with the v3.1 prompt's Location facts block so the
+    # asserted geography verdict and the applied override always agree (D-6).
+    target_locations, home_country = resolve_targets_and_home(config)
 
     verdict = compute_location_fit(
         locations_structured=locations_structured,
