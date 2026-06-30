@@ -312,9 +312,7 @@ def probe_single_company(
                             (company_id,),
                         )
                         _reset_retry_state(conn, company_id, now)
-                        logger.info(
-                            "probe_single_company: %s -> hit (adp)", company_name
-                        )
+                        logger.info("probe_single_company: %s -> hit (adp)", company_name)
                         return {"status": "hit", "jobs_found": 0}
                     conn.execute(
                         """UPDATE companies

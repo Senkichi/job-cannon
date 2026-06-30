@@ -41,7 +41,6 @@ from job_finder.web.ats_platforms._registry import (
     BoardGoneError,
     PlatformScanner,
     coerce_remote_bool,
-    label_or_str,
 )
 from job_finder.web.ats_prober import _PROBE_TIMEOUT
 from job_finder.web.location_parser import parse_locations

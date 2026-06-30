@@ -2,8 +2,8 @@
 
 from job_finder.web.ats_platforms._platforms_adp import (
     SCANNER,
-    _extract_external_job_id,
     _employment_type,
+    _extract_external_job_id,
     _is_remote,
     _job_url,
     _location,
@@ -25,9 +25,7 @@ def test_extract_external_job_id():
     # Missing ExternalJobID
     posting = {
         "customFieldGroup": {
-            "stringFields": [
-                {"nameCode": {"codeValue": "OtherField"}, "stringValue": "value"}
-            ]
+            "stringFields": [{"nameCode": {"codeValue": "OtherField"}, "stringValue": "value"}]
         }
     }
     assert _extract_external_job_id(posting) is None
@@ -59,18 +57,14 @@ def test_is_remote():
     """Test remote indicator extraction."""
     posting = {
         "customFieldGroup": {
-            "indicatorFields": [
-                {"nameCode": {"codeValue": "Remote"}, "indicatorValue": True}
-            ]
+            "indicatorFields": [{"nameCode": {"codeValue": "Remote"}, "indicatorValue": True}]
         }
     }
     assert _is_remote(posting) is True
 
     posting = {
         "customFieldGroup": {
-            "indicatorFields": [
-                {"nameCode": {"codeValue": "Remote"}, "indicatorValue": False}
-            ]
+            "indicatorFields": [{"nameCode": {"codeValue": "Remote"}, "indicatorValue": False}]
         }
     }
     assert _is_remote(posting) is False
@@ -88,9 +82,7 @@ def test_employment_type():
     # Fallback to custom field
     posting = {
         "customFieldGroup": {
-            "codeFields": [
-                {"nameCode": {"codeValue": "SalaryType"}, "shortName": "Hourly"}
-            ]
+            "codeFields": [{"nameCode": {"codeValue": "SalaryType"}, "shortName": "Hourly"}]
         }
     }
     assert _employment_type(posting) == "Hourly"
@@ -130,9 +122,7 @@ def test_scanner_posting_to_job():
         "requisitionTitle": "CNC Machinist",
         "postDate": "2026-06-25T14:50:00.000-04:00",
         "customFieldGroup": {
-            "stringFields": [
-                {"nameCode": {"codeValue": "ExternalJobID"}, "stringValue": "634946"}
-            ]
+            "stringFields": [{"nameCode": {"codeValue": "ExternalJobID"}, "stringValue": "634946"}]
         },
         "requisitionLocations": [
             {"nameCode": {"shortName": "San Francisco, CA"}, "itemID": "12345"}
