@@ -192,6 +192,17 @@ health:
   # for this many CONSECUTIVE checks. It fires once per streak, then stays quiet
   # until the signal recovers and degrades again. Default 3.
   escalation_consecutive_threshold: 3
+  # Owner-idle alarm: the heartbeat flags "running unattended" when your most
+  # recent HUMAN action (touching the UI -- sync, expand, status change, rescore,
+  # edit notes, ...) is older than this many days while the schedulers keep
+  # firing. Catches the tool quietly rotting after you've drifted away. Set 0 to
+  # disable. Default 14.
+  owner_idle_days: 14
+  # Score-rot alarm: the heartbeat re-derives every stored verdict from its saved
+  # sub-scores under today's thresholds (zero AI calls) and flags when at least
+  # this FRACTION of them would now differ -- i.e. the board is carrying verdicts
+  # from a stale scoring era. Set > 1 to disable. Default 0.01 (1%).
+  score_rot_fraction: 0.01
 
 # --- AI scoring configuration ---
 scoring:
