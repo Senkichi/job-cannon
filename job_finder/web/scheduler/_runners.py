@@ -141,6 +141,8 @@ def _derive_degraded_keys(issues: list[str], degraded_sources: list[str]) -> set
       - ``staleness``  <- "Stale detection missed last night"
       - ``oauth``      <- "OAuth token invalid: ..."
       - ``db``         <- "Health check DB error: ..."
+      - ``owner_idle`` <- "Owner idle: ..."
+      - ``score_rot``  <- "Score rot: ..."
       - ``source:<name>`` <- signal-3 "<action>: <n> failures in 24h" rows and
         every ``source_health.status='degraded'`` source (C2-4).
     """
@@ -148,6 +150,10 @@ def _derive_degraded_keys(issues: list[str], degraded_sources: list[str]) -> set
     for issue in issues:
         if issue.startswith("No ingestion"):
             keys.add("ingestion")
+        elif issue.startswith("Owner idle"):
+            keys.add("owner_idle")
+        elif issue.startswith("Score rot"):
+            keys.add("score_rot")
         elif issue.startswith("Stale detection missed"):
             keys.add("staleness")
         elif issue.startswith("OAuth token invalid"):
@@ -267,6 +273,111 @@ def _escalate_degradation(
         _fire_escalation(escalated, issues, config)
 
 
+def _check_owner_idle(conn, config: dict) -> str | None:
+    """Owner-idle alarm -- the pre-mortem's #1 death mode made visible.
+
+    The tool's heartbeat is the owner's own attention; if they drift away (e.g.
+    after landing a job) the scheduler keeps firing while rot accrues unwatched.
+    This fires when the most recent *human* action (``HUMAN_ACTIONS`` -- a person
+    touching the UI, not a scheduled row) is older than ``health.owner_idle_days``
+    (default 14; ``<= 0`` disables). Read-only; returns an issue string or None.
+
+    Scope note: this only runs while the app/scheduler is alive (it IS a
+    scheduled job), so it catches "running unattended", not "switched off
+    entirely" -- the latter is the external-deadman's job. A brand-new install
+    with no human action yet is not alarmed (that is the adoption-void path).
+    Passive board-viewing is not instrumented, so "idle" means "no interaction";
+    the generous default keeps that from nagging an engaged-but-quiet owner.
+    """
+    from job_finder.web.activity_tracker import HUMAN_ACTIONS
+
+    idle_days = int((config.get("health", {}) or {}).get("owner_idle_days", 14))
+    if idle_days <= 0:
+        return None
+
+    human = tuple(sorted(HUMAN_ACTIONS))
+    placeholders = ",".join("?" * len(human))
+    row = conn.execute(
+        f"SELECT MAX(occurred_at) FROM user_activity WHERE action IN ({placeholders})",
+        human,
+    ).fetchone()
+    last_human = row[0] if row else None
+    if not last_human:
+        return None
+
+    days = conn.execute(
+        "SELECT CAST(julianday('now') - julianday(?) AS INTEGER)", (last_human,)
+    ).fetchone()[0]
+    if days is None or days < idle_days:
+        return None
+    return f"Owner idle: no human activity in {days}d (threshold {idle_days}d)"
+
+
+def _check_score_rot(conn, config: dict) -> str | None:
+    """Score-rot parity alarm -- the pre-mortem's #3 death mode made visible.
+
+    Re-runs ``derive_classification`` over each LLM-scored row's ALREADY-STORED
+    sub-scores under today's thresholds (ZERO model calls) and counts rows whose
+    verdict would now differ -- the seam between scoring eras that, unlike
+    titles/dates/JDs, has no self-healing re-sweep. Fires when the drift fraction
+    reaches ``health.score_rot_fraction`` (default 0.01; ``> 1`` disables).
+    Read-only; returns an issue string or None.
+
+    ``low_signal`` rows are excluded from the count: that verdict can stem from a
+    per-run ``degenerate`` (all-providers-uniform) signal that is NOT persisted
+    and so cannot be faithfully reconstructed -- including them would surface
+    phantom drift. Rows with unparseable sub-scores are skipped, never raised.
+    """
+    import json
+
+    from job_finder.db._classification import derive_classification
+
+    scoring = config.get("scoring", {}) or {}
+    low_signal_threshold = int(scoring.get("low_signal_jd_chars", 1500))
+    apply_mean_floor = float(scoring.get("apply_mean_floor", 3.5))
+    apply_min_strong_axes = int(scoring.get("apply_min_strong_axes", 3))
+    floor = float((config.get("health", {}) or {}).get("score_rot_fraction", 0.01))
+    if floor > 1.0:
+        return None
+
+    rows = conn.execute(
+        "SELECT classification, sub_scores_json, legitimacy_note, enrichment_tier, "
+        "COALESCE(LENGTH(jd_full), 0) "
+        "FROM jobs "
+        "WHERE scoring_model IS NOT NULL AND sub_scores_json IS NOT NULL "
+        "AND classification IS NOT NULL AND classification != 'low_signal'"
+    ).fetchall()
+
+    audited = 0
+    drift = 0
+    for stored, sub_scores_json, legitimacy_note, enrichment_tier, jd_len in rows:
+        try:
+            sub_scores = json.loads(sub_scores_json)
+            if not isinstance(sub_scores, dict) or not sub_scores:
+                continue
+            rederived = derive_classification(
+                sub_scores=sub_scores,
+                legitimacy_note=legitimacy_note,
+                enrichment_tier=enrichment_tier,
+                jd_full_length=jd_len,
+                low_signal_threshold=low_signal_threshold,
+                apply_mean_floor=apply_mean_floor,
+                apply_min_strong_axes=apply_min_strong_axes,
+            )
+        except (ValueError, TypeError, json.JSONDecodeError):
+            continue
+        audited += 1
+        if rederived != stored:
+            drift += 1
+
+    if audited == 0 or drift == 0:
+        return None
+    frac = drift / audited
+    if frac < floor:
+        return None
+    return f"Score rot: {drift}/{audited} stored verdicts ({frac:.1%}) differ from today's rule"
+
+
 def run_health_check(app) -> None:
     """Daily health heartbeat -- verify key subsystems ran recently.
 
@@ -286,11 +397,19 @@ def run_health_check(app) -> None:
 
     from job_finder.web import run_events
     from job_finder.web.activity_tracker import ACTION_SCHEDULED_HEALTH, log_activity
+    from job_finder.web.db_helpers import get_config_snapshot
 
     with app.app_context():
         db_path = app.config.get("DB_PATH", "jobs.db")
         issues: list[str] = []
         degraded_sources: list[str] = []
+        # Hoisted once and reused by the owner-idle / score-rot checks, the
+        # autoheal sweep, and the escalation pass. Guarded so a config read can
+        # never break the heartbeat's no-raise contract.
+        try:
+            config = get_config_snapshot(app)
+        except Exception:
+            config = {}
 
         t0 = _time.time()
         run_id = run_events.start(job="health", source="scheduler", db_path=db_path)
@@ -338,18 +457,28 @@ def run_health_check(app) -> None:
                 except Exception as e:
                     issues.append(f"OAuth token invalid: {e}")
 
+                # 5. Owner-idle alarm: the app running unattended while the owner
+                #    has drifted away (pre-mortem #1). Read-only.
+                owner_idle = _check_owner_idle(conn, config)
+                if owner_idle:
+                    issues.append(owner_idle)
+
+                # 6. Score-rot parity: stored verdicts that today's rule would
+                #    change (pre-mortem #3). Read-only, zero model calls.
+                score_rot = _check_score_rot(conn, config)
+                if score_rot:
+                    issues.append(score_rot)
+
         except Exception as e:
             issues.append(f"Health check DB error: {e}")
 
-        # 5. Autoheal: retry heals for still-degraded sources (run_heal gates
+        # 7. Autoheal: retry heals for still-degraded sources (run_heal gates
         #    flag/backoff/attempt-cap itself) + attempt-counter hygiene. The
         #    sweep never contributes to `issues` — it must not fail the heartbeat.
         try:
             from job_finder.web.autoheal.heal_pipeline import run_heal
-            from job_finder.web.db_helpers import get_config_snapshot
             from job_finder.web.db_helpers import standalone_connection as _sc
 
-            config = get_config_snapshot(app)
             reset_days = float(config.get("autoheal", {}).get("heal_attempt_reset_days", 30))
             with _sc(db_path) as conn:
                 # Hygiene backstop (plan invariant I1): a source healthy for
@@ -384,18 +513,16 @@ def run_health_check(app) -> None:
         else:
             logger.info("HEALTH_OK: ingestion, stale detection, OAuth all nominal")
 
-        # 6. Escalation: a signal degraded for N consecutive heartbeats fires the
+        # 8. Escalation: a signal degraded for N consecutive heartbeats fires the
         #    notification egress. Runs every heartbeat (even when nominal) so
         #    recovered keys get their streak counter reset to 0. Best-effort —
         #    must never fail the heartbeat.
         try:
-            from job_finder.web.db_helpers import get_config_snapshot
-
             _escalate_degradation(
                 db_path,
                 issues,
                 degraded_sources,
-                get_config_snapshot(app),
+                config,
                 datetime.now(UTC).replace(tzinfo=None).isoformat(),
             )
         except Exception:

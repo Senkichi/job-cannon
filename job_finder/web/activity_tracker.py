@@ -51,6 +51,34 @@ ACTION_SCHEDULED_HEALTH = "scheduled_health"
 ACTION_SCHEDULED_PRIMARY_SOURCE = "scheduled_primary_source"
 
 # ---------------------------------------------------------------------------
+# Human-vs-system classification
+# ---------------------------------------------------------------------------
+
+# Actions a *person* initiated in the UI -- the single source of truth for
+# "did the owner actually touch the app". Consumed by the owner-idle health
+# alarm (run_health_check) to distinguish real human attention from the
+# scheduler grinding on unattended.
+#
+# Fail-safe direction: membership is EXPLICIT. A new human-initiated ACTION_*
+# that someone forgets to add here gets *under*-counted as activity, which can
+# only produce a benign false "still using this?" nudge -- never a SILENT miss
+# of a genuinely-idle owner (which is the failure an alarm must never have).
+# So: any new human action belongs in this set.
+HUMAN_ACTIONS = frozenset(
+    {
+        ACTION_SYNC,
+        ACTION_EXPAND_JOB,
+        ACTION_STATUS_CHANGE,
+        ACTION_PASTE_JD,
+        ACTION_RESCORE,
+        ACTION_BATCH_SCORE,
+        ACTION_SCORING_SKIPPED_BUDGET,
+        ACTION_SAVE_JD,
+        ACTION_EDIT_NOTES,
+    }
+)
+
+# ---------------------------------------------------------------------------
 # Core helper
 # ---------------------------------------------------------------------------
 
