@@ -32,8 +32,9 @@ logger = logging.getLogger(__name__)
 
 _COMPANY_SOURCE = "Phenom"
 
-# Phenom job URL pattern: /{locale}/job/{numeric_id}/{title_slug}
-_JOB_URL_RE = re.compile(r"/[a-z]{2}/[a-z]{2}/job/(\d+)/", re.IGNORECASE)
+# Phenom job URL pattern: /job/{job_id}/{title_slug} (locale-agnostic)
+# Job ID can be numeric or alphanumeric (e.g., 12345, R260012977, JR-12345)
+_JOB_URL_RE = re.compile(r"/job/([^/]+)/", re.IGNORECASE)
 
 
 def _sitemap_index_url(slug: str, careers_url: str | None = None) -> str:
@@ -43,9 +44,9 @@ def _sitemap_index_url(slug: str, careers_url: str | None = None) -> str:
     ``careers_url`` is the full careers URL if known (e.g. ``"https://careers.bmo.com/ca/en"``).
 
     Strategy:
-    1. If careers_url is provided, extract the locale path from it
-    2. Otherwise, try common sitemap paths (us/en first, then others)
-    3. Fall back to robots.txt discovery
+    1. Try robots.txt first (canonical, locale-independent discovery)
+    2. If careers_url is provided, extract locale path from it
+    3. Fall back to minimal common paths (us/en, bare-root) as last resort
 
     Returns the sitemap index URL.
     """
@@ -54,7 +55,40 @@ def _sitemap_index_url(slug: str, careers_url: str | None = None) -> str:
     host = slug.strip().replace("https://", "").replace("http://", "").split("/")[0]
     base_url = f"https://{host}"
 
-    # Strategy 1: Extract locale from careers_url if provided
+    # Strategy 1: Try robots.txt for Sitemap directive (canonical, locale-independent)
+    try:
+        robots_url = f"{base_url}/robots.txt"
+        resp = requests.get(robots_url, timeout=5)
+        if resp.status_code == 200:
+            sitemap_urls = []
+            for line in resp.text.splitlines():
+                line = line.strip()
+                if line.lower().startswith("sitemap:"):
+                    sitemap_url = line.split(":", 1)[1].strip()
+                    if "sitemap" in sitemap_url.lower():
+                        sitemap_urls.append(sitemap_url)
+            # If multiple sitemaps, prioritize sitemap_index.xml files
+            if sitemap_urls:
+                # Prefer sitemap_index.xml files (they contain references to other sitemaps)
+                index_sitemaps = [
+                    url for url in sitemap_urls if "sitemap_index.xml" in url.lower()
+                ]
+                if index_sitemaps:
+                    # Prefer us/en sitemap index if available
+                    for url in index_sitemaps:
+                        if "/us/en/" in url.lower():
+                            return url
+                    return index_sitemaps[0]
+                # Otherwise prefer us/en sitemap
+                for url in sitemap_urls:
+                    if "/us/en/" in url.lower():
+                        return url
+                # Otherwise return the first one
+                return sitemap_urls[0]
+    except Exception:
+        pass
+
+    # Strategy 2: Extract locale from careers_url if provided
     if careers_url:
         # Parse the URL to extract the locale path (e.g., /ca/en, /global/en, /en-us)
         from urllib.parse import urlparse
@@ -73,13 +107,10 @@ def _sitemap_index_url(slug: str, careers_url: str | None = None) -> str:
             except Exception:
                 pass
 
-    # Strategy 2: Try common sitemap paths (us/en first for US companies)
+    # Strategy 3: Try minimal common paths as last resort
     common_paths = [
         "/us/en/sitemap_index.xml",
         "/sitemap_index.xml",
-        "/global/en/sitemap_index.xml",
-        "/en-us/sitemap_index.xml",
-        "/en/sitemap_index.xml",
     ]
 
     for path in common_paths:
@@ -90,20 +121,6 @@ def _sitemap_index_url(slug: str, careers_url: str | None = None) -> str:
                 return candidate
         except Exception:
             continue
-
-    # Strategy 3: Try robots.txt for Sitemap directive
-    try:
-        robots_url = f"{base_url}/robots.txt"
-        resp = requests.get(robots_url, timeout=5)
-        if resp.status_code == 200:
-            for line in resp.text.splitlines():
-                line = line.strip()
-                if line.lower().startswith("sitemap:"):
-                    sitemap_url = line.split(":", 1)[1].strip()
-                    if "sitemap" in sitemap_url.lower():
-                        return sitemap_url
-    except Exception:
-        pass
 
     # Fall back to default
     return f"{base_url}/us/en/sitemap_index.xml"
@@ -140,22 +157,29 @@ def _extract_job_id(url: str) -> str | None:
 def _extract_title_from_url(url: str) -> str:
     """Extract a candidate title from the Phenom job URL slug.
 
-    Phenom URLs follow the pattern: /{locale}/job/{job_id}/{title_slug}
+    Phenom URLs follow the pattern: /{locale...}/job/{job_id}/{title_slug}
     The slug contains a hyphen-separated title (e.g., "Human-Resources-Business-Partner").
     This is a cheap pre-filter before the expensive Playwright detail fetch.
+
+    This is shape-independent: it locates the /job/ segment and extracts the
+    title slug after the job ID, regardless of how many locale segments precede it.
     """
-    # Extract the slug part after the job ID
+    # Find the /job/ segment and extract the title slug after the job ID
     parts = url.rstrip("/").split("/")
-    # URL pattern: /{locale}/job/{job_id}/{title_slug}
-    # We need at least 4 parts: ['', locale, 'job', job_id, title_slug]
-    if len(parts) >= 5:
-        slug = parts[-1]
-        # If the slug is just a number (job ID with no title slug), return empty
-        if slug.isdigit():
-            return ""
-        # Convert hyphens to spaces and capitalize words
-        title = " ".join(word.capitalize() for word in slug.split("-"))
-        return title
+    try:
+        job_index = parts.index("job")
+        # URL pattern: .../job/{job_id}/{title_slug}
+        # We need at least 2 segments after /job/: job_id and title_slug
+        if len(parts) > job_index + 2:
+            slug = parts[job_index + 2]  # title_slug is after job_id
+            # If the slug is just a number (job ID with no title slug), return empty
+            if slug.isdigit():
+                return ""
+            # Convert hyphens to spaces and capitalize words
+            title = " ".join(word.capitalize() for word in slug.split("-"))
+            return title
+    except (ValueError, IndexError):
+        pass
     return ""
 
 

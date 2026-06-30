@@ -11,11 +11,27 @@ from job_finder.web.ats_platforms._platforms_phenom import (
 
 def test_extract_job_id():
     """Test job ID extraction from Phenom URLs."""
+    # Numeric IDs (conduent style)
     assert (
         _extract_job_id("https://careers.conduent.com/us/en/job/23003/Accounting-Analyst")
         == "23003"
     )
     assert _extract_job_id("https://careers.blackbaud.com/us/en/job/12345/Engineer") == "12345"
+    # Alphanumeric IDs (BMO style)
+    assert (
+        _extract_job_id(
+            "https://jobs.bmo.com/ca/en/job/BOMOGLOBALR260012977EXTERNALENCA/Project-Manager"
+        )
+        == "BOMOGLOBALR260012977EXTERNALENCA"
+    )
+    assert _extract_job_id("https://example.com/job/JR-12345/Engineer") == "JR-12345"
+    # /global/en locale
+    assert _extract_job_id("https://careers.rtx.com/global/en/job/12345/Engineer") == "12345"
+    # Single-segment locale /en
+    assert _extract_job_id("https://careers.example.com/en/job/12345/Engineer") == "12345"
+    # Bare-root locale
+    assert _extract_job_id("https://jobs.ecolab.com/job/12345/Engineer") == "12345"
+    # Not a job URL
     assert _extract_job_id("https://example.com/not-a-job") is None
 
 
@@ -47,8 +63,8 @@ def test_extract_job_urls():
 
 
 def test_extract_title_from_url():
-    """Test title extraction from URL slug."""
-    # Basic case
+    """Test title extraction from URL slug (shape-independent)."""
+    # Basic case (us/en)
     assert (
         _extract_title_from_url(
             "https://careers.conduent.com/us/en/job/22047/Human-Resources-Business-Partner-Analyst-II"
@@ -60,10 +76,34 @@ def test_extract_title_from_url():
         _extract_title_from_url("https://careers.example.com/us/en/job/12345/Software-Engineer")
         == "Software Engineer"
     )
+    # /global/en locale
+    assert (
+        _extract_title_from_url("https://careers.rtx.com/global/en/job/12345/Software-Engineer")
+        == "Software Engineer"
+    )
+    # Single-segment locale /en
+    assert (
+        _extract_title_from_url("https://careers.example.com/en/job/12345/Software-Engineer")
+        == "Software Engineer"
+    )
+    # Bare-root locale
+    assert (
+        _extract_title_from_url("https://jobs.ecolab.com/job/12345/Software-Engineer")
+        == "Software Engineer"
+    )
+    # Alphanumeric ID (BMO style)
+    assert (
+        _extract_title_from_url(
+            "https://jobs.bmo.com/ca/en/job/BOMOGLOBALR260012977EXTERNALENCA/Project-Manager"
+        )
+        == "Project Manager"
+    )
     # Empty URL
     assert _extract_title_from_url("") == ""
     # URL without slug
     assert _extract_title_from_url("https://careers.example.com/us/en/job/12345") == ""
+    # URL without /job/ segment
+    assert _extract_title_from_url("https://careers.example.com/us/en/search") == ""
 
 
 def test_scanner_contract():
