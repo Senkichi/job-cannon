@@ -4,8 +4,8 @@ from job_finder.web.ats_platforms._platforms_phenom import (
     SCANNER,
     _extract_job_id,
     _extract_job_urls,
-    _extract_posting_from_html,
     _extract_sitemap_urls,
+    _extract_title_from_url,
 )
 
 
@@ -46,36 +46,24 @@ def test_extract_job_urls():
     )
 
 
-def test_extract_posting_from_html():
-    """Test job data extraction from HTML (captured fixture)."""
-    with open("tests/fixtures/phenom_job_detail.html", encoding="utf-8") as f:
-        html = f.read()
-    posting = _extract_posting_from_html(
-        html,
-        "https://careers.conduent.com/us/en/job/22047/Human-Resources-Business-Partner-Analyst-II",
-    )
-    assert posting is not None
-    assert "Human Resources" in posting["title"]
-    assert posting["source_id"] == "22047"
+def test_extract_title_from_url():
+    """Test title extraction from URL slug."""
+    # Basic case
     assert (
-        posting["source_url"]
-        == "https://careers.conduent.com/us/en/job/22047/Human-Resources-Business-Partner-Analyst-II"
+        _extract_title_from_url(
+            "https://careers.conduent.com/us/en/job/22047/Human-Resources-Business-Partner-Analyst-II"
+        )
+        == "Human Resources Business Partner Analyst Ii"
     )
-
-
-def test_extract_posting_title_bleed_protection():
-    """Test that location glued to title is removed (PR #539 regression)."""
-    # The captured fixture has location in the title: "Human Resources Business Partner Analyst II in Cebu City..."
-    with open("tests/fixtures/phenom_job_detail.html", encoding="utf-8") as f:
-        html = f.read()
-    posting = _extract_posting_from_html(
-        html,
-        "https://careers.conduent.com/us/en/job/22047/Human-Resources-Business-Partner-Analyst-II",
+    # Simple title
+    assert (
+        _extract_title_from_url("https://careers.example.com/us/en/job/12345/Software-Engineer")
+        == "Software Engineer"
     )
-    assert posting is not None
-    # Title should NOT contain location after clean_title processing
-    assert "Cebu City" not in posting["title"]
-    assert "Philippines" not in posting["title"]
+    # Empty URL
+    assert _extract_title_from_url("") == ""
+    # URL without slug
+    assert _extract_title_from_url("https://careers.example.com/us/en/job/12345") == ""
 
 
 def test_scanner_contract():
@@ -99,14 +87,14 @@ def test_scanner_posting_to_job():
         "title": "Software Engineer",
         "source_url": "https://careers.example.com/us/en/job/12345/Software-Engineer",
         "source_id": "12345",
-        "location": "San Francisco, CA",
-        "description": "Job description",
+        "location": "",  # Empty since we don't fetch detail pages
+        "description": "",  # Empty since we don't fetch detail pages
     }
     job = SCANNER.posting_to_job(posting, "careers.example.com")
     assert job["title"] == "Software Engineer"
     assert job["company_source"] == "Phenom"
-    assert job["location"] == "San Francisco, CA"
+    assert job["location"] == ""
     assert job["source_url"] == "https://careers.example.com/us/en/job/12345/Software-Engineer"
     assert job["source_id"] == "12345"
-    assert job["description"] == "Job description"
-    assert job["jd_full"] == "Job description"
+    assert job["description"] == ""
+    assert job["jd_full"] == ""
