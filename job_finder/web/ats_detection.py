@@ -181,6 +181,13 @@ _PHENOM_URL = re.compile(
     re.IGNORECASE,
 )
 
+# ADP Workforce Now: workforcenow.adp.com with cid= UUID parameter.
+# The slug is the client ID UUID. This matches Shape A (Workforce Now).
+_ADP_WORKFORCENOW_URL = re.compile(
+    r"https?://workforcenow\.adp\.com/.*[?&]cid=([0-9a-fA-F-]{36})",
+    re.IGNORECASE,
+)
+
 # Bump alongside material changes to the regex patterns above (contract tests).
 # m049-v4: + workable / jobvite / paylocity / rippling URL patterns (round 6 audit).
 # m049-v5: + icims URL pattern (careers-/jobs- tenant host) (PR-A2).
@@ -189,7 +196,8 @@ _PHENOM_URL = re.compile(
 # m049-v8: + successfactors URL pattern (regional TLDs + host|company_id slug).
 # m049-v9: + phenom URL pattern (careers/jobs subdomain host).
 # m049-v10: refine phenom URL pattern to exclude www.* (marketing sites).
-ATS_EXTRACTOR_VERSION = "m049-v10"
+# m049-v11: + adp_workforcenow URL pattern (cid= UUID).
+ATS_EXTRACTOR_VERSION = "m049-v11"
 
 # Relative pattern strength within a URL: API/canonical traces win ties in reconciliation.
 _SPECIFICITY_API = 10
@@ -344,6 +352,12 @@ def extract_ats_from_url_best(url: str) -> tuple[str, str, int] | None:
         parsed = urlparse(url)
         host = parsed.netloc  # Full host (e.g., "careers.conduent.com")
         return "phenom", host.lower(), _SPECIFICITY_BOARD
+
+    # ADP Workforce Now — cid= UUID parameter. Slug is the client ID UUID.
+    m = _ADP_WORKFORCENOW_URL.search(url)
+    if m:
+        cid = m.group(1).lower()
+        return "adp", cid, _SPECIFICITY_BOARD
 
     return None
 

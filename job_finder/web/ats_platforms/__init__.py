@@ -30,6 +30,7 @@ from job_finder.web.ats_platforms._detail_fetchers import (  # noqa: F401
     _fetch_smartrecruiters_description,
     _fetch_workday_description,
 )
+from job_finder.web.ats_platforms._platforms_adp import SCANNER as _ADP_SCANNER
 from job_finder.web.ats_platforms._platforms_amazon import SCANNER as _AMAZON_SCANNER
 from job_finder.web.ats_platforms._platforms_ashby import SCANNER as _ASHBY_SCANNER
 from job_finder.web.ats_platforms._platforms_bamboohr import SCANNER as _BAMBOOHR_SCANNER
@@ -79,6 +80,7 @@ from job_finder.web.ats_platforms._title_match import (  # noqa: F401
 SCANNERS_BY_NAME: dict[str, PlatformScanner] = {
     s.name: s
     for s in (
+        _ADP_SCANNER,
         _AMAZON_SCANNER,
         _ASHBY_SCANNER,
         _BAMBOOHR_SCANNER,
@@ -352,6 +354,18 @@ def scan_successfactors(slug: str, target_titles: list[str], exclusions: list[st
     return run_platform_scan(_SUCCESSFACTORS_SCANNER, slug, target_titles, exclusions)
 
 
+def scan_adp(slug: str, target_titles: list[str], exclusions: list[str]) -> list[dict]:
+    """Scan ADP Workforce Now for matched postings.
+
+    API: GET https://workforcenow.adp.com/mascsr/default/careercenter/public/events/staffing/v1/job-requisitions
+        ?cid={slug}&ccId=19000101_000001&lang=en_US&locale=en_US&$top=100&$skip={N}
+    Slug is the client ID UUID (e.g. "a6717ebc-f6a8-4a51-856b-f7ebd573645e").
+    OData-style pagination with $top/$skip. Description is NOT in the list endpoint;
+    jd_full is filled by enrichment.
+    """
+    return run_platform_scan(_ADP_SCANNER, slug, target_titles, exclusions)
+
+
 def scan_phenom(slug: str, target_titles: list[str], exclusions: list[str]) -> list[dict]:
     """Scan Phenom careers site for matched postings.
 
@@ -411,6 +425,7 @@ __all__ = [
     "SCANNERS_BY_NAME",
     "PlatformScanner",
     "run_platform_scan",
+    "scan_adp",
     "scan_amazon",
     "scan_ashby",
     "scan_bamboohr",
