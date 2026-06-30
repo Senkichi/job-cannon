@@ -138,3 +138,21 @@ def test_scanner_posting_to_job():
     assert job["source_id"] == "12345"
     assert job["description"] == ""
     assert job["jd_full"] == ""
+
+
+def test_extract_job_urls_from_flat_sitemap():
+    """Test job URL extraction from a flat urlset sitemap (not an index)."""
+    # Simulate a flat sitemap with direct job URLs
+    flat_sitemap = """<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url>
+    <loc>https://careers.flagstar.com/us/en/job/12345/Software-Engineer</loc>
+  </url>
+  <url>
+    <loc>https://careers.flagstar.com/us/en/job/67890/Data-Scientist</loc>
+  </url>
+</urlset>"""
+    urls = _extract_job_urls(flat_sitemap)
+    assert len(urls) == 2
+    assert "https://careers.flagstar.com/us/en/job/12345/Software-Engineer" in urls
+    assert "https://careers.flagstar.com/us/en/job/67890/Data-Scientist" in urls

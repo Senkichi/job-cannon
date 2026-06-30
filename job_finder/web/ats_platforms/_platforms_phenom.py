@@ -37,6 +37,44 @@ _COMPANY_SOURCE = "Phenom"
 _JOB_URL_RE = re.compile(r"/job/([^/]+)/", re.IGNORECASE)
 
 
+def _sitemap_has_jobs(sitemap_url: str) -> bool:
+    """Check if a sitemap (index or flat) contains job URLs.
+
+    This is used to select the best sitemap when robots.txt lists multiple.
+    Returns True if the sitemap is a flat urlset with job URLs or an index
+    that references sub-sitemaps containing job URLs.
+    """
+    import requests
+
+    try:
+        resp = requests.get(sitemap_url, timeout=5)
+        if resp.status_code != 200:
+            return False
+
+        soup = BeautifulSoup(resp.text, "xml")
+        all_locs = [loc.get_text(strip=True) for loc in soup.find_all("loc")]
+
+        # Check for direct job URLs (flat urlset)
+        if any("/job/" in url for url in all_locs):
+            return True
+
+        # Check for sub-sitemaps (index) - sample the first one
+        sub_sitemaps = [url for url in all_locs if "sitemap" in url.lower()]
+        if sub_sitemaps:
+            try:
+                sample_resp = requests.get(sub_sitemaps[0], timeout=5)
+                if sample_resp.status_code == 200:
+                    sample_soup = BeautifulSoup(sample_resp.text, "xml")
+                    sample_locs = [loc.get_text(strip=True) for loc in sample_soup.find_all("loc")]
+                    return any("/job/" in url for url in sample_locs)
+            except Exception:
+                pass
+
+        return False
+    except Exception:
+        return False
+
+
 def _sitemap_index_url(slug: str, careers_url: str | None = None) -> str:
     """Build the sitemap index URL for a Phenom tenant.
 
@@ -67,23 +105,27 @@ def _sitemap_index_url(slug: str, careers_url: str | None = None) -> str:
                     sitemap_url = line.split(":", 1)[1].strip()
                     if "sitemap" in sitemap_url.lower():
                         sitemap_urls.append(sitemap_url)
-            # If multiple sitemaps, prioritize sitemap_index.xml files
+            # If multiple sitemaps, try them and return the first that yields job URLs
             if sitemap_urls:
                 # Prefer sitemap_index.xml files (they contain references to other sitemaps)
                 index_sitemaps = [
                     url for url in sitemap_urls if "sitemap_index.xml" in url.lower()
                 ]
                 if index_sitemaps:
-                    # Prefer us/en sitemap index if available
+                    # Try us/en sitemap index first if available
                     for url in index_sitemaps:
                         if "/us/en/" in url.lower():
+                            if _sitemap_has_jobs(url):
+                                return url
+                    # Try other index sitemaps
+                    for url in index_sitemaps:
+                        if _sitemap_has_jobs(url):
                             return url
-                    return index_sitemaps[0]
-                # Otherwise prefer us/en sitemap
+                # Try all sitemaps (including non-index ones)
                 for url in sitemap_urls:
-                    if "/us/en/" in url.lower():
+                    if _sitemap_has_jobs(url):
                         return url
-                # Otherwise return the first one
+                # If none yield jobs, return the first one (will be handled as empty later)
                 return sitemap_urls[0]
     except Exception:
         pass
@@ -189,10 +231,11 @@ def fetch_postings(
     """Fetch Phenom job postings via sitemap (no Playwright detail fetches).
 
     The scanner:
-    1. Fetches all sitemaps (no cap) via cheap requests
-    2. Extracts all job URLs from all sitemaps (no cap)
-    3. Derives candidate titles from URL slugs (cheap)
-    4. Returns jobs with URL-derived data only (no Playwright fetches)
+    1. Fetches the discovered sitemap (index or flat urlset)
+    2. If it's a sitemap index, recurses into sub-sitemaps
+    3. If it's a flat urlset, extracts job URLs directly
+    4. Derives candidate titles from URL slugs (cheap)
+    5. Returns jobs with URL-derived data only (no Playwright fetches)
 
     Full detail (jd_full) is backfilled later by enrichment for jobs that pass
     the title gate. This avoids expensive Playwright fetches for jobs that would
@@ -210,40 +253,51 @@ def fetch_postings(
     import requests
 
     try:
-        # Step 1: Fetch sitemap index via requests (faster than Playwright)
-        sitemap_index_url = _sitemap_index_url(slug, careers_url)
+        # Step 1: Fetch sitemap via requests (faster than Playwright)
+        sitemap_url = _sitemap_index_url(slug, careers_url)
         try:
-            resp = requests.get(sitemap_index_url, timeout=10)
+            resp = requests.get(sitemap_url, timeout=10)
             if resp.status_code != 200:
-                logger.debug(
-                    "scan_phenom('%s'): sitemap index returned HTTP %d", slug, resp.status_code
-                )
+                logger.debug("scan_phenom('%s'): sitemap returned HTTP %d", slug, resp.status_code)
                 return []
-            sitemap_urls = _extract_sitemap_urls(resp.text)
         except Exception as exc:
-            logger.debug("scan_phenom('%s'): sitemap index fetch failed: %s", slug, exc)
+            logger.debug("scan_phenom('%s'): sitemap fetch failed: %s", slug, exc)
             return []
 
-        if not sitemap_urls:
-            logger.debug("scan_phenom('%s'): no sitemaps found", slug)
-            return []
+        # Step 2: Detect sitemap type and handle both index and flat urlset
+        # Collect all <loc> entries from the fetched document
+        soup = BeautifulSoup(resp.text, "xml")
+        all_locs = [loc.get_text(strip=True) for loc in soup.find_all("loc")]
 
-        # Step 2: Extract job URLs from ALL sitemaps (no cap)
+        # Partition into sub-sitemaps vs job URLs
+        sub_sitemap_urls = [url for url in all_locs if "sitemap" in url.lower()]
+        direct_job_urls = [url for url in all_locs if "/job/" in url]
+
         job_urls = []
-        for sitemap_url in sitemap_urls:
-            try:
-                resp = requests.get(sitemap_url, timeout=10)
-                if resp.status_code == 200:
-                    urls = _extract_job_urls(resp.text)
-                    job_urls.extend(urls)
-            except Exception as exc:
-                logger.debug(
-                    "scan_phenom('%s'): sitemap fetch failed for %s: %s", slug, sitemap_url, exc
-                )
-                continue
+
+        # Case A: Sitemap index - recurse into sub-sitemaps
+        if sub_sitemap_urls:
+            for sitemap_url in sub_sitemap_urls:
+                try:
+                    resp = requests.get(sitemap_url, timeout=10)
+                    if resp.status_code == 200:
+                        urls = _extract_job_urls(resp.text)
+                        job_urls.extend(urls)
+                except Exception as exc:
+                    logger.debug(
+                        "scan_phenom('%s'): sub-sitemap fetch failed for %s: %s",
+                        slug,
+                        sitemap_url,
+                        exc,
+                    )
+                    continue
+
+        # Case B: Flat urlset - use job URLs directly
+        if direct_job_urls:
+            job_urls.extend(direct_job_urls)
 
         if not job_urls:
-            logger.debug("scan_phenom('%s'): no job URLs found in sitemaps", slug)
+            logger.debug("scan_phenom('%s'): no job URLs found", slug)
             return []
 
         # Step 3: Build postings from URL-derived data (no Playwright fetches)
