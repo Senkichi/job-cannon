@@ -241,13 +241,15 @@ def fetch_postings(
             if not title:
                 continue
 
-            postings.append({
-                "title": title,
-                "source_url": job_url,
-                "source_id": job_id,
-                "location": "",  # Not available from URL slug
-                "description": "",  # Will be backfilled by enrichment
-            })
+            postings.append(
+                {
+                    "title": title,
+                    "source_url": job_url,
+                    "source_id": job_id,
+                    "location": "",  # Not available from URL slug
+                    "description": "",  # Will be backfilled by enrichment
+                }
+            )
 
         logger.debug(
             "scan_phenom('%s'): extracted %d job URLs from sitemaps",
