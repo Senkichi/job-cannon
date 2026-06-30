@@ -466,21 +466,29 @@ class TestUnifiedRouteShape:
     def test_predicate_uses_classification_not_haiku_score(self):
         """The worker SQL filters on `classification IS NULL`, not `haiku_score IS NULL`.
 
-        Checks the compiled function bytecode's string constants rather than the
-        source text to avoid false positives from docstring references.
+        Single-source design: the candidate predicate lives in the shared
+        ``SCORABLE_CANDIDATE_WHERE`` constant that BOTH the worker and
+        count_scorable SELECT from. Assert on that constant (the real source of
+        truth) and verify the worker actually composes its SELECT from it — so
+        the count and the worker can never query different universes.
         """
-        from job_finder.web.blueprints import batch_scoring as bs
+        import inspect
 
-        consts = bs._run_batch_bg.__code__.co_consts
-        sql_strings = [c for c in consts if isinstance(c, str) and "jobs" in c.lower()]
-        combined = " ".join(sql_strings)
-        assert "classification IS NULL" in combined, (
-            f"_run_batch_bg SQL must query on `classification IS NULL`. "
-            f"Found SQL strings: {sql_strings!r}"
+        from job_finder.web.blueprints import batch_scoring as bs
+        from job_finder.web.exclusion_filter import SCORABLE_CANDIDATE_WHERE
+
+        assert "classification IS NULL" in SCORABLE_CANDIDATE_WHERE, (
+            f"candidate predicate must query on `classification IS NULL`; "
+            f"got {SCORABLE_CANDIDATE_WHERE!r}"
         )
-        assert "haiku_score IS NULL" not in combined, (
-            f"_run_batch_bg SQL must not use the legacy `haiku_score IS NULL` predicate. "
-            f"Found SQL strings: {sql_strings!r}"
+        assert "haiku_score" not in SCORABLE_CANDIDATE_WHERE, (
+            f"candidate predicate must not use the legacy `haiku_score` column; "
+            f"got {SCORABLE_CANDIDATE_WHERE!r}"
+        )
+        worker_src = inspect.getsource(bs._run_batch_bg)
+        assert "SCORABLE_CANDIDATE_WHERE" in worker_src, (
+            "_run_batch_bg must build its candidate SELECT from the shared "
+            "SCORABLE_CANDIDATE_WHERE constant (single source with count_scorable)"
         )
 
     def _build_app(self, db_path):

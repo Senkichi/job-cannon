@@ -294,13 +294,19 @@ class TestDenylistConfigRoundTrip:
 
 
 class TestCountScorable:
-    """Tests for count_scorable() — must match what the unified scorer can process.
+    """Tests for count_scorable() — must equal what the batch worker scores.
 
-    Regression guard for the Score-Now-counter-desync bug: count_scorable was
-    counting jobs with classification IS NULL even if jd_full was missing. The
-    v3 unified scorer (job_scorer.score_job) returns status='skipped' on empty
-    jd_full and never writes classification, so those rows stayed unscored after
-    batch completion — making the dashboard count never decrease.
+    Regression guard for the Score-Now-counter-desync bug: the "Score N unscored
+    jobs" tile counts a job the v3 scorer (job_scorer.score_job) then skips
+    without writing classification, so the row stays unscored and the count never
+    decrements after a click. Bitten three times — jd_full gate, P3.2 location
+    gate, then a stale process serving a pre-fix count.
+
+    Single-source design (this iteration): count_scorable no longer
+    re-implements the scoring gates in SQL. It SELECTs the shared coarse
+    candidate set and counts rows passing is_scorable() — the SAME pure Python
+    predicate (should_exclude + scoring_precheck) the worker applies per row. So
+    the count and the worker cannot drift, and these tests pin that behaviour.
     """
 
     def _insert_job(self, conn, dedup_key: str, **fields):
@@ -432,12 +438,36 @@ class TestCountScorable:
         )
         assert count_scorable(conn, {}) == 1
 
+    def test_nonlist_or_malformed_structured_location_is_gated(self, migrated_db):
+        """JSON/NULL edge-case regression (the drift class that brought the bug
+        back). A row with an empty flat location, a non-terminal tier, and a
+        locations_structured value that is non-empty TEXT but parses to no usable
+        list ('null', '[ ]', '{}', '"city"', '[]', malformed) is awaiting_location
+        — the worker skips it. The OLD SQL gate counted all but '[]' as
+        location-READY (the raw text is not literally ''/'[]'), over-counting by 5
+        here; the single-source Python predicate gates them correctly."""
+        _, conn = migrated_db
+        for i, ls in enumerate(["null", "[ ]", "{}", '"city"', "[]", "not json"]):
+            self._insert_job(
+                conn,
+                f"gated-{i}",
+                location="",
+                enrichment_tier=None,
+                locations_structured=ls,
+            )
+        # A genuinely scorable structured-location row proves we don't zero out.
+        self._insert_job(
+            conn, "scorable", location="", locations_structured='[{"city": "Austin"}]'
+        )
+        assert count_scorable(conn, {}) == 1
+
     def test_matches_scoring_precheck(self, migrated_db):
-        """PARITY GUARD — count_scorable (SQL) must equal the count of candidate
-        rows for which job_scorer.scoring_precheck returns None and should_exclude
-        is False. Pins the SQL jd_full + P3.2 location gates to their single Python
-        source so they can never silently drift apart again (the recurring
-        desync that produced "205/174 processed" and a button stuck at 52)."""
+        """PARITY GUARD — count_scorable must equal the count of candidate rows for
+        which job_scorer.scoring_precheck returns None and should_exclude is False.
+        With the single-source design this is true by construction (count_scorable
+        IS that predicate); the test pins the coarse-candidate WHERE and the gate
+        wiring so a future refactor can't reintroduce a divergent count path (the
+        recurring desync that produced "205/174 processed" and a button stuck)."""
         from job_finder.web.job_scorer import scoring_precheck
 
         _, conn = migrated_db
