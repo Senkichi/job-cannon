@@ -8,52 +8,51 @@ and a configurable salary floor.
 import logging
 
 from job_finder.config import COMPANY_DENYLIST, get_company_denylist
-from job_finder.db._classification import _TERMINAL_ENRICHMENT_TIERS
 from job_finder.normalizers import normalize_company
+from job_finder.web.job_scorer import scoring_precheck
 
 logger = logging.getLogger(__name__)
 
-# Scoring-terminal enrichment tiers as plain strings for SQL binding. A row at
-# one of these tiers is location-ready even with an empty location (its location
-# is as good as it will ever get), matching job_scorer.scoring_precheck's P3.2
-# gate. Derived from the single-source frozenset so the two never drift.
-_TERMINAL_TIER_VALUES: tuple[str, ...] = tuple(sorted(str(t) for t in _TERMINAL_ENRICHMENT_TIERS))
+# ── Single source of truth for "which unscored jobs are scorable" ────────────
+#
+# The dashboard "Score N unscored jobs" tile, the batch-session ``total``, and
+# the batch worker's per-row decision MUST agree on the same set, or the button
+# advertises jobs the worker silently no-ops and its count never decrements after
+# a click (the recurring Score-Now desync — bitten on the jd_full gate, then the
+# P3.2 location gate, then again every time the two implementations drift).
+#
+# Earlier fixes kept a SECOND, SQL re-implementation of the scoring gates inside
+# count_scorable and pinned it to the Python source with a parity test. That is
+# inherently fragile: SQL and Python disagree on JSON / NULL / whitespace edge
+# cases the fixtures never exercise (e.g. ``locations_structured = 'null'`` or
+# ``'[ ]'`` — not literally ``''``/``'[]'`` so SQL calls them "location-ready",
+# but Python parses them to an empty list and gates them), and every new gate has
+# to be mirrored in two languages in lockstep. So the SQL copy is gone. There is
+# now ONE definition of "scorable":
+#
+#   * SCORABLE_CANDIDATE_WHERE — the cheap, index-friendly SQL pre-filter that
+#     selects the UNSCORED candidate universe. Shared verbatim by count_scorable
+#     AND the batch worker's SELECT, so they cannot disagree on the universe.
+#   * is_scorable(job, config)  — the pure Python predicate (should_exclude +
+#     scoring_precheck) the worker applies per row. count_scorable counts the
+#     candidates that pass it; the worker scores them. Same functions, no drift.
+#
+# Any future scoring gate added to scoring_precheck is reflected in the count
+# automatically — there is no SQL translation left to forget to update.
 
+# Cheap pre-filter: the unscored candidate universe (classification IS NULL),
+# minus dismissed/archived and quarantined (I-16/I-17) rows. This is the SQL the
+# worker SELECTs; count_scorable SELECTs the same set. Per-row scorability is then
+# decided in Python by is_scorable() — NOT in SQL — so the two never diverge.
+SCORABLE_CANDIDATE_WHERE = (
+    "classification IS NULL "
+    "AND pipeline_status NOT IN ('dismissed', 'archived') "
+    "AND COALESCE(unresolved_reasons, '[]') = '[]'"
+)
 
-def _location_ready_sql() -> tuple[str, list]:
-    """SQL fragment + params asserting a row is location-READY for scoring.
-
-    The negative of job_scorer.scoring_precheck's ``awaiting_location`` branch:
-    a row is location-ready UNLESS it has no structured locations, no flat
-    ``location`` string, AND is still enrichable (non-terminal tier).
-
-    Within the count_scorable candidate set ``unresolved_reasons`` is always
-    ``'[]'`` (the quarantine condition runs first), so scoring_precheck's
-    ``"location_missing" not in reasons`` term is vacuously true and is omitted
-    here. ``COALESCE(enrichment_tier, '')`` reproduces Python's ``None not in
-    {...}`` (a NULL tier is non-terminal → still enrichable → gated). The parity
-    test ``TestCountScorable.test_matches_scoring_precheck`` pins this
-    translation to the Python source so it cannot silently drift again.
-    """
-    placeholders = ",".join("?" * len(_TERMINAL_TIER_VALUES))
-    clause = (
-        "NOT ("
-        "COALESCE(locations_structured, '') IN ('', '[]') "
-        "AND TRIM(COALESCE(location, '')) = '' "
-        f"AND COALESCE(enrichment_tier, '') NOT IN ({placeholders})"
-        ")"
-    )
-    return clause, list(_TERMINAL_TIER_VALUES)
-
-
-def _normalize_company_sql(company: str | None) -> str:
-    """NULL-safe normalize_company wrapper for use as a SQLite UDF.
-
-    SQLite passes None for NULL company columns; normalize_company expects a str.
-    """
-    if not company:
-        return ""
-    return normalize_company(company)
+# Freshest-first scoring queue; served by idx_jobs_last_seen. Used by the worker
+# (count_scorable does not care about order).
+SCORABLE_CANDIDATE_ORDER_BY = "ORDER BY last_seen DESC"
 
 
 def should_exclude(
@@ -123,97 +122,67 @@ def should_exclude(
     return False, ""
 
 
+# Lightweight projection for counting: the only columns is_scorable's gates
+# read. jd_full is projected to a presence sentinel ('x' when non-blank, ''
+# otherwise) so a dashboard render never streams full JD bodies (up to
+# JD_STORAGE_MAX_CHARS each, for every unscored row, on every quick-actions
+# refresh) merely to answer a yes/no — scoring_precheck only needs jd presence.
+_SCORABLE_COLS = (
+    "title, company, salary_max, "
+    "locations_structured, location, enrichment_tier, unresolved_reasons, "
+    "CASE WHEN TRIM(COALESCE(jd_full, '')) <> '' THEN 'x' ELSE '' END AS jd_full"
+)
+
+
+def is_scorable(job: dict, config: dict) -> bool:
+    """Pure predicate: would the batch worker actually SCORE this row?
+
+    THE single source of truth for "scorable", shared by ``count_scorable`` (the
+    dashboard tile + batch ``total``) and the batch worker. A candidate row is
+    scorable iff it is not excluded (``should_exclude``) and passes every
+    completeness gate (``scoring_precheck`` returns ``None``) — the exact two
+    checks the worker applies per row, in the same order. Because the count and
+    the worker call the SAME functions, the tile can never advertise a job the
+    worker silently no-ops.
+
+    Pure: no I/O, no mutation. (The worker layers its exclusion auto-dismiss
+    side effect on top separately; counting must never mutate.) Callers pass
+    rows from SCORABLE_CANDIDATE_WHERE, so classification / pipeline_status /
+    quarantine are already filtered in SQL; this adds the per-row exclusion +
+    completeness gates that are impractical to express faithfully in SQL.
+    """
+    exclusions = config.get("profile", {}).get("exclusions", {})
+    min_salary = config.get("profile", {}).get("min_salary")
+    if should_exclude(job, exclusions, min_salary, config=config)[0]:
+        return False
+    return scoring_precheck(job) is None
+
+
 def count_scorable(conn, config: dict) -> int:
-    """Count unscored jobs that would pass the exclusion filter.
+    """Count unscored jobs the batch worker would actually score.
 
-    v3.0 (Phase 34 Plan 3 Commit A): predicate changed from
-    `haiku_score IS NULL` to `classification IS NULL` — the unified scorer
-    populates `classification` on every row it processes, so unclassified rows
-    are the correct "unscored" set.
+    Single-source design: SELECT the coarse candidate universe via the shared
+    ``SCORABLE_CANDIDATE_WHERE`` (identical to the worker's SELECT), then count
+    the rows that pass ``is_scorable`` — the SAME pure Python predicate
+    (``should_exclude`` + ``scoring_precheck``) the worker applies per row.
 
-    Mirrors EVERY pre-call completeness gate ``job_scorer.scoring_precheck``
-    enforces, because any gate the scorer applies but this count omits produces
-    the same desync bug: the dashboard "Score N unscored jobs" button advertises
-    rows the worker silently no-ops, the count never decrements after clicking,
-    and the batch progress counter overruns its total. The two gates:
+    This replaces a prior SQL re-implementation of the scoring gates. A parallel
+    SQL translation of ``scoring_precheck`` drifted from the Python source every
+    time a gate was added or the data hit an untested JSON/NULL edge case (e.g.
+    ``locations_structured = 'null'`` or ``'[ ]'``), producing the recurring
+    "Score N unscored" tile that counts rows the worker no-ops and never
+    decrements. Deriving the count from the worker's own predicate makes that
+    desync structurally impossible. The candidate universe is the UNSCORED set
+    (``classification IS NULL``), which is inherently small, so the per-row
+    Python pass is cheap.
 
-    1. non-empty ``jd_full`` (SCORER-05 / ``awaiting_jd``) — the scorer returns
-       status="skipped" on empty jd_full and never persists classification.
-    2. location resolvability (P3.2 / ``awaiting_location``, issue #391) — via
-       ``_location_ready_sql``; a row with no structured/flat location that is
-       still enrichable is skipped without a model call.
-
-    Replicates the three exclusion checks from should_exclude() in SQL so the
-    count matches what the batch scorer will actually attempt to score:
-    1. Title keyword exclusions (case-insensitive substring)
-    2. Company denylist + config exclusions (matched on normalize_company)
-    3. Salary floor (salary_max < min_salary * 0.85)
-
-    The company check registers normalize_company as a SQLite UDF so the SQL
-    predicate uses the exact same canonical form as should_exclude (#213).
-    Without this, a denylist of normalized bare names ("virtual vocations")
-    would miss the suffixed brands the SERP sources actually store
-    ("Virtual Vocations Inc"), and the dashboard "N unscored" tile would drift
-    from what the scorer dismisses.
+    Returns 0 (and logs a WARNING with traceback) on any DB error — a dashboard
+    render must never 500 because the count query failed.
     """
     try:
-        # Register normalize_company as a UDF for normalized-brand comparison.
-        # deterministic=True lets SQLite cache/optimize; harmless if the binding
-        # already exists (re-registration is idempotent).
-        try:
-            conn.create_function(
-                "normalize_company", 1, _normalize_company_sql, deterministic=True
-            )
-        except TypeError:
-            # Older SQLite builds without the deterministic kwarg.
-            conn.create_function("normalize_company", 1, _normalize_company_sql)
-
-        conditions = [
-            "classification IS NULL",
-            "jd_full IS NOT NULL",
-            "TRIM(jd_full) != ''",
-            "pipeline_status NOT IN ('dismissed', 'archived')",
-            # Quarantine gate (I-16/I-17): mirror the batch scorer's candidate
-            # SELECT so the dashboard "N unscored" tile matches what the worker
-            # actually attempts (a quarantined row is withheld from scoring).
-            "COALESCE(unresolved_reasons, '[]') = '[]'",
-        ]
-        params: list = []
-
-        # P3.2 location gate (issue #391): a row whose location is still
-        # awaiting enrichment is skipped by job_scorer.score_job
-        # (reason='awaiting_location') WITHOUT a model call, so it never gets a
-        # classification and stays "unscored" forever. Mirror that gate here —
-        # otherwise the Score-Now button advertises jobs the worker silently
-        # no-ops and its count never decrements (the recurrence of the
-        # jd_full-gate desync this function originally fixed, one gate later).
-        loc_clause, loc_params = _location_ready_sql()
-        conditions.append(loc_clause)
-        params.extend(loc_params)
-
-        exclusions = config.get("profile", {}).get("exclusions", {})
-
-        for keyword in exclusions.get("title_keywords", []):
-            if keyword:
-                conditions.append("LOWER(title) NOT LIKE ?")
-                params.append(f"%{keyword.lower()}%")
-
-        excluded_companies = {normalize_company(c) for c in exclusions.get("companies", []) if c}
-        excluded_companies |= get_company_denylist(config)
-        excluded_companies.discard("")
-        if excluded_companies:
-            placeholders = ",".join("?" * len(excluded_companies))
-            conditions.append(f"normalize_company(company) NOT IN ({placeholders})")
-            params.extend(sorted(excluded_companies))
-
-        min_salary = config.get("profile", {}).get("min_salary")
-        if min_salary is not None:
-            floor = min_salary * 0.85
-            conditions.append("NOT (salary_max IS NOT NULL AND salary_max > 0 AND salary_max < ?)")
-            params.append(floor)
-
-        where = " AND ".join(conditions)
-        return conn.execute(f"SELECT COUNT(*) FROM jobs WHERE {where}", params).fetchone()[0]
+        cur = conn.execute(f"SELECT {_SCORABLE_COLS} FROM jobs WHERE {SCORABLE_CANDIDATE_WHERE}")
+        cols = [d[0] for d in cur.description]
+        return sum(1 for row in cur if is_scorable(dict(zip(cols, row, strict=True)), config))
     except Exception:
         logger.warning("count_scorable failed; returning 0", exc_info=True)
         return 0

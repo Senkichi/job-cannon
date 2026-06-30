@@ -18,7 +18,12 @@ from job_finder.web.db_helpers import (
     render_polling_status,
     standalone_connection,
 )
-from job_finder.web.exclusion_filter import count_scorable, should_exclude
+from job_finder.web.exclusion_filter import (
+    SCORABLE_CANDIDATE_ORDER_BY,
+    SCORABLE_CANDIDATE_WHERE,
+    count_scorable,
+    should_exclude,
+)
 from job_finder.web.live_events import COSTS_CHANGED, JOBS_CHANGED, PIPELINE_CHANGED
 from job_finder.web.live_events import publish as publish_live
 
@@ -215,19 +220,19 @@ def _run_batch_bg(db_path: str, session_id: int, config: dict) -> None:
 
     try:
         with standalone_connection(db_path) as conn:
+            # Coarse candidate universe — the SAME shared SQL pre-filter
+            # count_scorable uses (SCORABLE_CANDIDATE_WHERE), so the dashboard
+            # "N unscored" tile / batch ``total`` and the rows this worker pulls
+            # can never disagree on the universe. Per-row scorability (exclusion
+            # auto-dismiss + completeness gates) is then decided below by the
+            # same should_exclude + scoring_precheck the count uses via
+            # is_scorable. The WHERE filters classification IS NULL, dismissed/
+            # archived, and quarantined (I-16/I-17) rows; ORDER scores the
+            # freshest first (served by idx_jobs_last_seen). The legacy heuristic
+            # ``score`` column was dropped in m113.
             rows = conn.execute(
-                f"SELECT {JOBS_ALL_COLUMNS} FROM jobs WHERE classification IS NULL "
-                "AND pipeline_status NOT IN ('dismissed', 'archived') "
-                # Quarantine gate (I-16/I-17): never score a row whose title (or
-                # other field) failed a contract — otherwise NULLing a quarantined
-                # row's classification just feeds it straight back here and it
-                # returns as 'apply'. COALESCE keeps legacy NULL-reasons rows
-                # scorable (clean); only genuinely-flagged rows are withheld.
-                "AND COALESCE(unresolved_reasons, '[]') = '[]' "
-                # v3.0: the legacy heuristic ``score`` column was dropped in m113.
-                # These rows are unscored (classification IS NULL), so order the
-                # scoring queue freshest-first (served by idx_jobs_last_seen).
-                "ORDER BY last_seen DESC"
+                f"SELECT {JOBS_ALL_COLUMNS} FROM jobs "
+                f"WHERE {SCORABLE_CANDIDATE_WHERE} {SCORABLE_CANDIDATE_ORDER_BY}"
             ).fetchall()
 
             # BATCH-04: Pre-loop cancellation check (was per-job inside loop)
