@@ -308,3 +308,52 @@ def test_conversion_alarm_silent_when_high_fit_outperforms():
     _seed_applied(conn, "s2", "skip", converted=False)
 
     assert _check_conversion_signal(conn, {"health": {"conversion_min_applied": 2}}) is None
+
+
+def test_conversion_alarm_symmetric_low_fit_floor():
+    """The min_applied floor is SYMMETRIC: a lone low-fit application (n=1 → 100%)
+    must NOT fire the alarm even when the high-fit side has ample volume.
+
+    High-fit apply: 3 applied, 0 converted (0%). Low-fit skip: 1 applied, 1 converted
+    (100%, n=1). With a high-fit-only floor + a mean of per-band rates this WOULD fire
+    (0% <= 100%); the symmetric floor makes it silent because low_fit_applied (1) is
+    below min_applied (3). Pins that a single low-fit datapoint can't manufacture a
+    false 'grade doesn't predict' alarm.
+    """
+    from job_finder.web.scheduler._runners import _check_conversion_signal
+
+    conn = _test_conn()
+    _seed_applied(conn, "a1", "apply", converted=False)
+    _seed_applied(conn, "a2", "apply", converted=False)
+    _seed_applied(conn, "a3", "apply", converted=False)  # 3 high-fit applied, 0 converted
+    _seed_applied(conn, "s1", "skip", converted=True)  # 1 low-fit applied, 1 converted
+
+    assert _check_conversion_signal(conn, {"health": {"conversion_min_applied": 3}}) is None
+
+
+def test_conversion_alarm_pools_rates_instead_of_averaging_bands():
+    """The verdict uses a POOLED (volume-weighted) callback rate per side, NOT a simple
+    mean of the two bands' rates — so a tiny band can't swing the verdict.
+
+    High-fit apply: 4 applied, 2 converted (50%); consider: 1 applied, 0 converted (0%).
+    Low-fit skip: 3 applied, 1 converted (33.3%).
+      - Simple mean of bands: high=(50%+0%)/2=25% <= low=33.3% → WOULD fire (false alarm).
+      - Pooled: high=2/5=40% > low=1/3=33.3% → silent (high-fit genuinely outperforms).
+    The alarm must stay SILENT here; a mean-based regression would fire.
+    """
+    from job_finder.web.scheduler._runners import _check_conversion_signal
+
+    conn = _test_conn()
+    # high-fit apply: 4 applied, 2 converted
+    _seed_applied(conn, "a1", "apply", converted=True)
+    _seed_applied(conn, "a2", "apply", converted=True)
+    _seed_applied(conn, "a3", "apply", converted=False)
+    _seed_applied(conn, "a4", "apply", converted=False)
+    # high-fit consider: 1 applied, 0 converted (the tiny 0% band that skews a mean)
+    _seed_applied(conn, "c1", "consider", converted=False)
+    # low-fit skip: 3 applied, 1 converted
+    _seed_applied(conn, "s1", "skip", converted=True)
+    _seed_applied(conn, "s2", "skip", converted=False)
+    _seed_applied(conn, "s3", "skip", converted=False)
+
+    assert _check_conversion_signal(conn, {"health": {"conversion_min_applied": 3}}) is None
