@@ -15,7 +15,7 @@ import json
 import logging
 import re
 import sqlite3
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from typing import TYPE_CHECKING, Literal
 
 from job_finder.config import JD_STORAGE_MAX_CHARS
@@ -565,19 +565,20 @@ def upsert_job(
         if ats_platform and is_direct_ats_platform(ats_platform) and parsed.source_id:
             # Build the 6-field descriptor (location_fit added in Phase 3)
             apply_url = parsed.source_urls[0] if parsed.source_urls else ""
-            locations_structured_dict = (
-                _locations_to_json(_locs_structured) if _locs_structured else []
+            locations_structured_list = (
+                [asdict(loc) for loc in _locs_structured] if _locs_structured else []
             )
             descriptor = build_posting_descriptor(
                 ats_platform=ats_platform,
                 source_id=parsed.source_id,
                 apply_url=apply_url,
-                locations_structured=locations_structured_dict,
+                locations_structured=locations_structured_list,
                 workplace_type=workplace_type_col,
             )
-            postings = upsert_posting(postings, descriptor)
-            # A posting upsert is a canonical change (new sub-entity data)
-            canonical_changed = True
+            new_postings = upsert_posting(postings, descriptor)
+            if new_postings != postings:
+                canonical_changed = True
+            postings = new_postings
 
         # Smart location merge: maintain locations_raw array (Remote/Hybrid
         # first). Delegated to merge_locations_raw — the single source of truth
@@ -843,14 +844,14 @@ def upsert_job(
         postings: list[dict] = []
         if ats_platform and is_direct_ats_platform(ats_platform) and parsed.source_id:
             apply_url = parsed.source_urls[0] if parsed.source_urls else ""
-            locations_structured_dict = (
-                _locations_to_json(_locs_structured) if _locs_structured else []
+            locations_structured_list = (
+                [asdict(loc) for loc in _locs_structured] if _locs_structured else []
             )
             descriptor = build_posting_descriptor(
                 ats_platform=ats_platform,
                 source_id=parsed.source_id,
                 apply_url=apply_url,
-                locations_structured=locations_structured_dict,
+                locations_structured=locations_structured_list,
                 workplace_type=workplace_type_col,
             )
             postings = [descriptor]

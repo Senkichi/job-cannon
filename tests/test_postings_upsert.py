@@ -11,7 +11,7 @@ from job_finder.db._jobs import upsert_job
 from job_finder.db._postings import build_posting_descriptor, upsert_posting
 from job_finder.models import Job
 from job_finder.parsed_job import ParsedJob
-from job_finder.web.ats_registry import PLATFORMS, is_direct_ats_platform
+from job_finder.web.ats_registry import is_direct_ats_platform
 from job_finder.web.location_canonical import JobLocation
 
 
@@ -391,7 +391,7 @@ class TestUpsertJobPostings:
         assert len(postings) == 1
 
         # Verify the single posting has both locations
-        locations_structured = json.loads(postings[0]["locations_structured"])
+        locations_structured = postings[0]["locations_structured"]
         assert len(locations_structured) == 2
         cities = {loc["city"] for loc in locations_structured}
         assert cities == {"San Francisco", "New York"}
@@ -647,14 +647,194 @@ class TestUpsertJobPostings:
 
         conn.close()
 
-    def test_company_source_resolves_to_ats_platform_at_upsert(self, migrated_db):
-        """The integration seam: job_dict["company_source"] resolves to platform key and reaches upsert_job."""
+    def test_identical_resighting_preserves_unresolved_reasons(self, migrated_db):
+        """Re-upserting a byte-identical job should not change canonical fields like unresolved_reasons."""
         db_path, conn = migrated_db
 
-        # Simulate the ats_scanner/_run.py path
+        # First upsert: create a direct-ATS job
+        job = Job(
+            title="Data Scientist",
+            company="TestCo",
+            location="San Francisco, CA",
+            source="Ashby",
+            source_url="http://example.com/1",
+            source_id="abc-123",
+            description="Job description",
+        )
+        parsed = ParsedJob.from_job(
+            job,
+            source_meta={
+                "locations_structured": [
+                    JobLocation(
+                        city="San Francisco",
+                        region="California",
+                        region_code="CA",
+                        country="United States",
+                        country_code="US",
+                        workplace_type="ONSITE",
+                        raw="San Francisco, CA",
+                        unresolved=False,
+                    )
+                ]
+            },
+        )
+        result1 = upsert_job(conn, parsed, ats_platform="ashby")
+        assert result1.kind == "inserted"
+
+        # Simulate admin approval: set unresolved_reasons to '[]'
+        conn.execute(
+            "UPDATE jobs SET unresolved_reasons = '[]' WHERE dedup_key = ?",
+            (parsed.dedup_key,),
+        )
+        conn.commit()
+
+        # Verify unresolved_reasons is '[]'
+        row = conn.execute(
+            "SELECT unresolved_reasons FROM jobs WHERE dedup_key = ?",
+            (parsed.dedup_key,),
+        ).fetchone()
+        assert row["unresolved_reasons"] == "[]"
+
+        # Second upsert: byte-identical job (same ats_platform, source_id, etc.)
+        result2 = upsert_job(conn, parsed, ats_platform="ashby")
+        # Should report "unchanged" or "touched", not "updated"
+        assert result2.kind in ("unchanged", "touched")
+
+        # Verify unresolved_reasons is still '[]' (not clobbered)
+        row = conn.execute(
+            "SELECT unresolved_reasons FROM jobs WHERE dedup_key = ?",
+            (parsed.dedup_key,),
+        ).fetchone()
+        assert row["unresolved_reasons"] == "[]"
+
+        # Third upsert: genuinely changed descriptor (URL change)
+        job2 = Job(
+            title="Data Scientist",
+            company="TestCo",
+            location="San Francisco, CA",
+            source="Ashby",
+            source_url="http://example.com/2",  # Changed URL
+            source_id="abc-123",
+            description="Job description",
+        )
+        parsed2 = ParsedJob.from_job(
+            job2,
+            source_meta={
+                "locations_structured": [
+                    JobLocation(
+                        city="San Francisco",
+                        region="California",
+                        region_code="CA",
+                        country="United States",
+                        country_code="US",
+                        workplace_type="ONSITE",
+                        raw="San Francisco, CA",
+                        unresolved=False,
+                    )
+                ]
+            },
+        )
+        result3 = upsert_job(conn, parsed2, ats_platform="ashby")
+        # Should report "updated" since the descriptor changed
+        assert result3.kind == "updated"
+
+        conn.close()
+
+    def test_locations_structured_is_list_not_string(self, migrated_db):
+        """locations_structured in postings should be stored as list[dict], not JSON string."""
+        db_path, conn = migrated_db
+
+        # Test with non-empty locations
+        job = Job(
+            title="Data Scientist",
+            company="TestCo",
+            location="San Francisco, CA",
+            source="Ashby",
+            source_url="http://example.com/1",
+            source_id="abc-123",
+            description="Job description",
+        )
+        parsed = ParsedJob.from_job(
+            job,
+            source_meta={
+                "locations_structured": [
+                    JobLocation(
+                        city="San Francisco",
+                        region="California",
+                        region_code="CA",
+                        country="United States",
+                        country_code="US",
+                        workplace_type="ONSITE",
+                        raw="San Francisco, CA",
+                        unresolved=False,
+                    )
+                ]
+            },
+        )
+        result = upsert_job(conn, parsed, ats_platform="ashby")
+        assert result.kind == "inserted"
+
+        row = conn.execute(
+            "SELECT postings FROM jobs WHERE dedup_key = ?",
+            (parsed.dedup_key,),
+        ).fetchone()
+        postings = json.loads(row["postings"])
+        assert len(postings) == 1
+        locations_structured = postings[0]["locations_structured"]
+
+        # Verify it's a list, not a string
+        assert isinstance(locations_structured, list)
+        assert len(locations_structured) == 1
+        assert isinstance(locations_structured[0], dict)
+        assert locations_structured[0]["city"] == "San Francisco"
+
+        # Test with empty locations (use a location that won't be structured)
+        job2 = Job(
+            title="Software Engineer",
+            company="TestCo2",
+            location="",  # Empty location to avoid auto-structuring
+            source="Lever",
+            source_url="http://example.com/2",
+            source_id="def-456",
+            description="Job description",
+        )
+        parsed2 = ParsedJob.from_job(
+            job2,
+            source_meta={"locations_structured": []},
+        )
+        result2 = upsert_job(conn, parsed2, ats_platform="lever")
+        assert result2.kind == "inserted"
+
+        row2 = conn.execute(
+            "SELECT postings FROM jobs WHERE dedup_key = ?",
+            (parsed2.dedup_key,),
+        ).fetchone()
+        postings2 = json.loads(row2["postings"])
+        assert len(postings2) == 1
+        locations_structured2 = postings2[0]["locations_structured"]
+
+        # Verify empty case is also a list
+        assert isinstance(locations_structured2, list)
+        assert len(locations_structured2) == 0
+
+        # Verify SQL-side json_extract works (proves JSON-native storage)
+        row3 = conn.execute(
+            """SELECT json_extract(postings, '$[0].locations_structured[0].city') as city
+               FROM jobs WHERE dedup_key = ?""",
+            (parsed.dedup_key,),
+        ).fetchone()
+        assert row3["city"] == "San Francisco"
+
+        conn.close()
+
+    def test_oracle_cloud_mints_posting(self, migrated_db):
+        """oracle_cloud platform key mints a posting (regression test for Finding 3)."""
+        db_path, conn = migrated_db
+
+        # Simulate an oracle_cloud job dict (as would come from the scanner)
         job_dict = {
             "title": "Data Scientist",
-            "company_source": "Ashby",  # Title-cased
+            "company_source": "Oracle Cloud",  # Display name that would fail lowercasing
             "source_id": "abc-123",
             "source_url": "http://example.com/1",
             "location": "San Francisco, CA",
@@ -673,17 +853,7 @@ class TestUpsertJobPostings:
             ],
         }
 
-        # Resolve platform key as _run.py does
-        company_source = job_dict["company_source"]
-        ats_platform = None
-        if company_source:
-            platform_key = company_source.lower()
-            if platform_key in PLATFORMS:
-                ats_platform = platform_key
-
-        assert ats_platform == "ashby"
-
-        # Build ParsedJob and call upsert_job
+        # Build ParsedJob and call upsert_job with the correct registry key
         from job_finder.models import Job
 
         job = Job(
@@ -700,7 +870,8 @@ class TestUpsertJobPostings:
             job, source_meta={"locations_structured": job_dict["locations_structured"]}
         )
 
-        result = upsert_job(conn, parsed, ats_platform=ats_platform)
+        # Use the correct registry key "oracle_cloud", not the lowercased display name
+        result = upsert_job(conn, parsed, ats_platform="oracle_cloud")
         assert result.kind == "inserted"
 
         # Verify posting was minted
@@ -710,7 +881,64 @@ class TestUpsertJobPostings:
         ).fetchone()
         postings = json.loads(row["postings"])
         assert len(postings) == 1
-        assert postings[0]["ats_platform"] == "ashby"
+        assert postings[0]["ats_platform"] == "oracle_cloud"
         assert postings[0]["source_id"] == "abc-123"
+
+        conn.close()
+
+    def test_all_direct_ats_platforms_mint_postings(self, migrated_db):
+        """Parity guard: every direct-ATS platform in SCANNABLE_TARGET_PLATFORMS mints a posting."""
+        from job_finder.web.ats_registry import SCANNABLE_TARGET_PLATFORMS
+
+        db_path, conn = migrated_db
+
+        for platform in SCANNABLE_TARGET_PLATFORMS:
+            if not is_direct_ats_platform(platform):
+                continue  # Skip non-direct-ATS platforms
+
+            # Build a minimal job for this platform with unique source_id per platform
+            job = Job(
+                title="Data Scientist",
+                company=f"TestCo_{platform}",  # Unique company per platform
+                location="San Francisco, CA",
+                source=platform.title(),  # Use title-cased display name
+                source_url=f"http://example.com/{platform}",
+                source_id=f"test-{platform}",  # Unique source_id per platform
+                description="Job description",
+            )
+
+            parsed = ParsedJob.from_job(
+                job,
+                source_meta={
+                    "locations_structured": [
+                        JobLocation(
+                            city="San Francisco",
+                            region="California",
+                            region_code="CA",
+                            country="United States",
+                            country_code="US",
+                            workplace_type="ONSITE",
+                            raw="San Francisco, CA",
+                            unresolved=False,
+                        )
+                    ]
+                },
+            )
+
+            # Call upsert_job with the correct registry key
+            result = upsert_job(conn, parsed, ats_platform=platform)
+            assert result.kind == "inserted", f"Platform {platform} failed to mint posting"
+
+            # Verify posting was minted with the correct platform key
+            row = conn.execute(
+                "SELECT postings FROM jobs WHERE dedup_key = ?",
+                (parsed.dedup_key,),
+            ).fetchone()
+            postings = json.loads(row["postings"])
+            assert len(postings) == 1, f"Platform {platform} should have 1 posting"
+            assert postings[0]["ats_platform"] == platform, (
+                f"Platform {platform} posting has wrong ats_platform: "
+                f"{postings[0]['ats_platform']}"
+            )
 
         conn.close()

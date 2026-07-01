@@ -470,6 +470,7 @@ def _scan_one_company_via_ats_api(
                     summary,
                     all_new_job_keys,
                     company_id=company_id,
+                    ats_platform=platform,
                 )
 
         # Log company scan
@@ -560,6 +561,7 @@ def _upsert_one_ats_api_job(
     all_new_job_keys: list,
     *,
     company_id: int | None = None,
+    ats_platform: str | None = None,
 ) -> None:
     """Upsert a single ATS-API-discovered job; promote jd_full + comp_data_json on first-seen."""
     try:
@@ -649,19 +651,6 @@ def _upsert_one_ats_api_job(
             # denylisted company (I-10) — or a result-count tile (I-14, #211)
             # — is skipped silently.
             return
-
-        # Resolve the registry platform key from job_dict["company_source"]
-        # (title-cased 'Ashby'/'Lever'/'Greenhouse') for the posting sub-entity
-        # upsert (#640). Lowercase and validate against PLATFORMS; unknown
-        # sources are treated as non-ATS sightings (mint no posting).
-        from job_finder.web.ats_registry import PLATFORMS
-
-        company_source = job_dict.get("company_source", "")
-        ats_platform = None
-        if company_source:
-            platform_key = company_source.lower()
-            if platform_key in PLATFORMS:
-                ats_platform = platform_key
 
         result = upsert_job(
             scan_conn,

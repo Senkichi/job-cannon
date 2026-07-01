@@ -80,6 +80,7 @@ COLUMN_CATEGORIES: dict[str, str] = {
     "employment_type": "system",  # NEW m106 — raw employmentType/typeOfEmployment/commitment
     "department": "system",  # NEW m106 — raw department/team string
     "ats_refreshed_at": "system",  # NEW m114 — raw mutable refresh timestamp (Greenhouse updated_at)
+    "postings": "system",  # NEW m205107961 — posting sub-entity JSON array for direct ATS sightings (#640)
     # ── scoring-owned ─────────────────────────────────────────────────────
     # m113 dropped the vestigial 0-100 ``score`` column (the v3.0 "Plan 4"
     # single-tier tail) — intentionally absent here, like the m083-dropped

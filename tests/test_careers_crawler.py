@@ -108,7 +108,8 @@ def tmp_db_path():
             locations_structured TEXT,
             workplace_type TEXT,
             primary_country_code TEXT,
-            unresolved_reasons TEXT NOT NULL DEFAULT '[]'
+            unresolved_reasons TEXT NOT NULL DEFAULT '[]',
+            postings TEXT DEFAULT '[]'
         );
         CREATE TABLE runs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,

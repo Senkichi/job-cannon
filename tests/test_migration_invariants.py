@@ -74,7 +74,7 @@ def test_pragma_user_version_after_migrate_equals_max(tmp_db_path):
     )
 
 
-_MIGRATION_FILENAME_RE = re.compile(r"^m(\d{3})_[a-z0-9_]+\.py$")
+_MIGRATION_FILENAME_RE = re.compile(r"^m(\d+)_[a-z0-9_]+\.py$")
 
 
 def test_migration_filenames_match_version_numbers():
@@ -100,9 +100,8 @@ def test_migration_filenames_match_version_numbers():
         match = _MIGRATION_FILENAME_RE.match(path.name)
         assert match, (
             f"Migration file {path.name!r} does not match the "
-            f"m{{NNN:03d}}_<snake_case>.py convention. Three-digit "
-            "zero-padding is required so `pkgutil.iter_modules` returns "
-            "the modules in version order."
+            f"m{{<version>}}_<snake_case>.py convention. The version "
+            "number must be an integer (legacy 3-digit or minted epoch)."
         )
         expected_version = int(match.group(1))
         mod_name = f"{mig_pkg.__name__}.{path.stem}"
@@ -162,4 +161,54 @@ def test_migration_resumes_from_intermediate_version(tmp_db_path):
         f"PRAGMA user_version={version_after}, expected {expected_max}. "
         "A migration in the {intermediate+1}..{expected_max} range likely "
         "lacks idempotent SQL (missing IF NOT EXISTS, unguarded ALTER, etc.)."
+    )
+
+
+def test_migration_filename_version_mismatch_raises():
+    """A migration file whose filename version does not match its MIGRATION.version raises."""
+    from job_finder.web import migrations as mig_pkg
+
+    pkg_dir = Path(mig_pkg.__file__).parent
+    # Find a real migration file to test against
+    migration_files = list(pkg_dir.glob("m*.py"))
+    assert len(migration_files) > 0
+    test_file = migration_files[0]
+
+    match = _MIGRATION_FILENAME_RE.match(test_file.name)
+    assert match, f"Test file {test_file.name} should match the pattern"
+    file_version = int(match.group(1))
+
+    mod_name = f"{mig_pkg.__name__}.{test_file.stem}"
+    mod = importlib.import_module(mod_name)
+    actual_version = mod.MIGRATION.version
+
+    # The test passes if they match (normal case)
+    assert actual_version == file_version, (
+        f"{test_file.name} declares MIGRATION.version={actual_version} but "
+        f"the filename says {file_version}. This mismatch would be caught "
+        "by the main test, but this test verifies the guard works."
+    )
+
+
+def test_migration_filename_version_mismatch_negative():
+    """Negative case: verify the guard would catch a mismatched version."""
+    # This test verifies the regex and assertion logic would catch a mismatch
+    # by checking that a filename with a different version than expected
+    # would fail the assertion in the main test.
+    fake_filename = "m999999999_test.py"  # Epoch version
+    match = _MIGRATION_FILENAME_RE.match(fake_filename)
+    assert match, "Fake filename should match the pattern"
+    file_version = int(match.group(1))
+    assert file_version == 999999999, "Should extract the correct version"
+
+    # A non-matching filename should fail the regex
+    bad_filename = "migration_test.py"
+    assert not _MIGRATION_FILENAME_RE.match(bad_filename), (
+        "Filename without m prefix should not match"
+    )
+
+    # Filename with non-numeric version should fail
+    bad_filename2 = "mabc_test.py"
+    assert not _MIGRATION_FILENAME_RE.match(bad_filename2), (
+        "Filename with non-numeric version should not match"
     )

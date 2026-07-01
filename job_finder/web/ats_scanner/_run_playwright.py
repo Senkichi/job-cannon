@@ -260,6 +260,7 @@ def _scan_one_company_via_playwright(
                     summary,
                     all_new_job_keys,
                     company_id=company_id,
+                    ats_platform=platform,
                 )
 
         conn.execute(
