@@ -415,13 +415,17 @@ def test_validator_catches_en_dash_in_full_text(example_profile, base_job):
     assert len(prohibited_violations) >= 1
 
 
-def test_validator_catches_all_sub_8_year_figures(example_profile, base_job):
-    """GROUP E4: All sub-8-year figures are caught, not just the first match.
+def test_validator_catches_all_sub_8_year_experience_claims(
+    example_profile, base_job, style_guide
+):
+    """Issue #624: All sub-8-year total-career experience claims are caught.
 
-    '12 years ... 3 years' should catch the 3 years violation.
+    '12 years of leadership; 3 years of experience' should catch the 3 years violation
+    because it's a total-career self-claim, but '3 years of Python' should NOT be caught
+    because it's a role/project duration.
     """
     tailored = {
-        "summary": "12 years of leadership; 3 years of Python",  # 3 years should be caught
+        "summary": "12 years of leadership; 3 years of experience",  # 3 years should be caught
         "skills": ["Python", "SQL"],
         "sections": [
             {
@@ -434,10 +438,10 @@ def test_validator_catches_all_sub_8_year_figures(example_profile, base_job):
         "jd_keywords": ["Python", "SQL"],
     }
 
-    report = validate_resume_grounding(tailored, example_profile, base_job)
+    report = validate_resume_grounding(tailored, example_profile, base_job, style_guide)
 
     prohibited_violations = [v for v in report.violations if v.kind == "prohibited_item"]
-    # Should catch the 3 years violation
+    # Should catch the 3 years violation (total-career claim)
     assert any("3 years" in v.value for v in prohibited_violations)
 
 
@@ -464,6 +468,157 @@ def test_validator_454_anchored_to_percent(example_profile, base_job):
 
     prohibited_violations = [v for v in report.violations if v.kind == "prohibited_item"]
     assert any("454%" in v.value for v in prohibited_violations)
+
+
+def test_min_years_anchor_blocks_under_claimed_total_career(
+    example_profile, base_job, style_guide
+):
+    """Issue #624: Under-claimed total-career experience is still blocked.
+
+    '5 years of experience' with min_years_anchor=8 should still violate
+    (preserves the owner's understatement guard).
+    """
+    tailored = {
+        "summary": "5 years of experience in data science",
+        "skills": ["Python", "SQL"],
+        "sections": [
+            {
+                "company": "TechCorp Solutions",
+                "title": "Senior Data Scientist",
+                "dates": "Mar 2022 - Present",
+                "bullets": ["Built ML pipeline"],
+            }
+        ],
+        "jd_keywords": ["Python", "SQL"],
+    }
+
+    report = validate_resume_grounding(tailored, example_profile, base_job, style_guide)
+
+    prohibited_violations = [v for v in report.violations if v.kind == "prohibited_item"]
+    assert any("5 years" in v.value for v in prohibited_violations)
+
+
+def test_min_years_anchor_allows_truthful_role_duration(example_profile, base_job, style_guide):
+    """Issue #624: Truthful role duration below floor is allowed (false-positive fix).
+
+    'Led the analytics team for 4 years' with min_years_anchor=8 should NOT violate
+    because it's a role duration, not a total-career self-claim.
+    """
+    tailored = {
+        "summary": "Experienced data scientist",
+        "skills": ["Python", "SQL"],
+        "sections": [
+            {
+                "company": "TechCorp Solutions",
+                "title": "Senior Data Scientist",
+                "dates": "Mar 2022 - Present",
+                "bullets": ["Led the analytics team for 4 years"],
+            }
+        ],
+        "jd_keywords": ["Python", "SQL"],
+    }
+
+    report = validate_resume_grounding(tailored, example_profile, base_job, style_guide)
+
+    prohibited_violations = [v for v in report.violations if v.kind == "prohibited_item"]
+    # Should NOT have a years violation
+    assert not any("years" in v.value for v in prohibited_violations)
+
+
+def test_min_years_anchor_allows_single_role_tenure(example_profile, base_job, style_guide):
+    """Issue #624: Truthful single-role tenure below floor is allowed.
+
+    '2 years at [company]' with min_years_anchor=8 should NOT violate
+    because it's a role tenure, not a total-career self-claim.
+    """
+    tailored = {
+        "summary": "Experienced data scientist",
+        "skills": ["Python", "SQL"],
+        "sections": [
+            {
+                "company": "TechCorp Solutions",
+                "title": "Senior Data Scientist",
+                "dates": "Mar 2022 - Present",
+                "bullets": ["Spent 2 years at TechCorp building ML systems"],
+            }
+        ],
+        "jd_keywords": ["Python", "SQL"],
+    }
+
+    report = validate_resume_grounding(tailored, example_profile, base_job, style_guide)
+
+    prohibited_violations = [v for v in report.violations if v.kind == "prohibited_item"]
+    # Should NOT have a years violation
+    assert not any("years" in v.value for v in prohibited_violations)
+
+
+def test_min_years_anchor_allows_above_floor_claim(example_profile, base_job, style_guide):
+    """Issue #624: Above-floor total-career claim is allowed.
+
+    '10 years of experience' with min_years_anchor=8 should NOT violate.
+    """
+    tailored = {
+        "summary": "10 years of professional experience in data science",
+        "skills": ["Python", "SQL"],
+        "sections": [
+            {
+                "company": "TechCorp Solutions",
+                "title": "Senior Data Scientist",
+                "dates": "Mar 2022 - Present",
+                "bullets": ["Built ML pipeline"],
+            }
+        ],
+        "jd_keywords": ["Python", "SQL"],
+    }
+
+    report = validate_resume_grounding(tailored, example_profile, base_job, style_guide)
+
+    prohibited_violations = [v for v in report.violations if v.kind == "prohibited_item"]
+    # Should NOT have a years violation
+    assert not any("years" in v.value for v in prohibited_violations)
+
+
+def test_min_years_anchor_other_prohibited_checks_unchanged(
+    example_profile, base_job, style_guide
+):
+    """Issue #624: Other prohibited-item checks remain unaffected.
+
+    Verify that banned_tokens, company-name-in-summary, sample sizes, em-dash,
+    ROI %, and third-person checks still work after the min_years_anchor fix.
+    """
+    tailored = {
+        "summary": "Experienced data scientist at TargetCorp with 5 years of experience",
+        "skills": ["Python", "SQL", "dbt"],  # dbt prohibited
+        "sections": [
+            {
+                "company": "TechCorp Solutions",
+                "title": "Senior Data Scientist",
+                "dates": "Mar 2022 - Present",
+                "bullets": [
+                    "Achieved 454% ROI",  # 454% prohibited
+                    "Processed N=200 samples",  # N= prohibited
+                    "Reduced latency — by 40%",  # em-dash prohibited
+                    "He delivered results.",  # third-person prohibited
+                ],
+            }
+        ],
+        "jd_keywords": ["Python", "SQL"],
+    }
+
+    report = validate_resume_grounding(tailored, example_profile, base_job, style_guide)
+
+    prohibited_violations = [v for v in report.violations if v.kind == "prohibited_item"]
+    violation_values = [v.value for v in prohibited_violations]
+
+    # Should catch all other prohibited items
+    assert any("dbt" in val.lower() for val in violation_values)
+    assert any("TargetCorp" in val for val in violation_values)
+    assert any("454%" in val for val in violation_values)
+    assert any("N=" in val for val in violation_values)
+    assert any("dash" in val for val in violation_values)
+    assert any("third-person" in val for val in violation_values)
+    # Should also catch the sub-8-year total-career claim
+    assert any("5 years" in val for val in violation_values)
 
 
 # ---------------------------------------------------------------------------
