@@ -520,7 +520,6 @@ def _check_conversion_signal(conn, config: dict) -> str | None:
     low_fit_bands = ["skip", "reject"]
 
     high_fit_applied = sum(by_band[band]["applied"] for band in high_fit_bands)
-    low_fit_applied = sum(by_band[band]["applied"] for band in low_fit_bands)
 
     if high_fit_applied < min_applied:
         return None  # Not enough data to be meaningful

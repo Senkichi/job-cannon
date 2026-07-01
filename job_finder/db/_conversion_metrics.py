@@ -21,7 +21,9 @@ from job_finder.constants import CLASSIFICATIONS, PIPELINE_STATUSES
 _PROGRESSION = ("applied", "phone_screen", "technical", "onsite", "offer", "accepted")
 # Single-point drift guard: every progression stage must exist in the canonical
 # vocabulary, else a rename silently drops it from the denominator/numerator.
-assert set(_PROGRESSION) <= set(PIPELINE_STATUSES), "progression stages drifted from PIPELINE_STATUSES"
+assert set(_PROGRESSION) <= set(PIPELINE_STATUSES), (
+    "progression stages drifted from PIPELINE_STATUSES"
+)
 POSITIVE_STAGES: tuple[str, ...] = _PROGRESSION
 
 

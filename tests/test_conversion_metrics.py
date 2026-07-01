@@ -16,8 +16,6 @@ from __future__ import annotations
 import sqlite3
 from datetime import UTC, datetime
 
-import pytest
-
 from job_finder.constants import PIPELINE_STATUSES
 from job_finder.db import compute_conversion_by_band
 from job_finder.db._conversion_metrics import POSITIVE_STAGES
@@ -147,7 +145,14 @@ def test_conversion_by_band_uses_max_stage_and_applied_denominator():
 def test_positive_stages_derived_from_constants():
     """Test that POSITIVE_STAGES is derived from PIPELINE_STATUSES and guarded."""
     # Exact value assertion
-    assert POSITIVE_STAGES == ("applied", "phone_screen", "technical", "onsite", "offer", "accepted")
+    assert POSITIVE_STAGES == (
+        "applied",
+        "phone_screen",
+        "technical",
+        "onsite",
+        "offer",
+        "accepted",
+    )
 
     # Drift guard: every progression stage must exist in the canonical vocabulary
     assert set(POSITIVE_STAGES) <= set(PIPELINE_STATUSES)
