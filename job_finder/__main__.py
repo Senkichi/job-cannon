@@ -218,6 +218,13 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Remove the installed supervisor manifest and deregister it "
         "(no-op success if nothing is installed).",
     )
+    supervisor.add_argument(
+        "--healthcheck-interval-min",
+        type=int,
+        default=15,
+        metavar="MINUTES",
+        help="Cadence for the periodic healthcheck probe (default: 15). Ignored for --uninstall.",
+    )
 
     # ``stop`` — gracefully stop the running instance(s) and disable the
     # keepalive supervisor so it cannot relaunch what we just stopped. Reads the

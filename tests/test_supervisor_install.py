@@ -28,6 +28,10 @@ from job_finder import __main__ as main_mod
 from job_finder.web import supervisor
 from job_finder.web._pidfile import claim_paths
 
+# Re-export constants for test readability
+_TASK_NAME = supervisor._TASK_NAME
+_HEALTHCHECK_TASK_NAME = supervisor._HEALTHCHECK_TASK_NAME
+
 # ---------------------------------------------------------------------------
 # Parser wiring
 # ---------------------------------------------------------------------------
@@ -437,7 +441,7 @@ def test_cmd_stop_disables_supervisor_then_stops_instances(monkeypatch, tmp_path
     monkeypatch.setattr(
         supervisor,
         "_supervisor_action",
-        lambda plat, *, uninstall: disabled.append(uninstall) or 0,
+        lambda plat, *, uninstall, interval_min: disabled.append(uninstall) or 0,
     )
     monkeypatch.setattr(
         supervisor, "free_jc_port", lambda h, p, **kw: freed.append((h, p)) or True
@@ -455,7 +459,7 @@ def test_cmd_stop_no_instances_still_disables_supervisor(monkeypatch, tmp_path):
     monkeypatch.setattr(
         supervisor,
         "_supervisor_action",
-        lambda plat, *, uninstall: disabled.append(uninstall) or 0,
+        lambda plat, *, uninstall, interval_min: disabled.append(uninstall) or 0,
     )
     monkeypatch.setattr(supervisor, "free_jc_port", lambda *a, **k: pytest.fail("must not free"))
 
@@ -467,7 +471,9 @@ def test_cmd_stop_no_instances_still_disables_supervisor(monkeypatch, tmp_path):
 def test_cmd_stop_reports_foreign_held_port(monkeypatch, tmp_path, capsys):
     _write_claim_marker(tmp_path, "127.0.0.1", 5000, pid=4242)
     monkeypatch.setattr(supervisor, "user_data_root", lambda: tmp_path)
-    monkeypatch.setattr(supervisor, "_supervisor_action", lambda plat, *, uninstall: 0)
+    monkeypatch.setattr(
+        supervisor, "_supervisor_action", lambda plat, *, uninstall, interval_min: 0
+    )
     monkeypatch.setattr(supervisor, "free_jc_port", lambda h, p, **kw: False)  # refused
 
     rc = supervisor.cmd_stop(argparse.Namespace(), platform="linux")
@@ -506,3 +512,148 @@ def test_is_supervisor_installed_linux_checks_unit_file(monkeypatch, tmp_path):
     assert supervisor.is_supervisor_installed("linux") is False
     unit.write_text("[Service]\n", encoding="utf-8")
     assert supervisor.is_supervisor_installed("linux") is True
+
+
+# ---------------------------------------------------------------------------
+# Healthcheck manifest renderers
+# ---------------------------------------------------------------------------
+
+
+def test_windows_healthcheck_manifest_contains_notify_probe():
+    xml = supervisor.render_windows_healthcheck_task_xml(15)
+    assert "healthcheck" in xml
+    assert "--notify" in xml
+    assert "<Repetition>" in xml
+    assert "PT15M" in xml
+    assert "<StartBoundary>" in xml
+    assert "InteractiveToken" in xml
+    assert "LeastPrivilege" in xml
+    assert "<LogonTrigger>" not in xml
+    assert "<RestartOnFailure>" not in xml
+
+
+def test_launchd_healthcheck_manifest_is_periodic():
+    plist = supervisor.render_launchd_healthcheck_plist(15)
+    assert "StartInterval" in plist
+    assert "<integer>900</integer>" in plist  # 15 min * 60 sec
+    assert "healthcheck" in plist
+    assert "--notify" in plist
+    assert supervisor._HEALTHCHECK_LAUNCHD_LABEL in plist
+    assert "KeepAlive" not in plist
+
+
+def test_systemd_healthcheck_units():
+    service, timer = supervisor.render_systemd_healthcheck_units(15)
+    assert "Type=oneshot" in service
+    assert "healthcheck" in service
+    assert "--notify" in service
+    assert "OnUnitActiveSec=15min" in timer
+    assert "WantedBy=timers.target" in timer
+
+
+def test_interval_override_flows_through():
+    xml = supervisor.render_windows_healthcheck_task_xml(5)
+    assert "PT5M" in xml
+    plist = supervisor.render_launchd_healthcheck_plist(5)
+    assert "<integer>300</integer>" in plist  # 5 min * 60 sec
+    service, timer = supervisor.render_systemd_healthcheck_units(5)
+    assert "OnUnitActiveSec=5min" in timer
+
+
+# ---------------------------------------------------------------------------
+# install / uninstall — healthcheck unit registration
+# ---------------------------------------------------------------------------
+
+
+def test_install_registers_both_units_windows(captured_run, isolated_paths):
+    args = argparse.Namespace(uninstall=False, healthcheck_interval_min=15)
+    code = supervisor.cmd_supervisor_install(args, platform="win32")
+    assert code == 0
+    # Both keepalive and healthcheck tasks registered.
+    create_calls = [c for c in captured_run if "/create" in c]
+    assert len(create_calls) == 2
+    assert any(_TASK_NAME in c for c in create_calls)
+    assert any(_HEALTHCHECK_TASK_NAME in c for c in create_calls)
+
+
+def test_install_registers_both_units_macos(captured_run, isolated_paths):
+    args = argparse.Namespace(uninstall=False, healthcheck_interval_min=15)
+    code = supervisor.cmd_supervisor_install(args, platform="darwin")
+    assert code == 0
+    # Both keepalive and healthcheck plists loaded.
+    load_calls = [c for c in captured_run if "load" in c]
+    assert len(load_calls) == 2
+    assert supervisor._launchd_plist_path().exists()
+    assert supervisor._launchd_healthcheck_plist_path().exists()
+
+
+def test_install_registers_both_units_linux(captured_run, isolated_paths):
+    args = argparse.Namespace(uninstall=False, healthcheck_interval_min=15)
+    code = supervisor.cmd_supervisor_install(args, platform="linux")
+    assert code == 0
+    # Both keepalive service and healthcheck timer enabled.
+    enable_calls = [c for c in captured_run if "enable" in c]
+    assert len(enable_calls) == 2
+    assert supervisor._systemd_unit_path().exists()
+    assert supervisor._systemd_healthcheck_service_path().exists()
+    assert supervisor._systemd_healthcheck_timer_path().exists()
+
+
+def test_uninstall_removes_both_units_windows(captured_run, isolated_paths):
+    args = argparse.Namespace(uninstall=False, healthcheck_interval_min=15)
+    supervisor.cmd_supervisor_install(args, platform="win32")
+    captured_run.clear()
+    args_uninstall = argparse.Namespace(uninstall=True, healthcheck_interval_min=15)
+    code = supervisor.cmd_supervisor_install(args_uninstall, platform="win32")
+    assert code == 0
+    # Both tasks deleted.
+    delete_calls = [c for c in captured_run if "/delete" in c]
+    assert len(delete_calls) == 2
+    assert any(_TASK_NAME in c for c in delete_calls)
+    assert any(_HEALTHCHECK_TASK_NAME in c for c in delete_calls)
+
+
+def test_uninstall_removes_both_units_macos(captured_run, isolated_paths):
+    args = argparse.Namespace(uninstall=False, healthcheck_interval_min=15)
+    supervisor.cmd_supervisor_install(args, platform="darwin")
+    captured_run.clear()
+    args_uninstall = argparse.Namespace(uninstall=True, healthcheck_interval_min=15)
+    code = supervisor.cmd_supervisor_install(args_uninstall, platform="darwin")
+    assert code == 0
+    # Both plists unlinked.
+    assert not supervisor._launchd_plist_path().exists()
+    assert not supervisor._launchd_healthcheck_plist_path().exists()
+
+
+def test_uninstall_removes_both_units_linux(captured_run, isolated_paths):
+    args = argparse.Namespace(uninstall=False, healthcheck_interval_min=15)
+    supervisor.cmd_supervisor_install(args, platform="linux")
+    captured_run.clear()
+    args_uninstall = argparse.Namespace(uninstall=True, healthcheck_interval_min=15)
+    code = supervisor.cmd_supervisor_install(args_uninstall, platform="linux")
+    assert code == 0
+    # Both units unlinked.
+    assert not supervisor._systemd_unit_path().exists()
+    assert not supervisor._systemd_healthcheck_service_path().exists()
+    assert not supervisor._systemd_healthcheck_timer_path().exists()
+
+
+def test_stop_disables_both_units(monkeypatch, tmp_path):
+    _write_claim_marker(tmp_path, "127.0.0.1", 5000, pid=4242)
+    disabled_plat: list[str] = []
+    freed: list[tuple] = []
+
+    monkeypatch.setattr(supervisor, "user_data_root", lambda: tmp_path)
+    monkeypatch.setattr(
+        supervisor,
+        "_supervisor_action",
+        lambda plat, *, uninstall, interval_min: disabled_plat.append(plat) or 0,
+    )
+    monkeypatch.setattr(
+        supervisor, "free_jc_port", lambda h, p, **kw: freed.append((h, p)) or True
+    )
+
+    rc = supervisor.cmd_stop(argparse.Namespace(), platform="linux")
+    assert rc == 0
+    assert disabled_plat == ["linux"]  # supervisor disabled (both units)
+    assert freed == [("127.0.0.1", 5000)]  # instance stopped

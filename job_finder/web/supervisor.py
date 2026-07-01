@@ -68,6 +68,12 @@ _LAUNCHD_LABEL = "com.senkichi.jobcannon"
 # Linux systemd --user unit filename.
 _SYSTEMD_UNIT = "job-cannon.service"
 
+# Healthcheck task/unit names (periodic probe, separate from keepalive).
+_HEALTHCHECK_TASK_NAME = "JobCannon-Healthcheck"
+_HEALTHCHECK_LAUNCHD_LABEL = "com.senkichi.jobcannon.healthcheck"
+_HEALTHCHECK_SYSTEMD_UNIT = "job-cannon-healthcheck"
+_HEALTHCHECK_INTERVAL_MIN = 15  # default cadence for the periodic probe
+
 # Restart governance (the same ceiling expressed per-OS): allow at most
 # _MAX_RESTARTS automatic restarts within a _RESTART_WINDOW_SEC window, with a
 # _RESTART_BACKOFF_SEC pause between attempts so a crash-loop cannot busy-spin.
@@ -246,6 +252,11 @@ def _quote_argv(argv: list[str]) -> str:
     return " ".join(f'"{part}"' if " " in part else part for part in argv)
 
 
+def _healthcheck_argv() -> list[str]:
+    """Return the argv that launches ``job-cannon healthcheck --notify``."""
+    return _resolve_invocation("healthcheck") + ["--notify"]
+
+
 def _supervisor_log_path() -> Path:
     """Per-OS supervisor stdout/stderr log path (under the user-data logs dir)."""
     return logs_path().parent / "supervisor.log"
@@ -377,6 +388,123 @@ def render_systemd_unit() -> str:
     )
 
 
+def render_windows_healthcheck_task_xml(interval_min: int) -> str:
+    """Render the Windows Task Scheduler XML manifest for the periodic healthcheck.
+
+    Per-user (``InteractiveToken`` + ``LeastPrivilege`` — never SYSTEM), a
+    repeating ``<TimeTrigger>`` (NOT a logon trigger) with a mandatory
+    ``<StartBoundary>`` and a ``<Repetition>`` that omits ``<Duration>`` to repeat
+    indefinitely. No ``<RestartOnFailure>`` — a probe that exits is normal.
+    """
+    argv = _healthcheck_argv()
+    command = argv[0]
+    arguments = _quote_argv(argv[1:])
+    interval = f"PT{interval_min}M"
+    return (
+        '<?xml version="1.0" encoding="UTF-16"?>\n'
+        '<Task version="1.2" '
+        'xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">\n'
+        "  <RegistrationInfo>\n"
+        "    <Description>Job Cannon periodic healthcheck probe (runs "
+        f"every {interval_min} min, per-user, no admin).</Description>\n"
+        "    <URI>\\JobCannon-Healthcheck</URI>\n"
+        "  </RegistrationInfo>\n"
+        "  <Triggers>\n"
+        "    <TimeTrigger>\n"
+        "      <StartBoundary>2020-01-01T00:00:00</StartBoundary>\n"
+        "      <Enabled>true</Enabled>\n"
+        "      <Repetition>\n"
+        f"        <Interval>{interval}</Interval>\n"
+        "        <StopAtDurationEnd>false</StopAtDurationEnd>\n"
+        "      </Repetition>\n"
+        "    </TimeTrigger>\n"
+        "  </Triggers>\n"
+        "  <Principals>\n"
+        '    <Principal id="Author">\n'
+        "      <LogonType>InteractiveToken</LogonType>\n"
+        "      <RunLevel>LeastPrivilege</RunLevel>\n"
+        "    </Principal>\n"
+        "  </Principals>\n"
+        "  <Settings>\n"
+        "    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>\n"
+        "    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>\n"
+        "    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>\n"
+        "    <StartWhenAvailable>true</StartWhenAvailable>\n"
+        "    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>\n"
+        "  </Settings>\n"
+        '  <Actions Context="Author">\n'
+        "    <Exec>\n"
+        f"      <Command>{command}</Command>\n"
+        f"      <Arguments>{arguments}</Arguments>\n"
+        "    </Exec>\n"
+        "  </Actions>\n"
+        "</Task>\n"
+    )
+
+
+def render_launchd_healthcheck_plist(interval_min: int) -> str:
+    """Render the macOS launchd LaunchAgent plist for the periodic healthcheck.
+
+    ``StartInterval`` for periodic execution (NOT ``KeepAlive`` — the probe must
+    exit each run), ``RunAtLoad`` true, label ``_HEALTHCHECK_LAUNCHD_LABEL``.
+    """
+    argv = _healthcheck_argv()
+    program_args = "\n".join(f"        <string>{part}</string>" for part in argv)
+    interval_sec = interval_min * 60
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" '
+        '"http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n'
+        '<plist version="1.0">\n'
+        "<dict>\n"
+        "    <key>Label</key>\n"
+        f"    <string>{_HEALTHCHECK_LAUNCHD_LABEL}</string>\n"
+        "    <key>ProgramArguments</key>\n"
+        "    <array>\n"
+        f"{program_args}\n"
+        "    </array>\n"
+        "    <key>RunAtLoad</key>\n"
+        "    <true/>\n"
+        "    <key>StartInterval</key>\n"
+        f"    <integer>{interval_sec}</integer>\n"
+        "    <key>StandardOutPath</key>\n"
+        f"    <string>{_supervisor_log_path()}</string>\n"
+        "    <key>StandardErrorPath</key>\n"
+        f"    <string>{_supervisor_log_path()}</string>\n"
+        "</dict>\n"
+        "</plist>\n"
+    )
+
+
+def render_systemd_healthcheck_units(interval_min: int) -> tuple[str, str]:
+    """Render the Linux systemd ``--user`` units for the periodic healthcheck.
+
+    Returns ``(service_text, timer_text)``. The service is ``Type=oneshot`` driven
+    by a ``.timer`` with ``OnBootSec`` + ``OnUnitActiveSec``.
+    """
+    exec_start = _quote_argv(_healthcheck_argv())
+    service = (
+        "[Unit]\n"
+        "Description=Job Cannon periodic healthcheck probe\n"
+        "\n"
+        "[Service]\n"
+        "Type=oneshot\n"
+        f"ExecStart={exec_start}\n"
+    )
+    timer = (
+        "[Unit]\n"
+        "Description=Job Cannon periodic healthcheck timer\n"
+        "\n"
+        "[Timer]\n"
+        f"OnBootSec={interval_min}min\n"
+        f"OnUnitActiveSec={interval_min}min\n"
+        "\n"
+        "[Install]\n"
+        "WantedBy=timers.target\n"
+    )
+    return (service, timer)
+
+
 # ---------------------------------------------------------------------------
 # Manifest paths
 # ---------------------------------------------------------------------------
@@ -400,6 +528,23 @@ def _systemd_unit_path() -> Path:
     return _home() / ".config" / "systemd" / "user" / _SYSTEMD_UNIT
 
 
+def _windows_healthcheck_task_xml_path() -> Path:
+    """Transient XML for the healthcheck task (under the user-data logs dir)."""
+    return logs_path().parent / "JobCannon-healthcheck-task.xml"
+
+
+def _launchd_healthcheck_plist_path() -> Path:
+    return _home() / "Library" / "LaunchAgents" / f"{_HEALTHCHECK_LAUNCHD_LABEL}.plist"
+
+
+def _systemd_healthcheck_service_path() -> Path:
+    return _home() / ".config" / "systemd" / "user" / f"{_HEALTHCHECK_SYSTEMD_UNIT}.service"
+
+
+def _systemd_healthcheck_timer_path() -> Path:
+    return _home() / ".config" / "systemd" / "user" / f"{_HEALTHCHECK_SYSTEMD_UNIT}.timer"
+
+
 # ---------------------------------------------------------------------------
 # Registration helpers
 # ---------------------------------------------------------------------------
@@ -411,7 +556,7 @@ def _run(cmd: list[str]) -> subprocess.CompletedProcess:
     return subprocess.run(cmd, capture_output=True, text=True)
 
 
-def _install_windows() -> int:
+def _install_windows(interval_min: int = _HEALTHCHECK_INTERVAL_MIN) -> int:
     path = _windows_task_xml_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     # schtasks /xml is happiest with a UTF-16 file matching the XML declaration.
@@ -421,18 +566,35 @@ def _install_windows() -> int:
         print(f"supervisor-install: schtasks failed: {proc.stderr.strip()}", file=sys.stderr)
         return proc.returncode
     print(f"Installed Job Cannon supervisor (Scheduled Task '{_TASK_NAME}', at logon).")
+
+    # Install the periodic healthcheck task.
+    hc_path = _windows_healthcheck_task_xml_path()
+    hc_path.write_text(render_windows_healthcheck_task_xml(interval_min), encoding="utf-16")
+    proc = _run(["schtasks", "/create", "/tn", _HEALTHCHECK_TASK_NAME, "/xml", str(hc_path), "/f"])
+    if proc.returncode != 0:
+        print(
+            f"supervisor-install: schtasks healthcheck failed: {proc.stderr.strip()}",
+            file=sys.stderr,
+        )
+        return proc.returncode
+    print(
+        f"Installed Job Cannon healthcheck probe (Scheduled Task '{_HEALTHCHECK_TASK_NAME}', every {interval_min} min)."
+    )
     return 0
 
 
 def _uninstall_windows() -> int:
     # /delete on a missing task returns non-zero — ignore for idempotency.
     _run(["schtasks", "/delete", "/tn", _TASK_NAME, "/f"])
+    _run(["schtasks", "/delete", "/tn", _HEALTHCHECK_TASK_NAME, "/f"])
     _windows_task_xml_path().unlink(missing_ok=True)
+    _windows_healthcheck_task_xml_path().unlink(missing_ok=True)
     print(f"Removed Job Cannon supervisor (Scheduled Task '{_TASK_NAME}').")
+    print(f"Removed Job Cannon healthcheck probe (Scheduled Task '{_HEALTHCHECK_TASK_NAME}').")
     return 0
 
 
-def _install_macos() -> int:
+def _install_macos(interval_min: int = _HEALTHCHECK_INTERVAL_MIN) -> int:
     path = _launchd_plist_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(render_launchd_plist(), encoding="utf-8")
@@ -444,18 +606,37 @@ def _install_macos() -> int:
         print(f"supervisor-install: launchctl load failed: {proc.stderr.strip()}", file=sys.stderr)
         return proc.returncode
     print(f"Installed Job Cannon supervisor (launchd LaunchAgent at {path}).")
+
+    # Install the periodic healthcheck plist.
+    hc_path = _launchd_healthcheck_plist_path()
+    hc_path.write_text(render_launchd_healthcheck_plist(interval_min), encoding="utf-8")
+    _run(["launchctl", "unload", str(hc_path)])  # ignore failure on fresh install
+    proc = _run(["launchctl", "load", str(hc_path)])
+    if proc.returncode != 0:
+        print(
+            f"supervisor-install: launchctl healthcheck load failed: {proc.stderr.strip()}",
+            file=sys.stderr,
+        )
+        return proc.returncode
+    print(
+        f"Installed Job Cannon healthcheck probe (launchd LaunchAgent at {hc_path}, every {interval_min} min)."
+    )
     return 0
 
 
 def _uninstall_macos() -> int:
     path = _launchd_plist_path()
+    hc_path = _launchd_healthcheck_plist_path()
     _run(["launchctl", "unload", str(path)])  # ignore failure when not loaded
+    _run(["launchctl", "unload", str(hc_path)])  # ignore failure when not loaded
     path.unlink(missing_ok=True)
+    hc_path.unlink(missing_ok=True)
     print("Removed Job Cannon supervisor (launchd LaunchAgent).")
+    print("Removed Job Cannon healthcheck probe (launchd LaunchAgent).")
     return 0
 
 
-def _install_linux() -> int:
+def _install_linux(interval_min: int = _HEALTHCHECK_INTERVAL_MIN) -> int:
     path = _systemd_unit_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(render_systemd_unit(), encoding="utf-8")
@@ -465,14 +646,38 @@ def _install_linux() -> int:
         print(f"supervisor-install: systemctl failed: {proc.stderr.strip()}", file=sys.stderr)
         return proc.returncode
     print(f"Installed Job Cannon supervisor (systemd --user unit at {path}).")
+
+    # Install the periodic healthcheck timer + service.
+    hc_service_path = _systemd_healthcheck_service_path()
+    hc_timer_path = _systemd_healthcheck_timer_path()
+    service_text, timer_text = render_systemd_healthcheck_units(interval_min)
+    hc_service_path.write_text(service_text, encoding="utf-8")
+    hc_timer_path.write_text(timer_text, encoding="utf-8")
+    _run(["systemctl", "--user", "daemon-reload"])
+    proc = _run(["systemctl", "--user", "enable", "--now", f"{_HEALTHCHECK_SYSTEMD_UNIT}.timer"])
+    if proc.returncode != 0:
+        print(
+            f"supervisor-install: systemctl healthcheck failed: {proc.stderr.strip()}",
+            file=sys.stderr,
+        )
+        return proc.returncode
+    print(
+        f"Installed Job Cannon healthcheck probe (systemd --user timer at {hc_timer_path}, every {interval_min} min)."
+    )
     return 0
 
 
 def _uninstall_linux() -> int:
     _run(["systemctl", "--user", "disable", "--now", _SYSTEMD_UNIT])  # ignore failure
+    _run(
+        ["systemctl", "--user", "disable", "--now", f"{_HEALTHCHECK_SYSTEMD_UNIT}.timer"]
+    )  # ignore failure
     _systemd_unit_path().unlink(missing_ok=True)
+    _systemd_healthcheck_service_path().unlink(missing_ok=True)
+    _systemd_healthcheck_timer_path().unlink(missing_ok=True)
     _run(["systemctl", "--user", "daemon-reload"])
     print("Removed Job Cannon supervisor (systemd --user unit).")
+    print("Removed Job Cannon healthcheck probe (systemd --user timer).")
     return 0
 
 
@@ -481,18 +686,20 @@ def _uninstall_linux() -> int:
 # ---------------------------------------------------------------------------
 
 
-def _supervisor_action(plat: str, *, uninstall: bool) -> int:
+def _supervisor_action(
+    plat: str, *, uninstall: bool, interval_min: int = _HEALTHCHECK_INTERVAL_MIN
+) -> int:
     """Install or uninstall the per-OS supervisor manifest. Returns an exit code.
 
     Shared by ``supervisor-install`` and ``stop`` (which disables the supervisor
     so it cannot relaunch the instance being stopped).
     """
     if plat.startswith("win"):
-        return _uninstall_windows() if uninstall else _install_windows()
+        return _uninstall_windows() if uninstall else _install_windows(interval_min)
     if plat == "darwin":
-        return _uninstall_macos() if uninstall else _install_macos()
+        return _uninstall_macos() if uninstall else _install_macos(interval_min)
     if plat.startswith("linux"):
-        return _uninstall_linux() if uninstall else _install_linux()
+        return _uninstall_linux() if uninstall else _install_linux(interval_min)
 
     print(
         f"supervisor: unsupported platform {plat!r}. Supervisor manifests are "
@@ -509,7 +716,12 @@ def cmd_supervisor_install(args, *, platform: str | None = None) -> int:
     ``sys.platform``. Returns a process exit code (0 = success).
     """
     plat = platform if platform is not None else sys.platform
-    return _supervisor_action(plat, uninstall=bool(getattr(args, "uninstall", False)))
+    uninstall = bool(getattr(args, "uninstall", False))
+    interval_min = getattr(args, "healthcheck_interval_min", _HEALTHCHECK_INTERVAL_MIN)
+    # Uninstall ignores the interval (no-op if not installed).
+    if uninstall:
+        return _supervisor_action(plat, uninstall=True)
+    return _supervisor_action(plat, uninstall=False, interval_min=interval_min)
 
 
 def is_supervisor_installed(platform: str | None = None) -> bool:
@@ -528,6 +740,25 @@ def is_supervisor_installed(platform: str | None = None) -> bool:
             return _systemd_unit_path().exists()
     except Exception:  # pragma: no cover - status probe must never raise
         logger.debug("is_supervisor_installed probe failed", exc_info=True)
+    return False
+
+
+def is_healthcheck_scheduled(platform: str | None = None) -> bool:
+    """True if the periodic healthcheck probe task/unit is currently installed.
+
+    Windows queries the Scheduled Task; macOS / Linux check for the manifest
+    file. Best-effort — any error is reported as "not installed".
+    """
+    plat = platform if platform is not None else sys.platform
+    try:
+        if plat.startswith("win"):
+            return _run(["schtasks", "/query", "/tn", _HEALTHCHECK_TASK_NAME]).returncode == 0
+        if plat == "darwin":
+            return _launchd_healthcheck_plist_path().exists()
+        if plat.startswith("linux"):
+            return _systemd_healthcheck_timer_path().exists()
+    except Exception:  # pragma: no cover - status probe must never raise
+        logger.debug("is_healthcheck_scheduled probe failed", exc_info=True)
     return False
 
 
@@ -564,7 +795,7 @@ def cmd_stop(args, *, platform: str | None = None) -> int:
     plat = platform if platform is not None else sys.platform
 
     # 1. Disable the supervisor so a self-restart cannot race the stop.
-    _supervisor_action(plat, uninstall=True)
+    _supervisor_action(plat, uninstall=True, interval_min=_HEALTHCHECK_INTERVAL_MIN)
 
     # 2. Terminate each recorded instance.
     targets = [
@@ -642,9 +873,13 @@ __all__ = [
     "cmd_stop",
     "cmd_supervisor_install",
     "free_jc_port",
+    "is_healthcheck_scheduled",
     "is_supervisor_installed",
+    "render_launchd_healthcheck_plist",
     "render_launchd_plist",
+    "render_systemd_healthcheck_units",
     "render_systemd_unit",
+    "render_windows_healthcheck_task_xml",
     "render_windows_task_xml",
     "user_data_root",
 ]
