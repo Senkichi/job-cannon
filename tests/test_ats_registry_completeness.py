@@ -108,6 +108,47 @@ def test_non_scannable_excluded_from_url_fastpath():
             assert not s.url_fastpath, f"{n} non_scannable must not be url_fastpath"
 
 
+def test_jd_fetch_priority_is_unique_and_contiguous():
+    """jd_fetch_priority ranks the JD-fetch order (domain_priority()'s ATS portion,
+    lower = higher priority). A collision or gap would silently produce an unstable
+    or wrong PRIORITY_DOMAINS_ATS ordering -- guard the invariant structurally so a
+    future platform addition can't introduce either without a red build."""
+    priorities = sorted(
+        s.jd_fetch_priority for s in PLATFORMS.values() if s.jd_fetch_priority is not None
+    )
+    assert len(priorities) == len(set(priorities)), (
+        f"duplicate jd_fetch_priority values: {priorities}"
+    )
+    assert priorities == list(range(len(priorities))), (
+        f"jd_fetch_priority must be contiguous starting at 0, got: {priorities}"
+    )
+
+
+def test_redirect_domains_requires_domains():
+    """A platform can't declare a subdomain-qualified redirect pattern without also
+    being a recognized bare-domain ATS -- redirect_domains is a refinement of
+    domains, not an independent facet. Guards against a future platform adding
+    redirect_domains while forgetting domains (the exact half-wiring class this
+    registry exists to prevent)."""
+    offenders = [n for n, s in PLATFORMS.items() if s.redirect_domains and not s.domains]
+    assert not offenders, f"platforms with redirect_domains but no domains: {offenders}"
+
+
+def test_jd_fetch_domain_requires_jd_fetch_priority():
+    """jd_fetch_domain and jd_fetch_priority are a pair (the exact string
+    PRIORITY_DOMAINS ranks, and its rank) -- one without the other is a half-wired
+    spec that would silently drop the platform from PRIORITY_DOMAINS_ATS or rank
+    an empty string."""
+    offenders = [
+        n
+        for n, s in PLATFORMS.items()
+        if (s.jd_fetch_domain is not None) != (s.jd_fetch_priority is not None)
+    ]
+    assert not offenders, (
+        f"platforms with only one of jd_fetch_domain/jd_fetch_priority set: {offenders}"
+    )
+
+
 def test_keyword_adapter_shape():
     """A keyword adapter has a (requests) scanner but no slug-probe — the explicit
     capability that exempts it from the scannable-must-have-probe guard."""
