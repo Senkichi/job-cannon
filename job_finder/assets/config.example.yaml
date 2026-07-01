@@ -245,6 +245,12 @@ metrics:
   # discovery-recall numbers are measured against. Tunable; 3.5 aligns with
   # scoring.apply_mean_floor (the positive-evidence 'apply' bar).
   fit_floor: 3.5
+  # A non-terminal, still-open posting older than this many days with no
+  # pursuit activity is a ghost candidate (2026-06-30 METRICS audit).
+  ghost_open_days: 30
+  # Repost signal: ats_refreshed_at (#575, Greenhouse-only) diverging from
+  # posted_date by more than this many days. Ignored until #575 lands.
+  ghost_repost_days: 14
 
 # --- AI scoring configuration ---
 scoring:

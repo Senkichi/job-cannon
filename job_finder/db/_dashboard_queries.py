@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import math
 import sqlite3
+import statistics
 from datetime import UTC, date, datetime
 
 from job_finder.db._queries import (
+    _HIDDEN_STATUSES,
     _SUB_SCORE_SUM_SQL,
     surfaced_classification_sql,
     target_membership_sql,
@@ -129,6 +131,166 @@ def get_dashboard_stats(conn: sqlite3.Connection) -> dict:
         "by_status": by_status,
         "stale_count": stale_count,
         "pending_detections": pending_detections,
+    }
+
+
+def get_liveness_stats(conn: sqlite3.Connection, config: dict) -> dict:
+    """Return liveness metrics: live share, dead age, and ghost likelihood.
+
+    Computes three read-only aggregates:
+    1. Liveness-%: share of non-terminal jobs that are not stale.
+    2. Dead-age: mean/median days since archived jobs were closed (from pipeline_events).
+    3. Ghost-likelihood: count of non-terminal jobs that are likely ghosts.
+
+    All aggregates are safe on empty DB (return None/0, never raise).
+
+    Args:
+        conn: Open sqlite3 connection.
+        config: App config dict (reads metrics.ghost_open_days / ghost_repost_days).
+
+    Returns:
+        dict with keys:
+            live_share (float | None): non-stale / non-terminal ratio (None if denom=0)
+            live_n (int): count of non-stale, non-terminal jobs
+            live_denom (int): count of non-terminal jobs
+            mean_dead_age_days (float | None): mean days since archived jobs closed
+            median_dead_age_days (float | None): median days since archived jobs closed
+            dead_age_n (int): count of archived jobs with archive event rows
+            ghost_count (int): count of non-terminal jobs flagged as likely ghosts
+            ghost_n (int): count of non-terminal jobs (ghost denominator)
+    """
+    # Terminal statuses from _queries._HIDDEN_STATUSES
+    terminal_placeholders = ",".join("?" * len(_HIDDEN_STATUSES))
+
+    # 1. Liveness-%: non-stale / non-terminal
+    liveness_row = conn.execute(
+        f"""SELECT
+             SUM(CASE WHEN is_stale = 0 THEN 1 ELSE 0 END) AS live_n,
+             COUNT(*) AS live_denom
+           FROM jobs
+           WHERE pipeline_status NOT IN ({terminal_placeholders})""",
+        _HIDDEN_STATUSES,
+    ).fetchone()
+
+    live_n = liveness_row["live_n"] or 0
+    live_denom = liveness_row["live_denom"] or 0
+    live_share = live_n / live_denom if live_denom > 0 else None
+
+    # 2. Dead-age: derive from pipeline_events archive rows
+    # Close time = MAX(pe.timestamp WHERE pe.to_status='archived')
+    # Only include jobs that HAVE an archive event row (excludes pre-event paths)
+    dead_age_rows = conn.execute(
+        """SELECT (julianday('now') - julianday(
+                 (SELECT MAX(pe.timestamp) FROM pipeline_events pe
+                  WHERE pe.job_id = j.dedup_key AND pe.to_status = 'archived')
+               )) AS dead_age_days
+           FROM jobs j
+           WHERE j.pipeline_status = 'archived'
+             AND EXISTS (SELECT 1 FROM pipeline_events pe
+                         WHERE pe.job_id = j.dedup_key AND pe.to_status = 'archived')"""
+    ).fetchall()
+
+    dead_age_values = [
+        row["dead_age_days"] for row in dead_age_rows if row["dead_age_days"] is not None
+    ]
+    dead_age_n = len(dead_age_values)
+
+    mean_dead_age_days = None
+    median_dead_age_days = None
+    if dead_age_values:
+        mean_dead_age_days = sum(dead_age_values) / dead_age_n
+        median_dead_age_days = statistics.median(dead_age_values)
+
+    # 3. Ghost-likelihood: composite of three sub-signals
+    # Active/protected stages from stale_detector (applied onward)
+    _PROTECTED_STATUSES = ("applied", "phone_screen", "technical", "onsite", "offer", "accepted")
+
+    ghost_open_days = config.get("metrics", {}).get("ghost_open_days", 30)
+    ghost_repost_days = config.get("metrics", {}).get("ghost_repost_days", 14)
+
+    # Feature-detect ats_refreshed_at column (pre-#575 compatibility)
+    columns_info = conn.execute("PRAGMA table_info(jobs)").fetchall()
+    column_names = {col["name"] for col in columns_info}
+    has_ats_refreshed_at = "ats_refreshed_at" in column_names
+
+    # Build ghost query with conditional repost clause
+    protected_placeholders = ",".join("?" * len(_PROTECTED_STATUSES))
+    if has_ats_refreshed_at:
+        # Full composite with repost detection
+        ghost_query = f"""
+            SELECT COUNT(*) AS ghost_count
+            FROM jobs j
+            WHERE pipeline_status NOT IN ({terminal_placeholders})
+              AND (
+                -- open_too_long: anchor on posted_date (exact/approx) or first_seen fallback
+                (CASE
+                   WHEN j.posted_date_precision IN ('exact', 'approximate')
+                   THEN (julianday('now') - julianday(j.posted_date))
+                   ELSE (julianday('now') - julianday(j.first_seen))
+                 END) > ?
+                -- zero_pursuit: no pipeline_events row with protected status
+                AND NOT EXISTS (
+                  SELECT 1 FROM pipeline_events pe
+                  WHERE pe.job_id = j.dedup_key
+                    AND pe.to_status IN ({protected_placeholders})
+                )
+                -- repost_detected OR cadence_unknown
+                AND (
+                  -- repost_detected: ats_refreshed_at diverges from posted_date
+                  (j.ats_refreshed_at IS NOT NULL
+                   AND (julianday(j.ats_refreshed_at) - julianday(j.posted_date)) > ?)
+                  OR
+                  -- cadence_unknown: ats_refreshed_at is NULL (non-Greenhouse or pre-#575)
+                  j.ats_refreshed_at IS NULL
+                )
+              )
+        """
+        ghost_params = (
+            _HIDDEN_STATUSES + (ghost_open_days,) + _PROTECTED_STATUSES + (ghost_repost_days,)
+        )
+    else:
+        # Degraded composite: repost signal always cadence_unknown (column absent)
+        ghost_query = f"""
+            SELECT COUNT(*) AS ghost_count
+            FROM jobs j
+            WHERE pipeline_status NOT IN ({terminal_placeholders})
+              AND (
+                -- open_too_long: anchor on posted_date (exact/approx) or first_seen fallback
+                (CASE
+                   WHEN j.posted_date_precision IN ('exact', 'approximate')
+                   THEN (julianday('now') - julianday(j.posted_date))
+                   ELSE (julianday('now') - julianday(j.first_seen))
+                 END) > ?
+                -- zero_pursuit: no pipeline_events row with protected status
+                AND NOT EXISTS (
+                  SELECT 1 FROM pipeline_events pe
+                  WHERE pe.job_id = j.dedup_key
+                    AND pe.to_status IN ({protected_placeholders})
+                )
+                -- cadence_unknown: ats_refreshed_at column absent → always true
+                AND 1=1
+              )
+        """
+        ghost_params = _HIDDEN_STATUSES + (ghost_open_days,) + _PROTECTED_STATUSES
+
+    ghost_count = conn.execute(ghost_query, ghost_params).fetchone()["ghost_count"] or 0
+
+    # Ghost denominator: non-terminal jobs
+    ghost_n_row = conn.execute(
+        f"SELECT COUNT(*) AS ghost_n FROM jobs WHERE pipeline_status NOT IN ({terminal_placeholders})",
+        _HIDDEN_STATUSES,
+    ).fetchone()
+    ghost_n = ghost_n_row["ghost_n"] or 0
+
+    return {
+        "live_share": live_share,
+        "live_n": live_n,
+        "live_denom": live_denom,
+        "mean_dead_age_days": mean_dead_age_days,
+        "median_dead_age_days": median_dead_age_days,
+        "dead_age_n": dead_age_n,
+        "ghost_count": ghost_count,
+        "ghost_n": ghost_n,
     }
 
 

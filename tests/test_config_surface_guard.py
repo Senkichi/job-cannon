@@ -87,6 +87,12 @@ _INV1_UNREAD_ALLOWLIST: frozenset[str] = frozenset(
         "heal_max_attempts",
         "heal_backoff_hours",
         "validate_timeout_s",
+        # --- Metrics keys (dashboard liveness stats) ---
+        # metrics.ghost_open_days and metrics.ghost_repost_days are read by
+        # get_liveness_stats() in _dashboard_queries.py for ghost-likelihood
+        # calculation, but not by settings.py (read-only metrics, no UI form).
+        "ghost_open_days",
+        "ghost_repost_days",
     }
 )
 

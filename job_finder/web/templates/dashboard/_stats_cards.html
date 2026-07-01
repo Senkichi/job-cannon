@@ -75,6 +75,42 @@
 
 </div>
 
+<!-- Liveness metrics row (below main stats) -->
+<div class="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-4">
+  <!-- Liveness % -->
+  <div class="bg-slate-800 rounded-xl border border-slate-700 p-4 flex flex-col gap-1">
+    <span class="text-xs font-medium text-slate-400 uppercase tracking-wider">Liveness</span>
+    {% if liveness.live_share is not none %}
+    <span class="text-2xl font-bold text-slate-100">{{ "%.1f" | format(liveness.live_share * 100) }}%</span>
+    <span class="text-xs text-slate-500">{{ liveness.live_n }} of {{ liveness.live_denom }} live</span>
+    {% else %}
+    <span class="text-2xl font-bold text-slate-500">N/A</span>
+    <span class="text-xs text-slate-500">No non-terminal jobs</span>
+    {% endif %}
+  </div>
+
+  <!-- Dead Age -->
+  <div class="bg-slate-800 rounded-xl border border-slate-700 p-4 flex flex-col gap-1">
+    <span class="text-xs font-medium text-slate-400 uppercase tracking-wider">Dead Age</span>
+    {% if liveness.median_dead_age_days is not none %}
+    <span class="text-2xl font-bold text-slate-100">{{ "%.1f" | format(liveness.median_dead_age_days) }}d</span>
+    <span class="text-xs text-slate-500">median ({{ liveness.dead_age_n }} archived)</span>
+    {% else %}
+    <span class="text-2xl font-bold text-slate-500">N/A</span>
+    <span class="text-xs text-slate-500">No archived jobs</span>
+    {% endif %}
+  </div>
+
+  <!-- Ghost Likelihood -->
+  <div class="bg-slate-800 rounded-xl border {% if liveness.ghost_count > 0 %}border-amber-600{% else %}border-slate-700{% endif %} p-4 flex flex-col gap-1">
+    <span class="text-xs font-medium text-slate-400 uppercase tracking-wider">Ghost Candidates</span>
+    <span class="text-2xl font-bold {% if liveness.ghost_count > 0 %}text-amber-400{% else %}text-slate-100{% endif %}">
+      {{ liveness.ghost_count }}
+    </span>
+    <span class="text-xs text-slate-500">of {{ liveness.ghost_n }} non-terminal</span>
+  </div>
+</div>
+
 <!-- ATS Discovery stat card (below main stats row) -->
 <div class="mt-4">
   <a href="{{ url_for('companies.index') }}" class="block bg-slate-800 rounded-xl border border-slate-700 p-4 hover:border-indigo-600 transition-colors">
