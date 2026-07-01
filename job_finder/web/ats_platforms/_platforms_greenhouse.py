@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import UTC, datetime
+from datetime import datetime
 
 from job_finder.json_utils import to_naive_utc_iso
 from job_finder.web._field_alias import resolve_title, resolve_url

@@ -50,7 +50,9 @@ def _insert_company(path: str) -> int:
     return company_id
 
 
-def _job_dict(*, is_remote, employment_type, department, ats_refreshed_at=None, title="Staff Data Engineer"):
+def _job_dict(
+    *, is_remote, employment_type, department, ats_refreshed_at=None, title="Staff Data Engineer"
+):
     return {
         "title": title,
         "company_source": "Ashby",
