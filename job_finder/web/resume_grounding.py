@@ -873,22 +873,31 @@ def adjudicate_resume_prose(
             ),
         )
 
-    # Convert to FabricationViolation objects
+    # Convert to FabricationViolation objects. A flagged item that yields no usable
+    # claim text (non-dict, or empty/whitespace claim) is an integrity failure, not a
+    # clean pass: fail closed rather than silently dropping a fabrication the model
+    # flagged but could not articulate (e.g. max_tokens truncation left only the locator).
     violations = []
     for fab in fabrications:
-        if not isinstance(fab, dict):
-            continue
-        claim = fab.get("claim", "")
+        claim = str(fab.get("claim", "")).strip() if isinstance(fab, dict) else ""
+        if not claim:
+            logger.warning("adjudicate_resume_prose: flagged item without usable claim: %s", fab)
+            return (
+                FabricationViolation(
+                    kind="adjudicator_unavailable",
+                    value="Flagged fabrication with empty claim text",
+                    section="summary/bullets",
+                ),
+            )
         fab_type = fab.get("type", "other")
         section = fab.get("section", "summary")
-        if claim:
-            violations.append(
-                FabricationViolation(
-                    kind="prose_fabrication",
-                    value=claim,
-                    section=f"{section} ({fab_type})",
-                )
+        violations.append(
+            FabricationViolation(
+                kind="prose_fabrication",
+                value=claim,
+                section=f"{section} ({fab_type})",
             )
+        )
 
     return tuple(violations)
 

@@ -1001,6 +1001,42 @@ def test_prose_adjudicator_catches_fabricated_aws_claims(example_profile, base_j
     assert all(v.kind == "prose_fabrication" for v in violations)
 
 
+def test_prose_adjudicator_fails_closed_on_empty_claim(example_profile, base_job):
+    """GROUP A3: a flagged fabrication with an empty/whitespace claim is schema-valid but
+    must NOT be silently dropped. The adjudicator fails closed (adjudicator_unavailable)
+    rather than returning a clean pass — otherwise a model that blanks or truncates the
+    claim text (e.g. max_tokens) turns a flagged fabrication into a silent pass.
+    """
+    from unittest.mock import Mock, patch
+
+    from job_finder.web.resume_grounding import adjudicate_resume_prose
+
+    tailored = {
+        "summary": "Previously Principal Engineer at Amazon Web Services",
+        "skills": ["Python"],
+        "sections": [
+            {
+                "company": "TechCorp Solutions",
+                "title": "Senior Data Scientist",
+                "dates": "Mar 2022 - Present",
+                "bullets": ["Built ML pipelines"],
+            }
+        ],
+        "jd_keywords": ["Python"],
+    }
+
+    # Schema-valid response whose flagged item has a blank claim (only the locator survived).
+    mock_result = Mock()
+    mock_result.data = {"fabrications": [{"claim": "", "type": "job_title", "section": "summary"}]}
+
+    with patch("job_finder.web.model_provider.call_model", return_value=mock_result):
+        violations = adjudicate_resume_prose(tailored, example_profile, {}, Mock())
+
+    # Fail closed: a blocking adjudicator_unavailable violation, never a clean pass ().
+    assert len(violations) >= 1
+    assert any(v.kind == "adjudicator_unavailable" for v in violations)
+
+
 def test_prose_adjudicator_passes_clean_prose(example_profile, base_job):
     """GROUP A3: Prose adjudicator passes when all claims are grounded in achievements.
 
@@ -1179,32 +1215,37 @@ def test_month_aware_concurrent_role_tiebreak(example_profile, base_job):
 # ---------------------------------------------------------------------------
 
 
-def test_validator_tiebreaks_concurrent_current_roles_discriminating(example_profile, base_job):
-    """GROUP D1: Discriminating tiebreak test (outcome depends on tiebreak).
+def test_validator_tiebreaks_concurrent_current_roles_discriminating(
+    example_profile, base_job, monkeypatch
+):
+    """GROUP D1: Discriminating tiebreak test — the OUTCOME depends on the month-aware tiebreak.
 
-    Rewrite the tiebreak test so the OUTCOME depends on the tiebreak: construct a case
-    where the tailored title is VALID for the TRUE most-recent company's allowlist but
-    INVALID for the wrong one. Prove it FAILS with the C1 fix reverted and PASSES with
-    it applied.
+    Only SAME-company concurrent roles can discriminate the tiebreak: Layer C validates each
+    section against its own company's allowlist, so a different-company section is graded
+    independently of which role is "most recent". Here the tailored section carries the TRUE
+    most-recent role's own title ('Principal'), grounded only when the tiebreak correctly picks
+    the later-starting role. The embedded revert proves the outcome flips, so this test cannot
+    pass if the tiebreak is broken OR non-discriminating.
     """
-    # Create profile with two concurrent current roles at DIFFERENT companies
-    profile_discriminating = example_profile.copy()
-    profile_discriminating["positions"] = [
+    import job_finder.web.resume_grounding as rg
+
+    profile_concurrent = example_profile.copy()
+    profile_concurrent["positions"] = [
         {
-            "title": "Engineer",
-            "company": "OldCo",
+            "title": "Junior Analyst",
+            "company": "MegaCorp",
             "start_date": "Jan 2023",  # Earlier start
             "end_date": None,  # Current
-            "title_variants": ["Director of Engineering"],  # OldCo-only variant
+            "title_variants": ["Trainee"],  # Junior-only variant
             "achievements": [],
             "skills": [],
         },
         {
-            "title": "Analyst",
-            "company": "NewCo",
+            "title": "Principal",
+            "company": "MegaCorp",
             "start_date": "Nov 2023",  # Later start → true most-recent
             "end_date": None,  # Current
-            "title_variants": ["Director of Engineering"],  # NewCo allows this variant
+            "title_variants": [],
             "achievements": [],
             "skills": [],
         },
@@ -1215,8 +1256,8 @@ def test_validator_tiebreaks_concurrent_current_roles_discriminating(example_pro
         "skills": ["Python"],
         "sections": [
             {
-                "company": "NewCo",  # True most-recent by start_date
-                "title": "Director of Engineering",  # Valid for NewCo, invalid for OldCo
+                "company": "MegaCorp",
+                "title": "Principal",  # The true most-recent role's own title
                 "dates": "Nov 2023 - Present",
                 "bullets": ["Built systems"],
             }
@@ -1224,10 +1265,18 @@ def test_validator_tiebreaks_concurrent_current_roles_discriminating(example_pro
         "jd_keywords": ["Python"],
     }
 
-    report = validate_resume_grounding(tailored, profile_discriminating, base_job)
-
-    # Should PASS (no violations) because NewCo is the true most-recent and allows this variant
+    # Month-aware tiebreak: Principal (Nov 2023) is most-recent, so its own title grounds.
+    report = validate_resume_grounding(tailored, profile_concurrent, base_job)
     assert len(report.violations) == 0
+
+    # Discrimination guard: revert the tiebreak to document order (Junior most-recent).
+    # 'Principal' is then graded against Junior's allowlist {Junior Analyst, Trainee} and
+    # MUST fire — proving this test's outcome depends on the tiebreak.
+    monkeypatch.setattr(
+        rg, "_identify_most_recent_position", lambda profile: profile.get("positions", [None])[0]
+    )
+    reverted = validate_resume_grounding(tailored, profile_concurrent, base_job)
+    assert any(v.kind in ("title", "title_unlisted") for v in reverted.violations)
 
 
 # ---------------------------------------------------------------------------
