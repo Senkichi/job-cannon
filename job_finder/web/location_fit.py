@@ -23,12 +23,23 @@ Rule table — first matching row wins; returns ``None`` when no row fires
            → (5, "fully remote, remote targeted")
     Row 3: all REMOTE locations restricted to countries ≠ home_country [†]
            → (1, "remote but ineligible geography")
+    Row R-a: work_arrangement=="remote" AND a presence-required (hybrid/onsite)
+           location matches a non-Remote target
+           → (4, "on-site/hybrid in target geography, remote preferred")
+    Row R-b: work_arrangement=="remote" AND every location is presence-required
+           (hybrid/onsite) with known geo AND none matches a target
+           → (1, "on-site/hybrid outside target geography")
     Row 4: all locations onsite/hybrid/UNSPECIFIED, countries ≠ home_country,
            no target_location matches any city/region             [†]
            → (1, "on-site outside candidate geography")
     Row 5: any location's city/region/country matches a non-Remote target
            → (5, "on-site/hybrid in target geography")
     → None: LLM judges (e.g. onsite home-country city not in targets)
+
+Rows R-a/R-b fire only for a remote-first candidate (``work_arrangement ==
+"remote"``); when the candidate prefers hybrid/on-site (or the preference is
+unset) the legacy rows 4/5 apply and an on-site/hybrid role in a target
+geography is a full 5.
 
 Multi-location rule: best location wins — a job offerable in NYC *or* Toronto
 is as good as its best option for the candidate.
@@ -156,6 +167,8 @@ def compute_location_fit(
     primary_country_code: str | None,
     target_locations: list[str],
     home_country: str | None,
+    *,
+    work_arrangement: str | None = None,
 ) -> tuple[int, str] | None:
     """Deterministic location_fit when structured facts decide it; None → LLM judges.
 
@@ -177,6 +190,14 @@ def compute_location_fit(
         home_country: Candidate's ``profile.home_country`` ISO country code
             (e.g. "US"). Optional; rows marked † in the rule table require
             this to fire. When None/empty, those rows are silently skipped.
+        work_arrangement: Candidate's ``profile.work_arrangement`` preference
+            ("remote" | "hybrid" | "on-site"). Optional. When ``"remote"``,
+            the remote-first refinement (rows R-a/R-b) fires: a role that
+            REQUIRES physical presence (hybrid/onsite) can never equal a fully
+            remote role, so it is capped at 4 in a target geography and is a
+            disqualifier (1) outside one. When None or non-remote, the legacy
+            rows 4/5 apply unchanged (on-site/hybrid in a target geography is a
+            5 — the candidate wants to be there).
 
     Returns:
         ``(score: int, reason: str)`` when facts are decisive, ``None`` when
@@ -189,12 +210,28 @@ def compute_location_fit(
                → (5, "fully remote, remote targeted")
         Row 3: all REMOTE restricted to countries ≠ home_country [†]
                → (1, "remote but ineligible geography")
+        Row R-a: work_arrangement=="remote" AND any presence-required
+               (hybrid/onsite) location matches a non-Remote target
+               → (4, "on-site/hybrid in target geography, remote preferred")
+        Row R-b: work_arrangement=="remote" AND every location is
+               presence-required (hybrid/onsite) with known geo AND none
+               matches a target
+               → (1, "on-site/hybrid outside target geography")
         Row 4: all onsite/hybrid/UNSPECIFIED in countries ≠ home_country,
                no target_loc city/region match              [†]
                → (1, "on-site outside candidate geography")
         Row 5: any city/region/country matches a non-Remote target
                → (5, "on-site/hybrid in target geography")
         otherwise → None
+
+    Rows R-a/R-b encode the remote-first preference: the candidate-context
+    prompt already tells the model "a remote role is preferred over any
+    on-site/hybrid target-geo role", but the deterministic override used to
+    flatten hybrid-in-target back up to 5 (equal to remote), erasing that
+    gradient and — worse — riding a secondary target-city match to a 5 for a
+    posting the candidate reads as an out-of-target hybrid. UNSPECIFIED-modality
+    locations stay ambiguous (they could be remote) and never trigger R-b's
+    reject; they fall through to rows 4/5/LLM.
     """
     target_locations = target_locations or []
     home = (home_country or "").strip().upper() or None
@@ -226,6 +263,25 @@ def compute_location_fit(
         return None
 
     remote_in_targets = any(_norm(t) == "remote" for t in target_locations)
+    prefers_remote = _norm(work_arrangement) == "remote"
+    job_modality = _norm(workplace_type)
+
+    def _eff_modality(loc: dict[str, Any]) -> str:
+        """Effective workplace modality for one location.
+
+        Prefers the location's own ``workplace_type``; when that is
+        UNSPECIFIED/blank, falls back to the denormalized job-level
+        ``workplace_type``. The structured parser sometimes captures only one
+        city of a multi-city posting and drops its per-location modality (the
+        Brigit "Lead Data Scientist" row: structured SF marked UNSPECIFIED while
+        the job column still says HYBRID), so this fallback keeps the remote-first
+        rows from silently missing a presence-required role. Returns "" when the
+        modality is genuinely unknown at both levels.
+        """
+        wt = _norm(loc.get("workplace_type"))
+        if wt in ("remote", "hybrid", "onsite"):
+            return wt
+        return job_modality if job_modality in ("remote", "hybrid", "onsite") else ""
 
     # ------------------------------------------------------------------
     # Row 1: any REMOTE, unrestricted (no country), 'Remote' ∈ targets
@@ -256,6 +312,31 @@ def compute_location_fit(
             non_remote = [loc for loc in resolved if not _is_remote(loc)]
             if not non_remote:
                 return (1, "remote but ineligible geography")
+
+    # ------------------------------------------------------------------
+    # Rows R-a / R-b: remote-first refinement (work_arrangement == "remote").
+    # A fully remote option would already have returned 5 at Row 1/2, so by here
+    # no remote-eligible location exists. A role that REQUIRES physical presence
+    # (hybrid/onsite) is therefore a compromise even in a target geo, and
+    # unreachable outside one:
+    #   R-a: any presence-required location in a target geography → 4
+    #        (viable, but ranked strictly below a fully remote role)
+    #   R-b: every location presence-required, all with known geo, none in a
+    #        target geography → 1 (unreachable for a remote-first candidate)
+    # UNSPECIFIED-modality locations stay ambiguous (could be remote) and never
+    # trigger the reject — they fall through to rows 4/5/LLM.
+    # ------------------------------------------------------------------
+    if prefers_remote:
+        presence_locs = [loc for loc in resolved if _eff_modality(loc) in ("hybrid", "onsite")]
+        if presence_locs:
+            if any(_target_loc_matches(loc, target_locations) for loc in presence_locs):
+                return (4, "on-site/hybrid in target geography, remote preferred")
+            all_presence = len(presence_locs) == len(resolved)
+            geo_known = all(
+                loc.get("city") or loc.get("region") or loc.get("country") for loc in presence_locs
+            )
+            if all_presence and geo_known:
+                return (1, "on-site/hybrid outside target geography")
 
     # ------------------------------------------------------------------
     # Row 4: all locations onsite/hybrid/UNSPECIFIED, every one has a country

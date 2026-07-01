@@ -152,7 +152,9 @@ def _apply_location_fit_override(
 
     Returns a new ``JobAssessment`` (immutability — frozen dataclass) with:
     - ``sub_scores['location_fit']`` replaced by the deterministic verdict
-    - ``rationale['gaps']`` prepended with a note recording the override
+    - ``rationale['overrides']`` appended with an audit note recording the
+      override (NOT ``gaps`` — that is a user-facing shortcomings list and is
+      scanned by the eval coherence metric)
 
     Returns the original ``assessment`` unchanged when:
     - the DB row is missing (dedup_key not found)
@@ -215,6 +217,7 @@ def _apply_location_fit_override(
         primary_country_code=primary_country_code,
         target_locations=target_locations,
         home_country=home_country,
+        work_arrangement=work_arrangement,
     )
 
     if verdict is None:
@@ -238,13 +241,21 @@ def _apply_location_fit_override(
 
     new_sub_scores = {**assessment.sub_scores, "location_fit": new_score}
 
-    # Amend rationale.gaps to surface the override decision (D-6 audit trail).
+    # Record the override in a dedicated ``overrides`` audit field — NOT in
+    # ``gaps`` (D-6 audit trail). ``gaps`` is a user-facing list of role
+    # shortcomings; it is also scanned by the eval coherence metric
+    # (job_finder.eval.metrics.coherence_violations). An audit note there
+    # rendered as a bogus headline gap in the UI (it lands at gaps[0]) AND
+    # manufactured false coherence violations — the note names "on-site"/
+    # "geography" while location_fit is scored high. The overrides list is
+    # persisted verbatim in fit_analysis and surfaced via logs, so the audit
+    # trail is preserved without polluting the gaps surface.
     rationale = dict(assessment.rationale)
     override_note = (
         f"[location_fit override P3.1] {reason} (LLM: {llm_score} → deterministic: {new_score})"
     )
-    existing_gaps: list = list(rationale.get("gaps") or [])
-    rationale = {**rationale, "gaps": [override_note, *existing_gaps]}
+    existing_overrides: list = list(rationale.get("overrides") or [])
+    rationale = {**rationale, "overrides": [*existing_overrides, override_note]}
 
     return JobAssessment(
         sub_scores=new_sub_scores,
