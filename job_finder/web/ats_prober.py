@@ -219,6 +219,7 @@ def _try_static_first_fallthrough(
     """
     from job_finder.web._http_constants import _HEADERS, _TIMEOUT
     from job_finder.web.ats_identity_reconcile import promote_from_careers_link
+    from job_finder.web.careers_crawler import _new_summary
     from job_finder.web.careers_crawler._embedded_json_tier import _try_embedded_json_extract
     from job_finder.web.careers_crawler._persistence import _upsert_and_log
     from job_finder.web.careers_crawler._static_tier import _try_static_extract
@@ -233,6 +234,12 @@ def _try_static_first_fallthrough(
 
     # Get DB path for job persistence (needed by _upsert_and_log)
     db_path = config.get("DB_PATH")
+
+    # Fetch company row for conditional logic (Fix 3 and Fix 4)
+    company = conn.execute("SELECT * FROM companies WHERE id = ?", (company_id,)).fetchone()
+
+    # Track Tier 1 outcome for meaningful non-promoted results (Fix 4)
+    tier1_outcome = None
 
     # ------------------------------------------------------------
     # Tier 1: Re-detect known ATS on subdomain
@@ -249,7 +256,11 @@ def _try_static_first_fallthrough(
                 platform,
                 slug[:48],
             )
-            # Promote to the detected ATS (reenable_scan=True for m074 cohort)
+            # Compute reenable_scan based on company state (Fix 3)
+            # Only re-enable for the m074 cohort: no known platform, prior miss
+            reenable = (
+                company.get("ats_platform") is None and company.get("ats_probe_status") == "miss"
+            )
             res = promote_from_careers_link(
                 conn,
                 company_id,
@@ -257,16 +268,16 @@ def _try_static_first_fallthrough(
                 slug,
                 page_url=careers_url,
                 config=config,
-                reenable_scan=True,
+                reenable_scan=reenable,
             )
             if res.get("outcome") == "promoted":
                 return {"status": "hit", "source": "ats_redetect_careers_url"}
             else:
-                # Surface non-promoted outcomes (Finding 5)
-                outcome = res.get("outcome", "unknown")
+                # Surface non-promoted outcomes (Finding 5, Fix 4)
+                tier1_outcome = res.get("outcome", "unknown")
                 logger.debug(
                     "static_fallthrough: tier1 ATS detection on careers_url returned non-promoted outcome: %s",
-                    outcome,
+                    tier1_outcome,
                 )
                 # Continue to next tier - this is a custom page, not a detected ATS
                 pass
@@ -299,7 +310,12 @@ def _try_static_first_fallthrough(
                             platform,
                             slug[:48],
                         )
-                        # Promote to the detected ATS (reenable_scan=True for m074 cohort)
+                        # Compute reenable_scan based on company state (Fix 3)
+                        # Only re-enable for the m074 cohort: no known platform, prior miss
+                        reenable = (
+                            company.get("ats_platform") is None
+                            and company.get("ats_probe_status") == "miss"
+                        )
                         res = promote_from_careers_link(
                             conn,
                             company_id,
@@ -307,16 +323,16 @@ def _try_static_first_fallthrough(
                             slug,
                             page_url=href,
                             config=config,
-                            reenable_scan=True,
+                            reenable_scan=reenable,
                         )
                         if res.get("outcome") == "promoted":
                             return {"status": "hit", "source": "ats_redetect_subdomain"}
                         else:
-                            # Surface non-promoted outcomes (Finding 5)
-                            outcome = res.get("outcome", "unknown")
+                            # Surface non-promoted outcomes (Finding 5, Fix 4)
+                            tier1_outcome = res.get("outcome", "unknown")
                             logger.debug(
                                 "static_fallthrough: tier1 ATS detection on subdomain returned non-promoted outcome: %s",
-                                outcome,
+                                tier1_outcome,
                             )
                             # Continue to next tier - this is a custom page, not a detected ATS
                             pass
@@ -338,7 +354,7 @@ def _try_static_first_fallthrough(
                 # This is NOT an ATS 'hit' (no platform+slug), so we mark as 'miss' with
                 # scan_enabled=1 and a specific miss_reason, so careers_crawler picks it up.
                 if db_path:
-                    summary = {"jobs_found": 0, "jobs_new": 0, "errors": []}
+                    summary = _new_summary()
                     all_new_job_keys = []
                     _upsert_and_log(
                         static_jobs,
@@ -417,7 +433,7 @@ def _try_static_first_fallthrough(
                 # This is NOT an ATS 'hit' (no platform+slug), so we mark as 'miss' with
                 # scan_enabled=1 and a specific miss_reason, so careers_crawler picks it up.
                 if db_path:
-                    summary = {"jobs_found": 0, "jobs_new": 0, "errors": []}
+                    summary = _new_summary()
                     all_new_job_keys = []
                     _upsert_and_log(
                         json_jobs,
@@ -577,17 +593,28 @@ def _try_static_first_fallthrough(
     # ------------------------------------------------------------
     # All tiers failed
     # ------------------------------------------------------------
+    # Fold meaningful Tier 1 outcomes into miss_reason (Fix 4)
+    # Meaningful outcomes: slug_collision, abstain_conflict, disabled
+    # Not meaningful: "no ATS candidate found at all" (tiers 2-4 have their own reasons)
+    meaningful_outcomes = {"slug_collision", "abstain_conflict", "disabled"}
+    if tier1_outcome in meaningful_outcomes:
+        final_reason = f"static_fallthrough_exhausted_tier1_{tier1_outcome}"
+    else:
+        final_reason = "static_fallthrough_all_tiers_exhausted"
+
     conn.execute(
         """UPDATE companies
            SET ats_probe_status = 'miss',
-               miss_reason = 'static_fallthrough_all_tiers_exhausted',
+               miss_reason = ?,
                updated_at = ?
            WHERE id = ?""",
-        (now, company_id),
+        (final_reason, now, company_id),
     )
     conn.commit()
-    logger.info("static_fallthrough: all tiers exhausted for %s", company_name)
-    return {"status": "miss", "reason": "static_fallthrough_all_tiers_exhausted"}
+    logger.info(
+        "static_fallthrough: all tiers exhausted for %s (reason: %s)", company_name, final_reason
+    )
+    return {"status": "miss", "reason": final_reason}
 
 
 def probe_single_company(
