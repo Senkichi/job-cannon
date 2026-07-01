@@ -158,12 +158,14 @@ class TestBackupBeforeMigrate:
         finally:
             conn.close()
 
-        # Manufacture a pending migration by downgrading user_version by 1.
+        # Manufacture a pending migration: forget the top migration in the ledger
+        # (membership is the authority) and roll the user_version cache back by 1.
         current = _get_version(db)
         if current < 1:
             pytest.skip("No migrations available to test backup trigger")
         conn = sqlite3.connect(str(db))
         try:
+            conn.execute("DELETE FROM schema_migrations WHERE version >= ?", (current,))
             conn.execute(f"PRAGMA user_version = {current - 1}")
             conn.commit()
         finally:

@@ -78,13 +78,15 @@ class TestMigration065Behavior:
         run_migrations(tmp_db_path)
         # Drop the new column to simulate a pre-m065 state.
         with closing(sqlite3.connect(tmp_db_path)) as conn:
-            # Sqlite supports DROP COLUMN as of 3.35. Reset user_version to 64
-            # to trigger m065 re-application.
+            # Sqlite supports DROP COLUMN as of 3.35. Forget migrations above 64
+            # in the ledger (membership is the authority) to trigger m065
+            # re-application; the user_version cache is rewound to match.
             conn.execute("ALTER TABLE batch_score_sessions DROP COLUMN last_tick_at")
             conn.execute(
                 "INSERT INTO batch_score_sessions (session_type, status, started_at) "
                 "VALUES ('scoring', 'running', '2026-05-27T00:00:00')"
             )
+            conn.execute("DELETE FROM schema_migrations WHERE version > 64")
             conn.execute("PRAGMA user_version = 64")
             conn.commit()
 

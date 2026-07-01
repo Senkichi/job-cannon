@@ -17,6 +17,7 @@ from __future__ import annotations
 import logging
 import sqlite3
 
+from job_finder.web.migrations._ledger import max_applied, record_applied
 from job_finder.web.migrations.types import Migration, MigrationContext
 
 logger = logging.getLogger(__name__)
@@ -63,10 +64,17 @@ def _apply_migration(ctx: MigrationContext, migration: Migration) -> None:
             if "no such column" not in error_msg:
                 raise
 
-    ctx.conn.commit()
-
     if not isinstance(migration.version, int):
         raise TypeError(f"Migration version must be int, got {type(migration.version)}")
-    ctx.conn.execute(f"PRAGMA user_version = {migration.version}")
+
+    # Record the migration in the ledger (the authoritative applied-set) and
+    # refresh the PRAGMA user_version cache (best-effort, = ledger MAX) in the
+    # SAME transaction as the DDL/DML above. Collapsing the prior two-commit
+    # pattern into one commit closes the crash-window where the schema change
+    # committed but the applied-record did not. record_applied self-bootstraps
+    # the ledger, so direct callers on a raw connection work without a prior
+    # run_migrations/ensure_ledger.
+    record_applied(ctx.conn, migration)
+    ctx.conn.execute(f"PRAGMA user_version = {max_applied(ctx.conn)}")
     ctx.conn.commit()
     logger.info("Migration %d applied successfully.", migration.version)

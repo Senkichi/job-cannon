@@ -145,6 +145,10 @@ def test_migration_resumes_from_intermediate_version(tmp_db_path):
     )
     with closing(sqlite3.connect(tmp_db_path)) as conn:
         conn.execute(f"PRAGMA user_version = {intermediate}")
+        # Ledger membership is the authority now: forget migrations above the
+        # rewind point so run_migrations re-applies intermediate+1..max. The
+        # user_version cache rewind above is corrected back to max on re-run.
+        conn.execute("DELETE FROM schema_migrations WHERE version > ?", (intermediate,))
         conn.commit()
 
     # Step 3: re-run. The migration loop should apply versions

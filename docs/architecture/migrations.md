@@ -3,8 +3,22 @@
 Schema evolution for `jobs.db` is managed by a hand-rolled migration runner —
 no Alembic, no SQLAlchemy. The system is intentionally simple: each migration
 is a Python module that declares a `Migration` value object, and the runner
-applies pending migrations in order using `PRAGMA user_version` as the
-sentinel.
+applies pending migrations in version order.
+
+**"Applied" is set membership, not a scalar.** Applied migrations are recorded
+as rows in a `schema_migrations` ledger table (see
+[`_ledger.py`](../../job_finder/web/migrations/_ledger.py)); the pending set is
+`[m for m in MIGRATIONS if m.version not in applied_versions(conn)]`. This is
+the Rails/Django/Flyway/Liquibase convergence point, and it eliminates the
+silent-skip bug the old single-`PRAGMA user_version` high-water mark had: under
+the scalar scheme, two parallel branches would both pick "the next" number and
+the loser (sorting at/below the merged `user_version`) was **silently skipped
+forever**. With the ledger, a migration merged in below the current max is
+simply absent from the set and **runs**. `PRAGMA user_version` is retained only
+as a best-effort cache (kept equal to the ledger's `MAX(version)`) for external
+inspectors. A legacy DB migrated under the old scheme is backfilled into the
+ledger once, on first run (Flyway `baseline` / Alembic `stamp`): every migration
+`<= user_version` is marked applied **without re-executing**.
 
 ## File layout
 
@@ -12,10 +26,11 @@ sentinel.
 job_finder/web/
 ├── db_migrate.py                      # 76-line runner; public entry point
 └── migrations/
-    ├── __init__.py                    # Discovery: assembles MIGRATIONS at import
+    ├── __init__.py                    # Discovery: assembles MIGRATIONS + duplicate-version guard
     ├── types.py                       # Migration / MigrationContext dataclasses
+    ├── _ledger.py                     # schema_migrations applied-set (ensure/applied_versions/has_run/backfill)
     ├── _gate.py                       # MigrationBlockedError + _check_backup_recent
-    ├── _runner.py                     # _apply_migration (one migration → DB)
+    ├── _runner.py                     # _apply_migration (one migration → DB + ledger record)
     ├── _post_hooks.py                 # _run_rekey_if_stale (standing dedup re-key, post-loop)
     └── m001_initial_schema.py         # One file per migration, version in name
         m002_ai_scoring_columns.py
@@ -23,13 +38,17 @@ job_finder/web/
         m048_drop_rejection_interview.py
 ```
 
-The naming convention is **mandatory**: `m{NNN:03d}_<snake_case_description>.py`.
-Three-digit zero-padding ensures `pkgutil.iter_modules` returns modules in
-version order (without it, `m010` sorts before `m2`). The discovery pass also
-sorts by `MIGRATION.version` defensively, so a renamed file would still
-produce a correctly ordered list — but
+The naming convention is `m{version}_<snake_case_description>.py`. New migrations
+are created by [`scripts/new_migration.py`](../../scripts/new_migration.py),
+which **mints** the version automatically (see "Adding a new migration" below),
+so authors never hand-pick a number. Legacy files use three-digit zero-padding
+(`m001`..`m117`); minted files use a wider epoch-second stamp (e.g.
+`m205087732_*`). Ordering is authoritative via `discovered.sort(key=lambda m:
+m.version)`, not filename lexical order — so zero-padding is no longer
+load-bearing for correctness. The discovery regex accepts any digit width
+(`m\d+_`), and
 [`tests/test_migration_invariants.py`](../../tests/test_migration_invariants.py)
-asserts the convention regardless.
+asserts filename-integer == declared version regardless.
 
 ## The Migration value object
 
@@ -63,11 +82,13 @@ not reach into module globals.
 These are enforced by tests in `tests/test_migration_invariants.py`. CI fails
 loudly if any of them slip:
 
-1. **Versions are append-only and never renumber.** The PRAGMA user_version
-   IS the migration version. A user with `PRAGMA user_version = 30` running
-   the latest code expects migrations 31, 32, … to apply. Renumbering a
-   shipped migration breaks every existing user's database. (`MI-4` in the
-   project's master invariants.)
+1. **Versions are append-only and never renumber.** A shipped migration's
+   version is recorded in every existing user's `schema_migrations` ledger (and
+   backfilled from `user_version` for legacy DBs). Renumbering a shipped
+   migration would make the old row an orphan and re-run the renamed file,
+   breaking existing databases. (`MI-4` in the project's master invariants.)
+   Existing files keep their small integers; **new** migrations get minted
+   epoch-second stamps from `scripts/new_migration.py`.
 
 2. **Migrations are append-only as files too.** Once a migration ships, you
    do not edit its file. A bug in a shipped migration is fixed by a NEW
@@ -84,12 +105,14 @@ loudly if any of them slip:
    EXISTS`. The intermediate-version resume test in
    `test_migration_invariants.py` exercises this contract end to end.
 
-4. **Three-digit zero-padding in filenames is mandatory.** Without it,
-   `pkgutil.iter_modules` would visit `m010_*.py` before `m002_*.py` and
-   the discovery pass would assemble the list in the wrong order. The
-   defensive `sort by version` after discovery would correct the runtime
-   list, but the source-tree ordering would still be misleading to anyone
-   reading the package.
+4. **No two migrations may share a version.** The discovery pass
+   (`_verify_unique_versions` in
+   [`migrations/__init__.py`](../../job_finder/web/migrations/__init__.py))
+   hard-fails at import / CI on a duplicate version. This is the loud backstop
+   behind the minted-stamp workflow: a hand-typed collision fails immediately
+   instead of silently skipping a migration at runtime. (Ordering is by
+   `m.version` after discovery, so filename zero-padding is cosmetic, not
+   load-bearing.)
 
 ## The backup-recency gate (Migration 41)
 
@@ -116,19 +139,21 @@ test suite.
 
 ## Adding a new migration
 
-1. Pick the next available version number (currently 49+).
-2. Create `migrations/m{version:03d}_<description>.py` with a `MIGRATION`
-   constant.
-3. Write the SQL with per-statement idempotency in mind: `CREATE TABLE IF
-   NOT EXISTS`, `CREATE INDEX IF NOT EXISTS`, etc.
-4. Bump `EXPECTED_MIGRATION_COUNT` in `tests/test_migration_invariants.py`
-   so the count-sentinel test acknowledges the addition.
-5. Run `uv run --active pytest tests/test_migration_invariants.py
-   tests/test_migration.py tests/test_db_migrate.py` to verify.
-6. If the migration needs filesystem or env state, define a `py`-helper
-   that takes a `MigrationContext`. See
+1. Run `python scripts/new_migration.py "<short description>"`. It **mints** a
+   collision-free version (an epoch-second stamp, e.g. `205087732`) and writes
+   `migrations/m{stamp}_<slug>.py` with a `MIGRATION` skeleton. You never pick a
+   number — so two parallel branches never collide, and worker/agent prompts
+   never carry a stale "next is mNNN".
+2. Fill in `sql=[...]` with per-statement idempotency in mind: `CREATE TABLE IF
+   NOT EXISTS`, `CREATE INDEX IF NOT EXISTS`, guarded `ALTER` (the runner
+   swallows `duplicate column name` / `no such column`).
+3. If the migration needs filesystem or env state, add a `py`-helper that takes
+   a `MigrationContext`. See
    [`m041_drop_legacy_scores.py`](../../job_finder/web/migrations/m041_drop_legacy_scores.py)
    for the reference shape.
+4. Add `tests/test_migration_<slug>.py` and verify:
+   `uv run --active pytest tests/test_migration_invariants.py
+   tests/test_migration.py tests/test_db_migrate.py tests/test_migration_ledger.py`.
 
 ## Migration history (one-line summaries)
 
