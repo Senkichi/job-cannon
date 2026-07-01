@@ -544,7 +544,9 @@ class TestOrchestratorOverride:
 
         result = _apply_location_fit_override(assessment, {"dedup_key": dedup_key}, conn, config)
         assert result.sub_scores["location_fit"] == 1
-        assert "override" in result.rationale["gaps"][0].lower()
+        # Audit note lives in 'overrides', never 'gaps' (display-leak fix).
+        assert "override" in result.rationale["overrides"][0].lower()
+        assert result.rationale["gaps"] == []
 
     def test_override_noop_when_llm_correct(self, migrated_db):
         """When override score == LLM score, assessment is unchanged."""
@@ -622,14 +624,21 @@ class TestOrchestratorOverride:
         result = _apply_location_fit_override(assessment, {}, conn, config)
         assert result is assessment
 
-    def test_override_amends_gaps_rationale(self, migrated_db):
-        """When override fires, the gaps rationale must be prepended."""
+    def test_override_records_audit_in_overrides_not_gaps(self, migrated_db):
+        """The override audit note goes to rationale['overrides'], never 'gaps'.
+
+        Regression (display-leak fix): the note used to be prepended into
+        'gaps', where it rendered as a bogus headline gap in the UI (gaps[0])
+        and tripped the eval coherence metric — it names 'on-site'/'geography'
+        while location_fit scored high. The user-facing gaps list must stay
+        exactly the LLM's shortcomings, untouched by the override.
+        """
         import json
 
         from job_finder.web.scoring_orchestrator import _apply_location_fit_override
 
         _path, conn = migrated_db
-        dedup_key = "gaps-prepend-test"
+        dedup_key = "override-audit-test"
         locs_json = json.dumps(
             [
                 {
@@ -667,9 +676,102 @@ class TestOrchestratorOverride:
 
         result = _apply_location_fit_override(assessment, {"dedup_key": dedup_key}, conn, config)
         assert result.sub_scores["location_fit"] == 1
-        gaps = result.rationale["gaps"]
-        assert gaps[0].startswith("[location_fit override P3.1]")
-        assert existing_gap in gaps
+        # gaps preserved verbatim — the override note is NOT injected here.
+        assert result.rationale["gaps"] == [existing_gap]
+        # Audit trail lives in a dedicated 'overrides' field.
+        overrides = result.rationale["overrides"]
+        assert overrides[-1].startswith("[location_fit override P3.1]")
+
+    def test_brigit_lead_ds_hybrid_sf_capped_to_four(self, migrated_db):
+        """Exact Brigit 'Lead Data Scientist' row through the orchestrator:
+        structured SF marked UNSPECIFIED + job workplace_type=HYBRID, candidate
+        prefers remote with target=[San Francisco] → LLM 5 capped to 4."""
+        import json
+
+        from job_finder.web.scoring_orchestrator import _apply_location_fit_override
+
+        _path, conn = migrated_db
+        dedup_key = "brigit|lead data scientist"
+        locs_json = json.dumps(
+            [
+                {
+                    "city": "San Francisco",
+                    "region": "California",
+                    "region_code": None,
+                    "country": "United States",
+                    "country_code": None,
+                    "workplace_type": "UNSPECIFIED",
+                    "raw": "San Francisco, California, United States",
+                    "unresolved": False,
+                }
+            ]
+        )
+        self._seed_job(
+            conn,
+            dedup_key,
+            locations_structured=locs_json,
+            workplace_type="HYBRID",
+            primary_country_code=None,
+        )
+
+        assessment = self._make_assessment(location_fit=5)  # LLM said 4→5 territory
+        config = {
+            "profile": {
+                "target_locations": ["San Francisco"],
+                "home_country": "US",
+                "work_arrangement": "remote",
+            },
+            "providers": {"primary": "ollama", "fallback_chain": []},
+        }
+
+        result = _apply_location_fit_override(assessment, {"dedup_key": dedup_key}, conn, config)
+        assert result.sub_scores["location_fit"] == 4
+        assert result.rationale["gaps"] == []
+        assert "remote preferred" in result.rationale["overrides"][0]
+
+    def test_brigit_nyc_only_hybrid_rejected(self, migrated_db):
+        """A Brigit NYC-only hybrid role → deterministic reject (location_fit 1)."""
+        import json
+
+        from job_finder.web.scoring_orchestrator import _apply_location_fit_override
+
+        _path, conn = migrated_db
+        dedup_key = "brigit|lead data analyst, product"
+        locs_json = json.dumps(
+            [
+                {
+                    "city": "New York City",
+                    "region": "New York",
+                    "region_code": None,
+                    "country": "USA",
+                    "country_code": None,
+                    "workplace_type": "HYBRID",
+                    "raw": "New York City, New York, USA",
+                    "unresolved": False,
+                }
+            ]
+        )
+        self._seed_job(
+            conn,
+            dedup_key,
+            locations_structured=locs_json,
+            workplace_type="HYBRID",
+            primary_country_code=None,
+        )
+
+        assessment = self._make_assessment(location_fit=3)
+        config = {
+            "profile": {
+                "target_locations": ["San Francisco"],
+                "home_country": "US",
+                "work_arrangement": "remote",
+            },
+            "providers": {"primary": "ollama", "fallback_chain": []},
+        }
+
+        result = _apply_location_fit_override(assessment, {"dedup_key": dedup_key}, conn, config)
+        assert result.sub_scores["location_fit"] == 1
+        assert "outside target geography" in result.rationale["overrides"][0]
 
 
 # ---------------------------------------------------------------------------
@@ -720,3 +822,151 @@ class TestHyderabadClassificationRegression:
         }
         classification = derive_classification(sub_scores_llm_only, None)
         assert classification == "apply", "Confirm the pre-fix bug: should have been 'apply'"
+
+
+# ---------------------------------------------------------------------------
+# Rows R-a / R-b: remote-first refinement (work_arrangement == "remote")
+# ---------------------------------------------------------------------------
+
+
+class TestRemoteFirstRefinement:
+    """A remote-first candidate: hybrid/on-site is capped at 4 in a target geo
+    and is a disqualifier (1) outside one. UNSPECIFIED modality stays deferred.
+
+    Contrast with TestRow5GeoTargetMatch, which exercises the SAME geographies
+    for a NON-remote candidate (work_arrangement unset) and expects a full 5.
+    """
+
+    def test_hybrid_in_target_geo_capped_at_four(self):
+        locs = [_hybrid("US", city="San Francisco", region="California")]
+        result = compute_location_fit(
+            locs, "HYBRID", "US", ["San Francisco", "Remote"], "US", work_arrangement="remote"
+        )
+        assert result == (4, "on-site/hybrid in target geography, remote preferred")
+
+    def test_onsite_in_target_geo_capped_at_four(self):
+        locs = [_onsite("US", city="San Francisco", region="California")]
+        result = compute_location_fit(
+            locs, "ONSITE", "US", ["San Francisco", "Remote"], "US", work_arrangement="remote"
+        )
+        assert result == (4, "on-site/hybrid in target geography, remote preferred")
+
+    def test_hybrid_outside_target_is_reject(self):
+        """The Brigit NYC-only regression: hybrid NYC, target=SF → reject."""
+        locs = [_hybrid("US", city="New York City", region="New York")]
+        result = compute_location_fit(
+            locs, "HYBRID", "US", ["San Francisco", "Remote"], "US", work_arrangement="remote"
+        )
+        assert result == (1, "on-site/hybrid outside target geography")
+
+    def test_onsite_in_home_country_not_target_is_reject(self):
+        """Stricter than legacy: onsite in a home-country city NOT in targets is
+        now a reject for a remote-first candidate (legacy → None/LLM)."""
+        locs = [_onsite("US", city="Omaha", region="Nebraska")]
+        result = compute_location_fit(
+            locs, "ONSITE", "US", ["San Francisco", "Remote"], "US", work_arrangement="remote"
+        )
+        assert result == (1, "on-site/hybrid outside target geography")
+
+    def test_multi_city_hybrid_best_target_wins(self):
+        """Job offerable hybrid in NYC OR SF — SF matches target → 4 (not reject)."""
+        locs = [
+            _hybrid(city="New York City", region="New York", country="USA"),
+            _hybrid(city="San Francisco", region="California", country="United States"),
+        ]
+        result = compute_location_fit(
+            locs, "HYBRID", None, ["San Francisco", "Remote"], "US", work_arrangement="remote"
+        )
+        assert result == (4, "on-site/hybrid in target geography, remote preferred")
+
+    def test_denorm_hybrid_fallback_when_structured_unspecified(self):
+        """Exact Brigit 'Lead Data Scientist' shape: structured SF marked
+        UNSPECIFIED, but the job-level workplace_type=HYBRID → treated as
+        presence-required in a target geo → 4 (not 5)."""
+        locs = [
+            _loc("UNSPECIFIED", city="San Francisco", region="California", country="United States")
+        ]
+        result = compute_location_fit(
+            locs, "HYBRID", None, ["San Francisco", "Remote"], "US", work_arrangement="remote"
+        )
+        assert result == (4, "on-site/hybrid in target geography, remote preferred")
+
+    def test_unspecified_modality_in_target_not_capped(self):
+        """No modality signal at either level → could be remote → NOT capped/
+        rejected; falls through to Row 5's geography match → 5."""
+        locs = [
+            _loc("UNSPECIFIED", city="San Francisco", region="California", country="United States")
+        ]
+        result = compute_location_fit(
+            locs, "UNSPECIFIED", None, ["San Francisco", "Remote"], "US", work_arrangement="remote"
+        )
+        assert result == (5, "on-site/hybrid in target geography")
+
+    def test_unspecified_home_no_geo_defers(self):
+        """Hybrid with no resolvable geo (only home country_code) → not rejected
+        (we can't say it's outside target); defers to the LLM."""
+        locs = [_hybrid("US")]  # no city/region/country
+        result = compute_location_fit(
+            locs, "HYBRID", "US", ["San Francisco", "Remote"], "US", work_arrangement="remote"
+        )
+        assert result is None
+
+    def test_foreign_onsite_no_city_still_caught_by_row4(self):
+        """R-b defers (no geo name) but legacy Row 4 still rejects foreign onsite."""
+        locs = [_onsite("IN")]  # country_code only, no city name
+        result = compute_location_fit(
+            locs, "ONSITE", "IN", ["San Francisco", "Remote"], "US", work_arrangement="remote"
+        )
+        assert result == (1, "on-site outside candidate geography")
+
+    def test_remote_still_five_for_remote_first(self):
+        """Remote-eligible option always beats presence-required (Row 1)."""
+        locs = [_remote()]
+        result = compute_location_fit(
+            locs, "REMOTE", None, ["San Francisco", "Remote"], "US", work_arrangement="remote"
+        )
+        assert result == (5, "fully remote, remote targeted")
+
+    def test_non_remote_pref_keeps_full_five(self):
+        """Backward compat: a hybrid-preferring candidate still gets 5 for a
+        hybrid role in a target geography (rows R-a/R-b do not fire)."""
+        locs = [_hybrid("US", city="San Francisco", region="California")]
+        result = compute_location_fit(
+            locs, "HYBRID", "US", ["San Francisco", "Remote"], "US", work_arrangement="hybrid"
+        )
+        assert result == (5, "on-site/hybrid in target geography")
+
+    def test_unset_work_arrangement_keeps_legacy_behavior(self):
+        """No work_arrangement passed → legacy Row 5 → 5 (proves the refinement
+        is opt-in and cannot silently regress the existing rule table)."""
+        locs = [_hybrid("US", city="New York City", region="New York")]
+        result = compute_location_fit(locs, "HYBRID", "US", ["New York", "Remote"], "US")
+        assert result == (5, "on-site/hybrid in target geography")
+
+
+class TestRemoteFirstClassificationRegression:
+    """End-to-end: how the R-a (4) vs R-b (1) verdict drives the final class."""
+
+    _BRIGIT_LEAD_DS = {
+        "title_fit": 5,
+        "location_fit": 5,  # LLM value, pre-override
+        "comp_fit": 3,
+        "domain_match": 4,
+        "seniority_match": 5,
+        "skills_match": 5,
+    }
+
+    def test_hybrid_sf_capped_to_four_still_applies(self):
+        """SF-hybrid (R-a → 4) keeps the strong Brigit role at 'apply' — the
+        user said SF hybrid is viable, just not a perfect remote match."""
+        from job_finder.db._classification import derive_classification
+
+        subs = {**self._BRIGIT_LEAD_DS, "location_fit": 4}
+        assert derive_classification(subs, None) == "apply"
+
+    def test_hybrid_nyc_reject_to_one_rejects(self):
+        """NYC-only hybrid (R-b → 1) flips the role to 'reject' (any axis==1)."""
+        from job_finder.db._classification import derive_classification
+
+        subs = {**self._BRIGIT_LEAD_DS, "location_fit": 1}
+        assert derive_classification(subs, None) == "reject"
