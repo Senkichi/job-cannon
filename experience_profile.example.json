@@ -1,4 +1,13 @@
 {
+  "contact": {
+    "full_name": "Jane Doe",
+    "email": "jane.doe@example.com",
+    "phone": "555-123-4567",
+    "linkedin": "https://linkedin.com/in/janedoe",
+    "github": "https://github.com/janedoe",
+    "portfolio": "https://janedoe.dev",
+    "location": "San Francisco, CA"
+  },
   "positions": [
     {
       "title": "Senior Data Scientist",

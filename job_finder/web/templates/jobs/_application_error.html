@@ -1,0 +1,17 @@
+{# Error fragment for application preparation failures — returns 200 for HTMX outerHTML swap #}
+<tr class="bg-red-900/20 border-t border-red-700">
+  <td colspan="12" class="p-4">
+    <div class="max-w-4xl mx-auto">
+      <div class="bg-red-900/40 border border-red-600 rounded-lg p-4">
+        <h4 class="text-red-200 font-medium mb-2">Application Package Error</h4>
+        <p class="text-red-300 text-sm">{{ error_message }}</p>
+        <button type="button"
+                hx-post="{{ url_for('jobs.prepare_application', dedup_key=job.dedup_key) }}"
+                hx-target="closest tr" hx-swap="outerHTML"
+                class="mt-3 px-3 py-1.5 bg-red-700 hover:bg-red-600 text-white text-sm rounded-md transition-colors">
+          Retry
+        </button>
+      </div>
+    </div>
+  </td>
+</tr>
