@@ -838,6 +838,9 @@ def retry(company_id):
             400,
         )
 
+    # Run probe synchronously (Fix 5: revert background-thread pattern from remediation 1)
+    # The background-thread pattern returned stale rows immediately; a correct-but-slow
+    # response is strictly better than a fast-but-stale one for this low-frequency action.
     try:
         probe_single_company(company_id, conn, config)
     except Exception as e:
