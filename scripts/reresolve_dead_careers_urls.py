@@ -346,17 +346,43 @@ def _process_company(
             "UPDATE companies SET careers_url = ?, miss_reason = NULL, updated_at = ? WHERE id = ?",
             (new_url, utc_now_iso(), company_id),
         )
-        # If we detected a platform, update ats_platform and ats_probe_status
+        # If we detected a platform, update ats_platform and ats_probe_status.
+        # A different company can already own this exact (platform, slug) pair
+        # (companies.ats_platform/ats_slug is UNIQUE) -- e.g. two DB rows for
+        # the same underlying employer, or a genuinely shared/ambiguous slug.
+        # That's a real, expected outcome (the same class of collision
+        # promote_from_careers_link reports as 'slug_collision'), not a script
+        # bug -- catch it, keep the careers_url correction (still valid and
+        # wanted independent of platform promotion), and continue the batch
+        # instead of losing all remaining companies to an unhandled crash.
         if detected_platform:
             # Extract slug from the detection result
             slug = detected[1] if detected else None
-            conn.execute(
-                """UPDATE companies
-                   SET ats_platform = ?, ats_slug = ?, ats_probe_status = 'hit',
-                       ats_probe_attempted_at = ?, updated_at = ?
-                   WHERE id = ?""",
-                (detected_platform, slug, utc_now_iso(), utc_now_iso(), company_id),
-            )
+            try:
+                conn.execute(
+                    """UPDATE companies
+                       SET ats_platform = ?, ats_slug = ?, ats_probe_status = 'hit',
+                           ats_probe_attempted_at = ?, updated_at = ?
+                       WHERE id = ?""",
+                    (detected_platform, slug, utc_now_iso(), utc_now_iso(), company_id),
+                )
+            except sqlite3.IntegrityError:
+                owner = conn.execute(
+                    "SELECT id, name_raw FROM companies WHERE ats_platform = ? AND ats_slug = ?",
+                    (detected_platform, slug),
+                ).fetchone()
+                log.warning(
+                    "Re-resolved %s (%s) to %s/%s but that slug is already owned by "
+                    "company %s (%s) -- keeping the corrected careers_url, skipping "
+                    "platform promotion (slug_collision).",
+                    company_name,
+                    company_id,
+                    detected_platform,
+                    slug,
+                    owner["id"] if owner else "?",
+                    owner["name_raw"] if owner else "unknown",
+                )
+                summary["outcome"] = "reresolved_slug_collision"
         conn.commit()
         log.info(
             "Re-resolved %s (%s): %s -> %s (platform: %s)",
