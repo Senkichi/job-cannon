@@ -194,6 +194,21 @@ def _fire_escalation(escalated: list[dict], issues: list[str], config: dict) -> 
     if issues:
         body += "\n\nIssues:\n" + "\n".join(f"- {i}" for i in issues)
 
+    # Hire-day handoff: the owner-idle signal is the one death mode whose most
+    # likely cause is *good* news (landed a role and drifted away). When it
+    # escalates, the terse metric isn't enough -- tell the owner what to do so a
+    # silent museum-piece decline isn't the default. Only appended for owner_idle.
+    if any(e["signal_key"] == "owner_idle" for e in escalated):
+        body += (
+            "\n\n---\n"
+            "About that owner-idle signal: if you've landed a role, congratulations -- "
+            "you can wind Job Cannon down anytime with `job-cannon stop` (it halts the app "
+            "and disables the keepalive supervisor). If you're still searching and just "
+            "stepped away, the board has kept scanning and scoring on schedule, so your "
+            "queue is waiting whenever you're ready. Nothing is required here; this note "
+            "only means Job Cannon has been running unattended for a while."
+        )
+
     try:
         notify(title, body, severity="critical", config=config)
     except Exception:
