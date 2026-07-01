@@ -357,7 +357,7 @@ def test_threshold_is_config_driven(migrated_db, events_file):
 
 
 def test_source_deadman_disabled_when_tolerance_zero(migrated_db):
-    """source_deadman_tolerance <= 0 disables the check."""
+    """source_deadman_tolerance <= 0 disables the deadman check."""
     db_path, conn = migrated_db
     config = {"health": {"source_deadman_tolerance": 0}}
     issues = _check_source_deadman(conn, config)
@@ -365,7 +365,7 @@ def test_source_deadman_disabled_when_tolerance_zero(migrated_db):
 
 
 def test_source_deadman_returns_empty_when_fresh(migrated_db):
-    """Fresh timestamps in all recency classes → no issues."""
+    """Fresh timestamps in all ATS recency classes → no issues."""
     db_path, conn = migrated_db
     config = {
         "health": {"source_deadman_tolerance": 2.0},
@@ -377,10 +377,6 @@ def test_source_deadman_returns_empty_when_fresh(migrated_db):
     conn.execute(
         "INSERT INTO companies (name, name_raw, ats_probe_status, last_scanned_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
         ("Test Company", "Test Company", "hit", now_iso, now_iso, now_iso),
-    )
-    conn.execute(
-        "INSERT INTO user_activity (action, entity_id, metadata, occurred_at) VALUES (?, ?, ?, ?)",
-        ("scheduled_sync", None, "{}", now_iso),
     )
     conn.execute(
         "INSERT INTO company_scan_log (company_id, scanned_at) VALUES (?, ?)",
@@ -400,16 +396,12 @@ def test_source_deadman_fires_when_stale(migrated_db):
         "scheduler": {"cadence_preset": "standard"},
     }
 
-    # Seed stale data (standard preset = 8h window, tolerance 2.0 = 16h allowed)
-    # Use 20 hours ago to exceed the allowed window
-    old_iso = _utc_naive(-20)
+    # Seed stale data (ATS window is 24h daily, tolerance 2.0 = 48h allowed)
+    # Use 50 hours ago to exceed the allowed window
+    old_iso = _utc_naive(-50)
     conn.execute(
         "INSERT INTO companies (name, name_raw, ats_probe_status, last_scanned_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
         ("Stale Company", "Stale Company", "hit", old_iso, old_iso, old_iso),
-    )
-    conn.execute(
-        "INSERT INTO user_activity (action, entity_id, metadata, occurred_at) VALUES (?, ?, ?, ?)",
-        ("scheduled_sync", None, "{}", old_iso),
     )
     conn.execute(
         "INSERT INTO company_scan_log (company_id, scanned_at) VALUES (?, ?)",
@@ -418,51 +410,224 @@ def test_source_deadman_fires_when_stale(migrated_db):
     conn.commit()
 
     issues = _check_source_deadman(conn, config)
-    assert len(issues) == 3
+    assert len(issues) == 2
     assert all(issue.startswith("Source deadman:") for issue in issues)
     assert "ATS scanner fleet" in issues[0]
-    assert "feed ingestion" in issues[1]
-    assert "ATS scan log" in issues[2]
+    assert "ATS scan log" in issues[1]
 
 
 def test_source_deadman_coverage_key_in_derived_keys(migrated_db):
     """'Source deadman' issue prefix maps to 'coverage' key."""
     from job_finder.web.scheduler._runners import _derive_degraded_keys
 
-    issues = ["Source deadman: ATS scanner fleet — no successful scan in 20.0h (window 8h)"]
+    issues = ["Source deadman: ATS scanner fleet — no successful scan in 50.0h (window 24h)"]
     keys = _derive_degraded_keys(issues, [])
     assert "coverage" in keys
 
 
-def test_source_deadman_window_changes_with_cadence_preset(migrated_db):
-    """Derived window changes when cadence_preset flips standard → heavy."""
+def test_source_deadman_uses_fixed_ats_window(migrated_db):
+    """Deadman uses fixed 24h ATS window (not cadence_preset-dependent)."""
     db_path, conn = migrated_db
 
-    # Standard preset: 8h window * 2.0 tolerance = 16h allowed
+    # Both presets use the same 24h ATS window * 2.0 tolerance = 48h allowed
     config_standard = {
         "health": {"source_deadman_tolerance": 2.0},
         "scheduler": {"cadence_preset": "standard"},
     }
 
-    # Heavy preset: 4h window * 2.0 tolerance = 8h allowed
     config_heavy = {
         "health": {"source_deadman_tolerance": 2.0},
         "scheduler": {"cadence_preset": "heavy"},
     }
 
-    # Seed data 12 hours ago (exceeds heavy window, within standard window)
-    mid_iso = _utc_naive(-12)
+    # Seed data 23 hours ago (normal state: last night's 07:00 scan, seen at 06:00 heartbeat)
+    # This should be silent on both presets (within 48h window)
+    normal_iso = _utc_naive(-23)
     conn.execute(
         "INSERT INTO companies (name, name_raw, ats_probe_status, last_scanned_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
-        ("Test Company", "Test Company", "hit", mid_iso, mid_iso, mid_iso),
+        ("Test Company", "Test Company", "hit", normal_iso, normal_iso, normal_iso),
+    )
+    conn.execute(
+        "INSERT INTO company_scan_log (company_id, scanned_at) VALUES (?, ?)",
+        (1, normal_iso),
     )
     conn.commit()
 
-    # Standard preset: within window → no issue
+    # Both presets: within window → no issue
     issues_standard = _check_source_deadman(conn, config_standard)
     assert issues_standard == []
 
-    # Heavy preset: exceeds window → issue
     issues_heavy = _check_source_deadman(conn, config_heavy)
-    assert len(issues_heavy) == 1
-    assert "ATS scanner fleet" in issues_heavy[0]
+    assert issues_heavy == []
+
+    # Seed data 50 hours ago (exceeds 48h window)
+    stale_iso = _utc_naive(-50)
+    conn.execute(
+        "UPDATE companies SET last_scanned_at = ? WHERE name = 'Test Company'",
+        (stale_iso,),
+    )
+    conn.execute(
+        "UPDATE company_scan_log SET scanned_at = ? WHERE company_id = 1",
+        (stale_iso,),
+    )
+    conn.commit()
+
+    # Both presets: exceeds window → issue
+    issues_standard_stale = _check_source_deadman(conn, config_standard)
+    assert len(issues_standard_stale) == 2
+
+    issues_heavy_stale = _check_source_deadman(conn, config_heavy)
+    assert len(issues_heavy_stale) == 2
+
+
+def test_source_deadman_tolerance_zero_does_not_affect_signal_1(migrated_db, events_file):
+    """tolerance=0 disables deadman but signal #1 (ingestion alarm) still works."""
+    db_path, conn = migrated_db
+    app = _make_app(db_path)
+    app.config["JF_CONFIG"] = {
+        "health": {"source_deadman_tolerance": 0},
+        "scheduler": {"cadence_preset": "standard"},
+    }
+
+    # Seed ingestion outage 20h ago (exceeds 8h standard window)
+    old_iso = _utc_naive(-20)
+    conn.execute(
+        "INSERT INTO user_activity (action, entity_id, metadata, occurred_at) VALUES (?, ?, ?, ?)",
+        ("scheduled_sync", None, "{}", old_iso),
+    )
+    # Seed recent staleness to avoid signal #2 firing
+    recent_iso = _utc_naive(-0.5)
+    conn.execute(
+        "INSERT INTO user_activity (action, entity_id, metadata, occurred_at) VALUES (?, ?, ?, ?)",
+        ("scheduled_staleness", None, "{}", recent_iso),
+    )
+    conn.commit()
+
+    with patch("job_finder.gmail_auth.get_credentials", return_value=object()):
+        run_health_check(app)
+
+    rows = _fetch_health_rows(conn)
+    assert len(rows) == 1
+    meta = json.loads(rows[0]["metadata"])
+    # Signal #1 should fire (ingestion alarm is independent of tolerance)
+    assert any("No ingestion in last 8h" in issue for issue in meta["issues"])
+    # Deadman should be silent (tolerance=0 disables it)
+    assert not any("Source deadman" in issue for issue in meta["issues"])
+
+
+def test_signal_1_separator_safe_with_t_separated_timestamps(migrated_db, events_file):
+    """Signal #1 uses epoch math, so 'T'-separated timestamps work correctly."""
+    db_path, conn = migrated_db
+    app = _make_app(db_path)
+    app.config["JF_CONFIG"] = {
+        "scheduler": {"cadence_preset": "standard"},
+    }
+
+    # Seed ingestion outage 20h ago with 'T'-separated ISO timestamp
+    old_iso = _utc_naive(-20)  # This produces 'T'-separated format
+    conn.execute(
+        "INSERT INTO user_activity (action, entity_id, metadata, occurred_at) VALUES (?, ?, ?, ?)",
+        ("scheduled_sync", None, "{}", old_iso),
+    )
+    # Seed recent staleness to avoid signal #2 firing
+    recent_iso = _utc_naive(-0.5)
+    conn.execute(
+        "INSERT INTO user_activity (action, entity_id, metadata, occurred_at) VALUES (?, ?, ?, ?)",
+        ("scheduled_staleness", None, "{}", recent_iso),
+    )
+    conn.commit()
+
+    with patch("job_finder.gmail_auth.get_credentials", return_value=object()):
+        run_health_check(app)
+
+    rows = _fetch_health_rows(conn)
+    assert len(rows) == 1
+    meta = json.loads(rows[0]["metadata"])
+    # Signal #1 should fire (epoch math handles 'T' separator correctly)
+    assert any("No ingestion in last 8h" in issue for issue in meta["issues"])
+    # Should be exactly one issue (no double-count from deadman)
+    assert len(meta["issues"]) == 1
+
+
+def test_deadman_end_to_end_surface(migrated_db, events_file):
+    """End-to-end: stale ATS fleet state surfaces through run_health_check."""
+    db_path, conn = migrated_db
+    app = _make_app(db_path)
+    app.config["JF_CONFIG"] = {
+        "health": {"source_deadman_tolerance": 2.0},
+        "scheduler": {"cadence_preset": "standard"},
+    }
+
+    # Seed stale ATS fleet (50h ago, exceeds 48h window)
+    stale_iso = _utc_naive(-50)
+    conn.execute(
+        "INSERT INTO companies (name, name_raw, ats_probe_status, last_scanned_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+        ("Stale Company", "Stale Company", "hit", stale_iso, stale_iso, stale_iso),
+    )
+    conn.execute(
+        "INSERT INTO company_scan_log (company_id, scanned_at) VALUES (?, ?)",
+        (1, stale_iso),
+    )
+    # Seed recent staleness to avoid signal #2 firing
+    recent_iso = _utc_naive(-0.5)
+    conn.execute(
+        "INSERT INTO user_activity (action, entity_id, metadata, occurred_at) VALUES (?, ?, ?, ?)",
+        ("scheduled_staleness", None, "{}", recent_iso),
+    )
+    conn.commit()
+
+    with patch("job_finder.gmail_auth.get_credentials", return_value=object()):
+        run_health_check(app)
+
+    rows = _fetch_health_rows(conn)
+    assert len(rows) == 1
+    meta = json.loads(rows[0]["metadata"])
+    # Deadman issues should surface
+    assert any("Source deadman" in issue for issue in meta["issues"])
+    # Should have exactly 2 deadman issues (ATS fleet + scan log)
+    deadman_issues = [i for i in meta["issues"] if "Source deadman" in i]
+    assert len(deadman_issues) == 2
+
+
+def test_deadman_end_to_end_escalation(migrated_db, events_file):
+    """End-to-end: stale deadman state escalates to 'coverage' key after threshold."""
+    db_path, conn = migrated_db
+    app = _make_app(db_path)
+    app.config["JF_CONFIG"] = {
+        "health": {"source_deadman_tolerance": 2.0},
+        "scheduler": {"cadence_preset": "standard"},
+    }
+
+    # Seed stale ATS fleet (50h ago, exceeds 48h window)
+    stale_iso = _utc_naive(-50)
+    conn.execute(
+        "INSERT INTO companies (name, name_raw, ats_probe_status, last_scanned_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+        ("Stale Company", "Stale Company", "hit", stale_iso, stale_iso, stale_iso),
+    )
+    conn.execute(
+        "INSERT INTO company_scan_log (company_id, scanned_at) VALUES (?, ?)",
+        (1, stale_iso),
+    )
+    # Seed recent staleness to avoid signal #2 firing
+    recent_iso = _utc_naive(-0.5)
+    conn.execute(
+        "INSERT INTO user_activity (action, entity_id, metadata, occurred_at) VALUES (?, ?, ?, ?)",
+        ("scheduled_staleness", None, "{}", recent_iso),
+    )
+    conn.commit()
+
+    with (
+        patch("job_finder.gmail_auth.get_credentials", return_value=object()),
+        patch("job_finder.web.scheduler._runners._fire_escalation") as fire,
+    ):
+        # Run 3 times to hit the default threshold of 3
+        for _ in range(3):
+            run_health_check(app)
+
+    assert fire.call_count == 1
+    escalated_keys = {e["signal_key"] for e in fire.call_args.args[0]}
+    assert "coverage" in escalated_keys
+
+    # Verify escalation state
+    state = _esc_state(conn)
+    assert state["coverage"]["consecutive_degraded"] >= 3

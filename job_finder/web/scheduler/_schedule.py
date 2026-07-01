@@ -215,6 +215,16 @@ def expected_staleness_window_hours() -> int:
     return 26
 
 
+def expected_ats_scan_window_hours() -> int:
+    """Return the ATS scan window in hours.
+
+    ATS scan runs daily (at 07:00), so its expected window is 24 hours.
+    The supply-side deadman alarm multiplies this by source_deadman_tolerance
+    (default 2.0) to allow for missed cycles. Returns 24 (the base daily window).
+    """
+    return 24
+
+
 # ---------------------------------------------------------------------------
 # Boot-time collision guard.
 # ---------------------------------------------------------------------------
