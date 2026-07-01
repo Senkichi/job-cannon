@@ -359,6 +359,10 @@ class TestGhostRepostCadence:
     def test_repost_cadence_column_absent(self, migrated_db):
         """ats_refreshed_at column absent → cadence_unknown, composite still computes."""
         path, conn = migrated_db
+        # m116 adds ats_refreshed_at unconditionally; drop it here to exercise the
+        # pre-#575 degraded path where the feature-detect takes the column-absent branch.
+        conn.execute("ALTER TABLE jobs DROP COLUMN ats_refreshed_at")
+        conn.commit()
         _insert_job(
             conn,
             "job_no_column",
@@ -376,10 +380,7 @@ class TestGhostRepostCadence:
     def test_repost_cadence_column_present_null(self, migrated_db):
         """ats_refreshed_at present but NULL → cadence_unknown."""
         path, conn = migrated_db
-        # Add the column (simulating #575 schema)
-        conn.execute("ALTER TABLE jobs ADD COLUMN ats_refreshed_at TEXT")
-        conn.commit()
-
+        # ats_refreshed_at is provided by m116; no manual ADD needed.
         _insert_job(
             conn,
             "job_null_refresh",
@@ -397,10 +398,7 @@ class TestGhostRepostCadence:
     def test_repost_cadence_detected(self, migrated_db):
         """ats_refreshed_at diverges from posted_date by > ghost_repost_days → repost_detected."""
         path, conn = migrated_db
-        # Add the column (simulating #575 schema)
-        conn.execute("ALTER TABLE jobs ADD COLUMN ats_refreshed_at TEXT")
-        conn.commit()
-
+        # ats_refreshed_at is provided by m116; no manual ADD needed.
         _insert_job(
             conn,
             "job_repost",
@@ -424,10 +422,7 @@ class TestGhostRepostCadence:
     def test_repost_cadence_not_divergent(self, migrated_db):
         """ats_refreshed_at close to posted_date → repost_detected does not fire."""
         path, conn = migrated_db
-        # Add the column (simulating #575 schema)
-        conn.execute("ALTER TABLE jobs ADD COLUMN ats_refreshed_at TEXT")
-        conn.commit()
-
+        # ats_refreshed_at is provided by m116; no manual ADD needed.
         _insert_job(
             conn,
             "job_fresh",
@@ -643,9 +638,7 @@ class TestConfigDefaults:
     def test_ghost_repost_days_default(self, migrated_db):
         """ghost_repost_days defaults to 14 when not in config."""
         path, conn = migrated_db
-        conn.execute("ALTER TABLE jobs ADD COLUMN ats_refreshed_at TEXT")
-        conn.commit()
-
+        # ats_refreshed_at is provided by m116; no manual ADD needed.
         _insert_job(
             conn,
             "job_repost",
