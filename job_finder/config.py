@@ -28,6 +28,9 @@ DEFAULT_CANDIDATE_SCORE_THRESHOLD = 42
 DEFAULT_DAILY_BUDGET_USD: float = 10.0
 DEFAULT_MIN_SCORE_THRESHOLD = 40
 
+# --- Metrics defaults ---
+DEFAULT_FIT_FLOOR: float = 3.5
+
 # --- Model defaults ---
 # Legacy tier constants removed in Phase 40 (replaced by _PROVIDER_DEFAULTS)
 
@@ -177,6 +180,18 @@ def get_company_denylist(config: dict) -> frozenset[str]:
     config_entries = config.get("filters", {}).get("company_denylist", [])
     extra = _normalize_denylist(config_entries)
     return COMPANY_DENYLIST | extra
+
+
+def get_fit_floor(config: dict) -> float:
+    """Return the fit-floor threshold for target-set membership.
+
+    Args:
+        config: Full config dict (may contain metrics.fit_floor).
+
+    Returns:
+        Fit-floor value (default 3.5).
+    """
+    return float(config.get("metrics", {}).get("fit_floor", DEFAULT_FIT_FLOOR))
 
 
 def validate_target_titles(config: dict) -> None:

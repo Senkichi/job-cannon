@@ -5,7 +5,7 @@ from __future__ import annotations
 import sqlite3
 from datetime import UTC, date, datetime
 
-from job_finder.db._queries import _SUB_SCORE_SUM_SQL
+from job_finder.db._queries import _SUB_SCORE_SUM_SQL, target_membership_sql
 
 _DEFAULT_COLD_START_EXCLUDE_DAYS = 30
 
@@ -349,3 +349,25 @@ def get_crawl_latency_sli(conn: sqlite3.Connection, config: dict) -> dict:
                 "cold_start_exclude_days": cold_start_days,
             }
         raise
+
+
+def get_target_set_size(conn: sqlite3.Connection, fit_floor: float) -> int:
+    """Return the count of jobs that are target-set members.
+
+    A job is a target-set member when:
+    - sub_scores_json IS NOT NULL (scored)
+    - mean of the six sub-scores >= fit_floor
+    - classification is NOT a hard negative (reject, low_signal)
+
+    This is the single sanctioned count for downstream metrics (M6/M7, discovery dashboard).
+
+    Args:
+        conn: Open sqlite3 connection.
+        fit_floor: Mean sub-score threshold (1.0-5.0 scale).
+
+    Returns:
+        Count of target-set member jobs.
+    """
+    where_clause = target_membership_sql(fit_floor)
+    row = conn.execute(f"SELECT COUNT(*) FROM jobs WHERE {where_clause}").fetchone()
+    return row[0] if row else 0

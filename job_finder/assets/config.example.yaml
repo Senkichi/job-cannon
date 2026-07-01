@@ -258,6 +258,15 @@ scoring:
   # — Phase 40 moved that selection to the providers.overrides path and the
   # legacy keys were never read after the move.
 
+# --- Discovery / measurement configuration ---
+metrics:
+  # Fit-floor: a scored job is a "target-set member" when the mean of its six
+  # sub-scores is at or above this value AND its classification is not a hard
+  # negative (reject/low_signal). This is the frozen target/watch boundary that
+  # discovery-recall numbers are measured against. Tunable; 3.5 aligns with
+  # scoring.apply_mean_floor (the positive-evidence 'apply' bar).
+  fit_floor: 3.5
+
 # --- Multi-provider model routing (Phase 40 flat schema) ---
 # Every call_model() invocation is cascaded: the primary provider is tried
 # first, then each entry in fallback_chain in order. Models for each
