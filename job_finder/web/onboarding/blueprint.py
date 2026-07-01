@@ -61,6 +61,7 @@ from job_finder.config import (
     load_config,
 )
 from job_finder.web import user_data_dirs
+from job_finder.web.ats_scanner import upsert_company
 from job_finder.web.db_helpers import get_db, refresh_jf_config
 from job_finder.web.onboarding import imap_test, resume_parser, state, system_check
 from job_finder.web.providers.detection import detect_available_providers, get_detection_extras
@@ -384,6 +385,7 @@ def profile_edit():
                 error="At least one target job title is required.",
                 target_titles="",
                 target_locations=request.form.get("target_locations", "").strip(),
+                target_companies=request.form.get("target_companies", "").strip(),
                 work_arrangement=work_arrangement_err,
                 skills=request.form.get("skills", "").strip(),
                 min_salary=request.form.get("min_salary", "").strip(),
@@ -401,6 +403,7 @@ def profile_edit():
             "profile_edit": {
                 "target_titles": target_titles_raw,
                 "target_locations": request.form.get("target_locations", "").strip(),
+                "target_companies": request.form.get("target_companies", "").strip(),
                 "work_arrangement": work_arrangement_raw,
                 "skills": request.form.get("skills", "").strip(),
                 "min_salary": min_salary,
@@ -444,6 +447,7 @@ def profile_edit():
         "onboarding/profile_edit.html",
         target_titles=user_titles or suggested_titles_text,
         target_locations=existing_edit.get("target_locations", ""),
+        target_companies=existing_edit.get("target_companies", ""),
         work_arrangement=existing_edit.get("work_arrangement", "remote"),
         skills=user_skills or parsed_skills_text,
         min_salary=existing_edit.get("min_salary") or "",
@@ -452,6 +456,7 @@ def profile_edit():
         # can tell autofilled chips apart from ones they typed.
         titles_from_suggestion=(not user_titles) and bool(suggested_titles_text),
         skills_from_suggestion=(not user_skills) and bool(parsed_skills_text),
+        companies_from_suggestion=False,  # No autofill source for companies
         notice=notice,
         **_step("profile_edit"),
     )
@@ -755,6 +760,10 @@ def done():
             config_slice["profile"]["target_titles"] = _split_lines(
                 profile_edit.get("target_titles", "")
             )
+        if not existing_profile.get("target_companies"):
+            config_slice["profile"]["target_companies"] = _split_lines(
+                profile_edit.get("target_companies", "")
+            )
         if not existing_profile.get("skills"):
             config_slice["profile"]["skills"] = _split_lines(profile_edit.get("skills", ""))
         if provider_block.get("api_key"):
@@ -831,6 +840,19 @@ def done():
         # --- Side effect 3: mark onboarding_complete + clear wizard_data (D-16) ---
         state.mark_onboarding_complete(db)
         logger.info("onboarding done: onboarding_complete=1, wizard_data cleared")
+
+        # --- Side effect 3.5: seed declared target companies into the watchlist ---
+        # Derived from the user's OWN declaration (profile_edit target_companies),
+        # never inferred. upsert_company INSERTs with scan_enabled defaulting to 1
+        # (m007 schema), so the ATS scanner watches them from the first cycle.
+        declared_companies = _split_lines(profile_edit.get("target_companies", ""))
+        for company_name in declared_companies:
+            company_id = upsert_company(db, company_name)
+            if company_id is None:
+                logger.warning("onboarding done: failed to seed target company %r", company_name)
+        logger.info(
+            "onboarding done: seeded %d declared target companies", len(declared_companies)
+        )
 
         # --- Side effect 4: one-shot first ingest via scheduler (D-17) ---
         # CRITICAL: APScheduler calls scheduled callables with NO arguments. run_ingestion's

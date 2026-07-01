@@ -23,6 +23,10 @@ profile:
   home_country: "US"
   # Minimum acceptable salary in USD (jobs below 85% of this are auto-excluded)
   min_salary: 100000
+  # Companies to watch for new roles from day one. Seeds the ATS scanner
+  # watchlist at onboarding so scanning isn't empty until jobs ingest.
+  # Derived from your explicit list — never inferred from job titles.
+  target_companies: []
   # Industries you're interested in (used by AI scoring)
   industries:
     - Tech
