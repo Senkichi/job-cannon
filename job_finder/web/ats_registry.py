@@ -36,6 +36,7 @@ from job_finder.web.ats_platforms import SCANNERS_BY_NAME as _REQUESTS_SCANNERS
 from job_finder.web.ats_platforms._platforms_icims import SCANNER as _ICIMS_SCANNER
 from job_finder.web.ats_platforms._platforms_icims import PlaywrightPlatformScanner
 from job_finder.web.ats_platforms._platforms_phenom import SCANNER as _PHENOM_SCANNER
+from job_finder.web.ats_platforms._platforms_talentbrew import SCANNER as _TALENTBREW_SCANNER
 from job_finder.web.ats_platforms._registry import PlatformScanner
 
 
@@ -144,6 +145,8 @@ _SPECS: tuple[PlatformSpec, ...] = (
     PlatformSpec("icims", playwright_scanner=_ICIMS_SCANNER, probe_attr="_probe_icims"),
     # Phenom — Playwright scanner via sitemap, no public JSON API.
     PlatformSpec("phenom", playwright_scanner=_PHENOM_SCANNER, probe_attr="_probe_phenom"),
+    # TalentBrew (by Radancy) — Playwright scanner via static HTML extraction, no public JSON API.
+    PlatformSpec("talentbrew", playwright_scanner=_TALENTBREW_SCANNER, probe_attr="_probe_talentbrew"),
     # Registered stub with a probe but kept at 'miss' (careers_crawler owns it).
     PlatformSpec("jobvite", probe_attr="_probe_jobvite", non_scannable=True),
     # Keyword-search adapters: scanner but no slug-probe and no URL form. The

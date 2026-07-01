@@ -188,6 +188,14 @@ _ADP_WORKFORCENOW_URL = re.compile(
     re.IGNORECASE,
 )
 
+# TalentBrew (by Radancy): careers/jobs subdomain patterns. The slug is the full host.
+# Note: This pattern overlaps with Phenom (both use careers/jobs subdomains). The probe
+# distinguishes them by checking for TalentBrew-specific markers in the HTML.
+_TALENTBREW_URL = re.compile(
+    r"https?://(?:careers|jobs)\.([a-z0-9.-]+)",
+    re.IGNORECASE,
+)
+
 # Bump alongside material changes to the regex patterns above (contract tests).
 # m049-v4: + workable / jobvite / paylocity / rippling URL patterns (round 6 audit).
 # m049-v5: + icims URL pattern (careers-/jobs- tenant host) (PR-A2).
@@ -197,7 +205,8 @@ _ADP_WORKFORCENOW_URL = re.compile(
 # m049-v9: + phenom URL pattern (careers/jobs subdomain host).
 # m049-v10: refine phenom URL pattern to exclude www.* (marketing sites).
 # m049-v11: + adp_workforcenow URL pattern (cid= UUID).
-ATS_EXTRACTOR_VERSION = "m049-v11"
+# m049-v12: + talentbrew URL pattern (careers/jobs subdomain host).
+ATS_EXTRACTOR_VERSION = "m049-v12"
 
 # Relative pattern strength within a URL: API/canonical traces win ties in reconciliation.
 _SPECIFICITY_API = 10
@@ -358,6 +367,16 @@ def extract_ats_from_url_best(url: str) -> tuple[str, str, int] | None:
     if m:
         cid = m.group(1).lower()
         return "adp", cid, _SPECIFICITY_BOARD
+
+    # TalentBrew (by Radancy) — careers/jobs subdomain host. Slug is the full host.
+    m = _TALENTBREW_URL.search(url)
+    if m:
+        # Extract the full host from the URL
+        from urllib.parse import urlparse
+
+        parsed = urlparse(url)
+        host = parsed.netloc  # Full host (e.g., "careers.ford.com")
+        return "talentbrew", host.lower(), _SPECIFICITY_BOARD
 
     return None
 

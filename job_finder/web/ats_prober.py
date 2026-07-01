@@ -326,6 +326,29 @@ def probe_single_company(
                 except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
                     _handle_scan_error(conn, company_id, company_name, str(e), now)
                     return {"status": "error", "detail": str(e)}
+            elif platform == "talentbrew":
+                # TalentBrew (by Radancy) — static HTML extraction, delegate to the probe function.
+                try:
+                    if _probe_talentbrew(slug):
+                        conn.execute(
+                            "UPDATE companies SET ats_probe_status = 'hit' WHERE id = ?",
+                            (company_id,),
+                        )
+                        _reset_retry_state(conn, company_id, now)
+                        logger.info("probe_single_company: %s -> hit (talentbrew)", company_name)
+                        return {"status": "hit", "jobs_found": 0}
+                    conn.execute(
+                        """UPDATE companies
+                           SET ats_probe_status = 'miss',
+                               miss_reason = 'platform_slug_404'
+                           WHERE id = ?""",
+                        (company_id,),
+                    )
+                    conn.commit()
+                    return {"status": "miss"}
+                except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
+                    _handle_scan_error(conn, company_id, company_name, str(e), now)
+                    return {"status": "error", "detail": str(e)}
             else:
                 # B4: platform value is set but not one we know how to probe —
                 # ATS catalog drift (probably the company's platform was
@@ -1080,6 +1103,40 @@ def _probe_rippling(slug: str) -> bool:
         return isinstance(items, list) and len(items) > 0
     except Exception as e:
         logger.debug("_probe_rippling('%s') failed: %s", slug, e)
+        return False
+
+
+def _probe_talentbrew(slug: str) -> bool:
+    """Return True if slug resolves to a live TalentBrew (by Radancy) career site.
+
+    TalentBrew sites are server-rendered HTML with no public JSON API.
+    The probe checks if the careers site returns 200 and contains TalentBrew-specific
+    markers (talentbrew/radancy references) to distinguish from Phenom (which also
+    uses careers/jobs subdomains).
+
+    Args:
+        slug: TalentBrew careers host (e.g. "careers.ford.com").
+
+    Returns:
+        True if the slug resolves to a live TalentBrew career site.
+    """
+    # Build the base URL from the slug
+    base_url = f"https://{slug}" if not slug.startswith("http") else slug
+    search_url = f"{base_url}/search-jobs" if not base_url.endswith("/search-jobs") else base_url
+
+    try:
+        r = requests.get(search_url, timeout=_PROBE_TIMEOUT, allow_redirects=True)
+        if r.status_code != 200:
+            return False
+
+        # Check for TalentBrew-specific markers to distinguish from Phenom
+        text_lower = r.text.lower()
+        has_talentbrew = "talentbrew" in text_lower or "radancy" in text_lower
+        has_jobs = "job" in text_lower and ("search" in text_lower or "openings" in text_lower or "opportunities" in text_lower)
+
+        return has_talentbrew and has_jobs
+    except Exception as e:
+        logger.debug("_probe_talentbrew('%s') failed: %s", slug, e)
         return False
 
 
