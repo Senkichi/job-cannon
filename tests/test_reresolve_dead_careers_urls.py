@@ -366,6 +366,84 @@ def test_process_company_dead_url_with_ats_detection(migrated_db):
     assert row[4] is None
 
 
+def test_process_company_slug_collision_does_not_crash(migrated_db):
+    """A re-resolved URL detecting a (platform, slug) already owned by another
+    company must not crash the batch -- it should keep the corrected careers_url,
+    skip the platform promotion, and record a distinct outcome."""
+    _path, conn = migrated_db
+
+    conn.execute(
+        """INSERT INTO companies
+           (name, name_raw, careers_url, homepage_url, ats_platform, ats_slug,
+            ats_probe_status, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, 'hit', '2026-06-18T00:00:00', '2026-06-18T00:00:00')""",
+        (
+            "Existing Owner",
+            "Existing Owner",
+            "https://jobs.lever.co/testco",
+            "https://existingowner.example.com",
+            "lever",
+            "testco",
+        ),
+    )
+    conn.execute(
+        """INSERT INTO companies (name, name_raw, careers_url, homepage_url, created_at, updated_at)
+           VALUES (?, ?, ?, ?, '2026-06-18T00:00:00', '2026-06-18T00:00:00')""",
+        ("Test Co", "Test Co", "https://example.com/old-careers", "https://example.com"),
+    )
+    conn.commit()
+    company_id = conn.execute(
+        "SELECT id FROM companies WHERE name_raw = ?", ("Test Co",)
+    ).fetchone()[0]
+
+    dead_resp = MockResponse(404, "https://example.com/old-careers", "Not found")
+    live_resp = MockResponse(200, "https://jobs.lever.co/testco", "<html><body>Jobs</body></html>")
+
+    with patch(
+        "scripts.reresolve_dead_careers_urls.fetch_with_deadline",
+        side_effect=[dead_resp, live_resp],
+    ):
+        with patch(
+            "scripts.reresolve_dead_careers_urls._discover_careers_url_from_homepage",
+            return_value="https://jobs.lever.co/testco",
+        ):
+            with patch(
+                "scripts.reresolve_dead_careers_urls._check_careers_url_liveness",
+                side_effect=[(False, "dead_4xx", None), (True, "live", None)],
+            ):
+                with patch(
+                    "scripts.reresolve_dead_careers_urls.extract_ats_from_url_best",
+                    return_value=("lever", "testco", 5),
+                ):
+                    result = _process_company(
+                        conn,
+                        company_id,
+                        "Test Co",
+                        "https://example.com/old-careers",
+                        "https://example.com",
+                        dry_run=False,
+                    )
+
+    assert result["outcome"] == "reresolved_slug_collision"
+
+    # careers_url correction is kept even though platform promotion collided.
+    row = conn.execute(
+        "SELECT careers_url, ats_platform, ats_slug, ats_probe_status FROM companies WHERE id = ?",
+        (company_id,),
+    ).fetchone()
+    assert row[0] == "https://jobs.lever.co/testco"
+    assert row[1] is None
+    assert row[2] is None
+    assert row[3] == "pending"
+
+    # The existing owner's row is untouched.
+    owner_row = conn.execute(
+        "SELECT ats_platform, ats_slug FROM companies WHERE name_raw = ?", ("Existing Owner",)
+    ).fetchone()
+    assert owner_row[0] == "lever"
+    assert owner_row[1] == "testco"
+
+
 def test_process_company_unresolvable(migrated_db):
     """A company with no findable careers URL gets miss_reason set."""
     _path, conn = migrated_db

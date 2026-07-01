@@ -12,6 +12,9 @@ experience_profile.json
 experience_reference.md
 resume_style_guide.json
 !job_finder/web/scoring_prompts/resume_style_guide.json
+# Personal resume-tailoring knowledge base (real PII: contact info + confidential
+# client names). Runtime KB loads from the user-data dir, NEVER a tracked repo asset.
+docs/assets/resume/
 
 # Database
 *.db
