@@ -712,13 +712,17 @@ def get_off_platform_miss_log(conn: sqlite3.Connection, fit_floor: float | None 
         SCANNABLE_TARGET_PLATFORMS = frozenset()
 
     try:
-        # Select off-platform jobs with LEFT JOIN to companies for reachability classification
-        # We also select c.id to distinguish between no match (NULL) vs match with NULL ats_platform
+        # Select off-platform jobs, LEFT JOIN companies on the canonical FK
+        # (jobs.company_id = companies.id) — the SAME linkage the sibling
+        # get_surfaced_concentration() and company_resolver use. jobs.company holds
+        # the RAW parser name while companies.name is normalized, so a name-join
+        # would miss ~99% of links and invert the metric (reachable -> untracked).
+        # c.id (NULL vs non-NULL) distinguishes an unlinked job from a tracked one.
         rows = conn.execute(
             """SELECT j.dedup_key, j.company, j.first_seen,
                       c.id as company_id, c.ats_platform, c.scan_enabled
                FROM jobs j
-               LEFT JOIN companies c ON j.company = c.name
+               LEFT JOIN companies c ON j.company_id = c.id
                WHERE EXISTS (
                    SELECT 1 FROM json_each(j.sources) WHERE value = 'off_platform_email'
                )"""
@@ -761,8 +765,10 @@ def get_off_platform_miss_log(conn: sqlite3.Connection, fit_floor: float | None 
         elif ats_platform is None or ats_platform not in SCANNABLE_TARGET_PLATFORMS:
             # Company tracked but ATS not scannable (NULL or unsupported platform)
             bucket = "unreachable_unsupported"
-        elif not scan_enabled:
-            # Scannable ATS but scan disabled
+        elif scan_enabled == 0:
+            # Scannable ATS but scan EXPLICITLY disabled. NULL (unknown) is NOT
+            # counted here — the schema default is enabled (m007), so a NULL falls
+            # through to 'reachable' rather than being read as a scope decision.
             bucket = "unreachable_scan_disabled"
         else:
             # Reachable (potential funnel leak)
