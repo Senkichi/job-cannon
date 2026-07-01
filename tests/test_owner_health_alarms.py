@@ -29,6 +29,7 @@ from job_finder.web.scheduler._runners import (
     _check_funnel_unexplained,
     _check_owner_idle,
     _check_score_rot,
+    _derive_degraded_keys,
     run_health_check,
 )
 
@@ -676,8 +677,22 @@ def test_check_concentration_excludes_non_surfaced():
     assert issue is not None and "30 surfaced jobs" in issue
 
 
+def test_derive_degraded_keys_maps_concentration_issue():
+    """A fired concentration alarm string routes to the stable 'concentration' signal key.
+
+    Direct unit coverage for the `_derive_degraded_keys` branch that gates whether a
+    concentration alarm escalates/notifies. Without this, the only exercise of that
+    branch is the skipped integration test below, so a regression that renamed the
+    'Concentration' issue prefix (in `_check_concentration`) would fall through to the
+    generic `source:` else-branch and silently mis-escalate with nothing failing.
+    """
+    issue = "Concentration: employer HHI 0.90 over 40 surfaced jobs (ceiling 0.60)"
+    assert _derive_degraded_keys([issue], []) == {"concentration"}
+
+
 def test_concentration_participates_in_escalation(migrated_db, events_file):
     """The concentration signal escalates under its own key after the threshold."""
-    # Skip this integration test due to complex NOT NULL constraints on migrated_db
-    # The unit tests already verify the alarm logic and key mapping
+    # Skip this integration test due to complex NOT NULL constraints on migrated_db.
+    # The issue-string → signal-key mapping is now unit-covered by
+    # test_derive_degraded_keys_maps_concentration_issue above.
     pytest.skip("Integration test requires full jobs table schema; unit tests cover the logic")
