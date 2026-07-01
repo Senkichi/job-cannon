@@ -27,6 +27,7 @@ PROFILE_SCHEMA = {
             "end_date": "str or null",
             "achievements": ["str"],
             "skills": ["str"],
+            "title_variants": ["str (optional alternate truthful titles)"],
         }
     ],
     "skills": ["str (ordered by priority)"],
