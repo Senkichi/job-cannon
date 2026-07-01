@@ -684,8 +684,7 @@ def _check_source_deadman(conn, config: dict) -> list[str]:
 
     # 2. Feed/ingestion sources: MAX(occurred_at) for ingestion actions
     row = conn.execute(
-        "SELECT MAX(occurred_at) FROM user_activity "
-        "WHERE action IN ('scheduled_sync', 'sync')"
+        "SELECT MAX(occurred_at) FROM user_activity WHERE action IN ('scheduled_sync', 'sync')"
     ).fetchone()
     if row and row[0]:
         last_ingestion = row[0]
@@ -764,7 +763,9 @@ def run_health_check(app) -> None:
                 # Window is derived from cadence_preset (default standard = 8h max gap)
                 # with a tolerance multiplier (default 2.0 = allows 2 missed cycles).
                 preset = (config.get("scheduler", {}) or {}).get("cadence_preset", "standard")
-                tolerance = float((config.get("health", {}) or {}).get("source_deadman_tolerance", 2.0))
+                tolerance = float(
+                    (config.get("health", {}) or {}).get("source_deadman_tolerance", 2.0)
+                )
                 ingestion_window_hours = expected_ingestion_window_hours(preset) * tolerance
                 row = conn.execute(
                     "SELECT MAX(occurred_at) FROM user_activity "

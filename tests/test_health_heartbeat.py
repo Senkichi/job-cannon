@@ -367,7 +367,10 @@ def test_source_deadman_disabled_when_tolerance_zero(migrated_db):
 def test_source_deadman_returns_empty_when_fresh(migrated_db):
     """Fresh timestamps in all recency classes → no issues."""
     db_path, conn = migrated_db
-    config = {"health": {"source_deadman_tolerance": 2.0}, "scheduler": {"cadence_preset": "standard"}}
+    config = {
+        "health": {"source_deadman_tolerance": 2.0},
+        "scheduler": {"cadence_preset": "standard"},
+    }
 
     # Seed fresh data (within window)
     now_iso = _utc_naive(-0.5)  # 30 minutes ago
@@ -392,7 +395,10 @@ def test_source_deadman_returns_empty_when_fresh(migrated_db):
 def test_source_deadman_fires_when_stale(migrated_db):
     """Old timestamps exceed window * tolerance → issues returned."""
     db_path, conn = migrated_db
-    config = {"health": {"source_deadman_tolerance": 2.0}, "scheduler": {"cadence_preset": "standard"}}
+    config = {
+        "health": {"source_deadman_tolerance": 2.0},
+        "scheduler": {"cadence_preset": "standard"},
+    }
 
     # Seed stale data (standard preset = 8h window, tolerance 2.0 = 16h allowed)
     # Use 20 hours ago to exceed the allowed window
