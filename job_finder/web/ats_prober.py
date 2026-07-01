@@ -1132,7 +1132,9 @@ def _probe_talentbrew(slug: str) -> bool:
         # Check for TalentBrew-specific markers to distinguish from Phenom
         text_lower = r.text.lower()
         has_talentbrew = "talentbrew" in text_lower or "radancy" in text_lower
-        has_jobs = "job" in text_lower and ("search" in text_lower or "openings" in text_lower or "opportunities" in text_lower)
+        has_jobs = "job" in text_lower and (
+            "search" in text_lower or "openings" in text_lower or "opportunities" in text_lower
+        )
 
         return has_talentbrew and has_jobs
     except Exception as e:

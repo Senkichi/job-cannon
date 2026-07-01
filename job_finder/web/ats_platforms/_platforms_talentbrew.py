@@ -18,14 +18,12 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 from urllib.parse import urljoin, urlparse
 
 import requests
 from bs4 import BeautifulSoup
 
 from job_finder.web.ats_platforms._platforms_icims import PlaywrightPlatformScanner
-from job_finder.web.ats_platforms._registry import _auth_block_statuses
 
 logger = logging.getLogger(__name__)
 

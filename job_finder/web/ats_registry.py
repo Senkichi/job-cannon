@@ -146,7 +146,9 @@ _SPECS: tuple[PlatformSpec, ...] = (
     # Phenom — Playwright scanner via sitemap, no public JSON API.
     PlatformSpec("phenom", playwright_scanner=_PHENOM_SCANNER, probe_attr="_probe_phenom"),
     # TalentBrew (by Radancy) — Playwright scanner via static HTML extraction, no public JSON API.
-    PlatformSpec("talentbrew", playwright_scanner=_TALENTBREW_SCANNER, probe_attr="_probe_talentbrew"),
+    PlatformSpec(
+        "talentbrew", playwright_scanner=_TALENTBREW_SCANNER, probe_attr="_probe_talentbrew"
+    ),
     # Registered stub with a probe but kept at 'miss' (careers_crawler owns it).
     PlatformSpec("jobvite", probe_attr="_probe_jobvite", non_scannable=True),
     # Keyword-search adapters: scanner but no slug-probe and no URL form. The

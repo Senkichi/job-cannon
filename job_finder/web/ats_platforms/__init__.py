@@ -57,8 +57,8 @@ from job_finder.web.ats_platforms._platforms_smartrecruiters import (
 from job_finder.web.ats_platforms._platforms_successfactors import (
     SCANNER as _SUCCESSFACTORS_SCANNER,
 )
-from job_finder.web.ats_platforms._platforms_teamtailor import SCANNER as _TEAMTAILOR_SCANNER
 from job_finder.web.ats_platforms._platforms_talentbrew import SCANNER as _TALENTBREW_SCANNER
+from job_finder.web.ats_platforms._platforms_teamtailor import SCANNER as _TEAMTAILOR_SCANNER
 from job_finder.web.ats_platforms._platforms_ultipro import SCANNER as _ULTIPRO_SCANNER
 from job_finder.web.ats_platforms._platforms_workable import SCANNER as _WORKABLE_SCANNER
 from job_finder.web.ats_platforms._platforms_workday import SCANNER as _WORKDAY_SCANNER
