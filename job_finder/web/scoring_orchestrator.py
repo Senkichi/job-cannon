@@ -276,8 +276,9 @@ def score_and_persist_job(
     - Persists: classification (Python-derived), sub_scores_json,
       fit_analysis (rationale payload), scoring_provider, scoring_model.
     - Returns the underlying ScoringResult (status='ok'/'skipped'/'error')
-      or None if the scorer returned nothing. Missing dedup_key rows are
-      silent no-ops (matches SQLite UPDATE-no-match semantics).
+      or None if the scorer returned nothing. Jobs missing ``dedup_key`` are
+      rejected before scoring runs (returns None) — there is no row to key
+      a persisted assessment against, so scoring would be wasted work.
     - run_id: optional correlation id from the scheduler / harness run
       wrapper. When supplied, the per-job ``score`` event emitted onto the
       ``run_events`` stream after a successful persist carries it; ad-hoc
@@ -299,6 +300,10 @@ def score_and_persist_job(
         scorer_fn = _default_scorer
 
     dedup_key = job.get("dedup_key")
+    if not dedup_key:
+        logger.warning("score_and_persist_job: missing dedup_key, skipping score+persist")
+        return None
+
     candidate_context = _resolve_candidate_context(config)
     result = scorer_fn(job, conn, config, candidate_context=candidate_context)
 
