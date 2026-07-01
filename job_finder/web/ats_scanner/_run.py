@@ -650,10 +650,24 @@ def _upsert_one_ats_api_job(
             # — is skipped silently.
             return
 
+        # Resolve the registry platform key from job_dict["company_source"]
+        # (title-cased 'Ashby'/'Lever'/'Greenhouse') for the posting sub-entity
+        # upsert (#640). Lowercase and validate against PLATFORMS; unknown
+        # sources are treated as non-ATS sightings (mint no posting).
+        from job_finder.web.ats_registry import PLATFORMS
+
+        company_source = job_dict.get("company_source", "")
+        ats_platform = None
+        if company_source:
+            platform_key = company_source.lower()
+            if platform_key in PLATFORMS:
+                ats_platform = platform_key
+
         result = upsert_job(
             scan_conn,
             parsed,
             company_id=company_id,
+            ats_platform=ats_platform,
         )
 
         # Promote ATS description to jd_full (DQ-03) — only when jd_full is NULL,
