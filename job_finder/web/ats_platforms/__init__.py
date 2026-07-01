@@ -38,6 +38,7 @@ from job_finder.web.ats_platforms._platforms_breezy import SCANNER as _BREEZY_SC
 from job_finder.web.ats_platforms._platforms_eightfold import SCANNER as _EIGHTFOLD_SCANNER
 from job_finder.web.ats_platforms._platforms_google import SCANNER as _GOOGLE_SCANNER
 from job_finder.web.ats_platforms._platforms_greenhouse import SCANNER as _GREENHOUSE_SCANNER
+from job_finder.web.ats_platforms._platforms_ibm import SCANNER as _IBM_SCANNER
 from job_finder.web.ats_platforms._platforms_icims import SCANNER as _ICIMS_SCANNER
 from job_finder.web.ats_platforms._platforms_icims import PlaywrightPlatformScanner
 from job_finder.web.ats_platforms._platforms_jazzhr import SCANNER as _JAZZHR_SCANNER
@@ -88,6 +89,7 @@ SCANNERS_BY_NAME: dict[str, PlatformScanner] = {
         _EIGHTFOLD_SCANNER,
         _GOOGLE_SCANNER,
         _GREENHOUSE_SCANNER,
+        _IBM_SCANNER,
         _JAZZHR_SCANNER,
         _JOBVITE_SCANNER,
         _LEVER_SCANNER,
@@ -354,6 +356,16 @@ def scan_successfactors(slug: str, target_titles: list[str], exclusions: list[st
     return run_platform_scan(_SUCCESSFACTORS_SCANNER, slug, target_titles, exclusions)
 
 
+def scan_ibm(slug: str, target_titles: list[str], exclusions: list[str]) -> list[dict]:
+    """Scan IBM careers API for matched postings.
+
+    API: POST https://www-api.ibm.com/search/api/v2
+    Slug is a constant ("ibm") — IBM is single-tenant. Offset pagination up to
+    _MAX_RESULTS. Description is the short blurb; jd_full is filled by enrichment.
+    """
+    return run_platform_scan(_IBM_SCANNER, slug, target_titles, exclusions)
+
+
 def scan_adp(slug: str, target_titles: list[str], exclusions: list[str]) -> list[dict]:
     """Scan ADP Workforce Now for matched postings.
 
@@ -433,6 +445,7 @@ __all__ = [
     "scan_eightfold",
     "scan_google",
     "scan_greenhouse",
+    "scan_ibm",
     "scan_jazzhr",
     "scan_jobvite",
     "scan_lever",

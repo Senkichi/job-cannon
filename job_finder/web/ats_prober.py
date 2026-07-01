@@ -326,6 +326,29 @@ def probe_single_company(
                 except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
                     _handle_scan_error(conn, company_id, company_name, str(e), now)
                     return {"status": "error", "detail": str(e)}
+            elif platform == "ibm":
+                # IBM careers API — delegate to the probe function.
+                try:
+                    if _probe_ibm(slug):
+                        conn.execute(
+                            "UPDATE companies SET ats_probe_status = 'hit' WHERE id = ?",
+                            (company_id,),
+                        )
+                        _reset_retry_state(conn, company_id, now)
+                        logger.info("probe_single_company: %s -> hit (ibm)", company_name)
+                        return {"status": "hit", "jobs_found": 0}
+                    conn.execute(
+                        """UPDATE companies
+                           SET ats_probe_status = 'miss',
+                               miss_reason = 'platform_slug_404'
+                           WHERE id = ?""",
+                        (company_id,),
+                    )
+                    conn.commit()
+                    return {"status": "miss"}
+                except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
+                    _handle_scan_error(conn, company_id, company_name, str(e), now)
+                    return {"status": "error", "detail": str(e)}
             else:
                 # B4: platform value is set but not one we know how to probe —
                 # ATS catalog drift (probably the company's platform was
@@ -650,6 +673,42 @@ def _probe_ultipro(slug: str) -> bool:
         return r.status_code == 200
     except Exception as e:
         logger.debug("_probe_ultipro('%s') failed: %s", slug, e)
+        return False
+
+
+def _probe_ibm(slug: str) -> bool:
+    """Return True if IBM careers API is live.
+
+    IBM is single-tenant — slug is ignored (constant "ibm"). POSTs the public
+    search API with a minimal payload; a 200 means the API resolves (empty
+    results still return 200).
+    """
+    url = "https://www-api.ibm.com/search/api/v2"
+    body = {
+        "appId": "careers",
+        "scopes": ["careers2"],
+        "query": {"bool": {"must": []}},
+        "size": 1,
+        "from": 0,
+        "_source": [
+            "field_text_01",
+            "title",
+            "field_keyword_05",
+            "field_keyword_08",
+            "field_keyword_19",
+        ],
+    }
+    try:
+        r = requests.post(
+            url, json=body, headers={"Content-Type": "application/json"}, timeout=_PROBE_TIMEOUT
+        )
+        if r.status_code != 200:
+            return False
+        payload = r.json()
+        hits = payload.get("hits", {}).get("hits", [])
+        return len(hits) > 0
+    except Exception as e:
+        logger.debug("_probe_ibm('%s') failed: %s", slug, e)
         return False
 
 
