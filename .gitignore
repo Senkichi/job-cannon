@@ -101,6 +101,7 @@ orchestrator-state/
 # effect (a file under a directory-level ignore cannot be re-included).
 .planning/*
 !.planning/NEXT_STEPS_ATS_COVERAGE.md
+!.planning/MARQUEE_AUDIT_FINAL_*.md
 
 # Cascade audit (phase 36/37) artifact outputs — regenerable, may contain
 # LLM cost details and per-row provider responses. JD source samples under
