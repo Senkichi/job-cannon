@@ -47,7 +47,7 @@ import re
 import sqlite3
 import time
 
-from job_finder.web.pipeline_detector._constants import ATS_DOMAINS
+from job_finder.web.ats_registry import ATS_DOMAINS
 
 logger = logging.getLogger(__name__)
 

@@ -11,9 +11,9 @@ and is thread-safe for APScheduler background jobs.
 
 import logging
 
+from job_finder.web.ats_registry import ATS_DOMAINS
 from job_finder.web.db_helpers import standalone_connection
 from job_finder.web.pipeline_detector._constants import (
-    ATS_DOMAINS,
     CONFIRMATION_KEYWORDS,
     CONFIRMATION_QUERY,
     DETECTION_TYPE_TO_STATUS,

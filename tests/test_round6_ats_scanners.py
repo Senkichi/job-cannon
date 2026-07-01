@@ -680,7 +680,8 @@ class TestNonScannablePlatformsConstant:
         assert "jobvite" in NON_SCANNABLE_PLATFORMS
 
     def test_non_scannable_platforms_subset_of_registered_scanners(self):
-        """Every entry in NON_SCANNABLE_PLATFORMS must be a registered scanner name."""
-        from job_finder.web.ats_registry import NON_SCANNABLE_PLATFORMS, SCANNERS_BY_NAME
+        """Every entry in NON_SCANNABLE_PLATFORMS must be a registered platform name.
+        Some non-scannable platforms have no scanner (domain-only entries for email matching)."""
+        from job_finder.web.ats_registry import NON_SCANNABLE_PLATFORMS, PLATFORMS
 
-        assert set(SCANNERS_BY_NAME) >= NON_SCANNABLE_PLATFORMS
+        assert set(PLATFORMS.keys()) >= NON_SCANNABLE_PLATFORMS

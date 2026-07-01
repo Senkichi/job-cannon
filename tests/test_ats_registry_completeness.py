@@ -144,7 +144,12 @@ def test_parity_scanner_registry():
 def test_non_scannable_derivation():
     # Derived from each spec's `non_scannable` flag — the registered stubs with no
     # public API. Was a hand-maintained frozenset in ats_platforms (now deleted).
-    assert frozenset({"jobvite", "google"}) == ats_registry.NON_SCANNABLE_PLATFORMS
+    # Includes jobvite/google (no public API) plus taleo/kronos/modernloop/governmentjobs
+    # (ATS domains with no scanner/probe, used only for email-sender/pipeline-signal matching).
+    assert (
+        frozenset({"jobvite", "google", "taleo", "kronos", "modernloop", "governmentjobs"})
+        == ats_registry.NON_SCANNABLE_PLATFORMS
+    )
 
 
 def test_scannable_target_platforms():

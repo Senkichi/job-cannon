@@ -25,6 +25,7 @@ import requests
 from bs4 import BeautifulSoup
 
 from job_finder.config import JD_STORAGE_MAX_CHARS
+from job_finder.web.ats_registry import REDIRECT_DOMAINS
 from job_finder.web.careers_crawler._title_filters import clean_title
 from job_finder.web.claude_client import call_claude
 from job_finder.web.http_fetch import fetch_with_deadline
@@ -83,15 +84,6 @@ _AUTH_WALL_SIGNATURES = [
     "sign in or join",
     "please verify you are a human",
     "access denied",
-]
-
-# ATS domain patterns to detect redirects (Research Pitfall 6)
-_ATS_DOMAINS = [
-    "jobs.lever.co",
-    "api.lever.co",
-    "boards.greenhouse.io",
-    "boards-api.greenhouse.io",
-    "jobs.ashbyhq.com",
 ]
 
 # Subdomains that indicate a careers site (checked after ATS exclusion)
@@ -417,7 +409,7 @@ def find_careers_url(
     # Research Pitfall 6: check final URL for ATS redirect
     final_url = resp.url
     parsed = urlparse(final_url)
-    if any(ats_domain in parsed.netloc for ats_domain in _ATS_DOMAINS):
+    if any(ats_domain in parsed.netloc for ats_domain in REDIRECT_DOMAINS):
         logger.debug(
             "find_careers_url('%s'): redirected to ATS domain '%s' — returning None",
             homepage_url,
@@ -455,7 +447,7 @@ def find_careers_url(
             refresh_url = urljoin(homepage_url, refresh_url)
             refresh_parsed = urlparse(refresh_url)
             # Check for ATS domain — don't follow
-            if any(ats in refresh_parsed.netloc for ats in _ATS_DOMAINS):
+            if any(ats in refresh_parsed.netloc for ats in REDIRECT_DOMAINS):
                 logger.debug(
                     "find_careers_url('%s'): meta-refresh to ATS domain '%s' — returning None",
                     homepage_url,
@@ -489,7 +481,7 @@ def find_careers_url(
             href_parsed = urlparse(href)
             if any(href_parsed.netloc.startswith(sub) for sub in _CAREERS_SUBDOMAINS):
                 # Verify it's not an ATS domain
-                if not any(ats in href_parsed.netloc for ats in _ATS_DOMAINS):
+                if not any(ats in href_parsed.netloc for ats in REDIRECT_DOMAINS):
                     logger.debug(
                         "find_careers_url('%s'): found link to careers subdomain '%s'",
                         homepage_url,
@@ -541,7 +533,7 @@ def find_careers_url(
                 if probe.status_code >= 400:
                     continue
                 final = urlparse(probe.url)
-                if any(ats in final.netloc for ats in _ATS_DOMAINS):
+                if any(ats in final.netloc for ats in REDIRECT_DOMAINS):
                     continue
                 # Validate final URL still looks like a careers page —
                 # reject if redirect bounced back to main site
