@@ -258,9 +258,7 @@ def _try_static_first_fallthrough(
             )
             # Compute reenable_scan based on company state (Fix 3)
             # Only re-enable for the m074 cohort: no known platform, prior miss
-            reenable = (
-                company["ats_platform"] is None and company["ats_probe_status"] == "miss"
-            )
+            reenable = company["ats_platform"] is None and company["ats_probe_status"] == "miss"
             res = promote_from_careers_link(
                 conn,
                 company_id,
