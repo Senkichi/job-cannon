@@ -282,8 +282,10 @@ def get_crawl_latency_sli(conn: sqlite3.Connection, config: dict) -> dict:
             cold_start_exclude_days (int): the cold-start window used
         Returns zeroed dict (no crash) on pre-m095 DBs (missing posted_date_precision column).
     """
-    cold_start_days = config.get("metrics", {}).get("crawl_latency", {}).get(
-        "cold_start_exclude_days", _DEFAULT_COLD_START_EXCLUDE_DAYS
+    cold_start_days = (
+        config.get("metrics", {})
+        .get("crawl_latency", {})
+        .get("cold_start_exclude_days", _DEFAULT_COLD_START_EXCLUDE_DAYS)
     )
 
     try:
@@ -322,9 +324,7 @@ def get_crawl_latency_sli(conn: sqlite3.Connection, config: dict) -> dict:
             p95_days = latencies[p95_idx]
             p99_days = latencies[p99_idx]
 
-        exact_coverage_pct = (
-            round(100 * qualifying / total_dated, 1) if total_dated else 0.0
-        )
+        exact_coverage_pct = round(100 * qualifying / total_dated, 1) if total_dated else 0.0
 
         return {
             "p50_days": p50_days,

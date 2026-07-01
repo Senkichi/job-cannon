@@ -2,8 +2,6 @@
 
 import sqlite3
 
-import pytest
-
 from job_finder.db import get_crawl_latency_sli
 
 
@@ -18,11 +16,61 @@ def test_p50_p95_p99_from_known_ladder(migrated_db):
             (dedup_key, title, company, location, first_seen, last_seen, posted_date, posted_date_precision, sources)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         [
-            ("job1", "Job 1", "Co1", "Remote", "2026-01-02", "2026-01-02", "2026-01-01", "exact", '["ats"]'),
-            ("job2", "Job 2", "Co2", "Remote", "2026-01-02", "2026-01-02", "2026-01-01", "exact", '["ats"]'),
-            ("job3", "Job 3", "Co3", "Remote", "2026-01-03", "2026-01-03", "2026-01-01", "exact", '["ats"]'),
-            ("job4", "Job 4", "Co4", "Remote", "2026-01-06", "2026-01-06", "2026-01-01", "exact", '["ats"]'),
-            ("job5", "Job 5", "Co5", "Remote", "2026-01-11", "2026-01-11", "2026-01-01", "exact", '["ats"]'),
+            (
+                "job1",
+                "Job 1",
+                "Co1",
+                "Remote",
+                "2026-01-02",
+                "2026-01-02",
+                "2026-01-01",
+                "exact",
+                '["ats"]',
+            ),
+            (
+                "job2",
+                "Job 2",
+                "Co2",
+                "Remote",
+                "2026-01-02",
+                "2026-01-02",
+                "2026-01-01",
+                "exact",
+                '["ats"]',
+            ),
+            (
+                "job3",
+                "Job 3",
+                "Co3",
+                "Remote",
+                "2026-01-03",
+                "2026-01-03",
+                "2026-01-01",
+                "exact",
+                '["ats"]',
+            ),
+            (
+                "job4",
+                "Job 4",
+                "Co4",
+                "Remote",
+                "2026-01-06",
+                "2026-01-06",
+                "2026-01-01",
+                "exact",
+                '["ats"]',
+            ),
+            (
+                "job5",
+                "Job 5",
+                "Co5",
+                "Remote",
+                "2026-01-11",
+                "2026-01-11",
+                "2026-01-01",
+                "exact",
+                '["ats"]',
+            ),
         ],
     )
     conn.commit()
@@ -50,8 +98,28 @@ def test_copy_row_excluded(migrated_db):
             (dedup_key, title, company, location, first_seen, last_seen, posted_date, posted_date_precision, sources)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         [
-            ("copy", "Copy", "Co1", "Remote", "2026-01-01", "2026-01-01", "2026-01-01", "exact", '["ats"]'),
-            ("real", "Real", "Co2", "Remote", "2026-01-02", "2026-01-02", "2026-01-01", "exact", '["ats"]'),
+            (
+                "copy",
+                "Copy",
+                "Co1",
+                "Remote",
+                "2026-01-01",
+                "2026-01-01",
+                "2026-01-01",
+                "exact",
+                '["ats"]',
+            ),
+            (
+                "real",
+                "Real",
+                "Co2",
+                "Remote",
+                "2026-01-02",
+                "2026-01-02",
+                "2026-01-01",
+                "exact",
+                '["ats"]',
+            ),
         ],
     )
     conn.commit()
@@ -76,10 +144,50 @@ def test_proxy_and_approximate_excluded_from_headline(migrated_db):
             (dedup_key, title, company, location, first_seen, last_seen, posted_date, posted_date_precision, sources)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         [
-            ("exact1", "Exact 1", "Co1", "Remote", "2026-01-02", "2026-01-02", "2026-01-01", "exact", '["ats"]'),
-            ("exact2", "Exact 2", "Co2", "Remote", "2026-01-03", "2026-01-03", "2026-01-01", "exact", '["ats"]'),
-            ("proxy", "Proxy", "Co3", "Remote", "2026-01-02", "2026-01-02", "2026-01-01", "proxy", '["linkedin"]'),
-            ("approx", "Approx", "Co4", "Remote", "2026-01-02", "2026-01-02", "2026-01-01", "approximate", '["indeed"]'),
+            (
+                "exact1",
+                "Exact 1",
+                "Co1",
+                "Remote",
+                "2026-01-02",
+                "2026-01-02",
+                "2026-01-01",
+                "exact",
+                '["ats"]',
+            ),
+            (
+                "exact2",
+                "Exact 2",
+                "Co2",
+                "Remote",
+                "2026-01-03",
+                "2026-01-03",
+                "2026-01-01",
+                "exact",
+                '["ats"]',
+            ),
+            (
+                "proxy",
+                "Proxy",
+                "Co3",
+                "Remote",
+                "2026-01-02",
+                "2026-01-02",
+                "2026-01-01",
+                "proxy",
+                '["linkedin"]',
+            ),
+            (
+                "approx",
+                "Approx",
+                "Co4",
+                "Remote",
+                "2026-01-02",
+                "2026-01-02",
+                "2026-01-01",
+                "approximate",
+                '["indeed"]',
+            ),
         ],
     )
     conn.commit()
@@ -104,8 +212,28 @@ def test_cold_start_backlog_excluded(migrated_db):
             (dedup_key, title, company, location, first_seen, last_seen, posted_date, posted_date_precision, sources)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         [
-            ("normal", "Normal", "Co1", "Remote", "2026-01-02", "2026-01-02", "2026-01-01", "exact", '["ats"]'),
-            ("backlog", "Backlog", "Co2", "Remote", "2026-04-01", "2026-04-01", "2026-01-01", "exact", '["ats"]'),
+            (
+                "normal",
+                "Normal",
+                "Co1",
+                "Remote",
+                "2026-01-02",
+                "2026-01-02",
+                "2026-01-01",
+                "exact",
+                '["ats"]',
+            ),
+            (
+                "backlog",
+                "Backlog",
+                "Co2",
+                "Remote",
+                "2026-04-01",
+                "2026-04-01",
+                "2026-01-01",
+                "exact",
+                '["ats"]',
+            ),
         ],
     )
     conn.commit()
@@ -133,8 +261,28 @@ def test_negative_latency_excluded(migrated_db):
             (dedup_key, title, company, location, first_seen, last_seen, posted_date, posted_date_precision, sources)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         [
-            ("normal", "Normal", "Co1", "Remote", "2026-01-02", "2026-01-02", "2026-01-01", "exact", '["ats"]'),
-            ("skew", "Skew", "Co2", "Remote", "2026-01-01", "2026-01-01", "2026-01-02", "exact", '["ats"]'),
+            (
+                "normal",
+                "Normal",
+                "Co1",
+                "Remote",
+                "2026-01-02",
+                "2026-01-02",
+                "2026-01-01",
+                "exact",
+                '["ats"]',
+            ),
+            (
+                "skew",
+                "Skew",
+                "Co2",
+                "Remote",
+                "2026-01-01",
+                "2026-01-01",
+                "2026-01-02",
+                "exact",
+                '["ats"]',
+            ),
         ],
     )
     conn.commit()
