@@ -4,7 +4,7 @@ import logging
 
 from flask import Blueprint, current_app, render_template
 
-from job_finder.config import DEFAULT_DAILY_BUDGET_USD
+from job_finder.config import DEFAULT_DAILY_BUDGET_USD, get_fit_floor
 from job_finder.db import (
     get_dashboard_stats,
     get_liveness_stats,
@@ -71,7 +71,7 @@ def _get_stats_context(conn, config):
     pending_count = stats.get("pending_detections", 0)
     ats_ctx = _get_ats_context(conn)
     liveness_stats = get_liveness_stats(conn, config)
-    off_platform_miss_log = get_off_platform_miss_log(conn)
+    off_platform_miss_log = get_off_platform_miss_log(conn, get_fit_floor(config))
     # TODO(M6 follow-up): per-case HTMX-expandable dashboard card listing each reachable miss
     # with its attributed discovery stage
     return {

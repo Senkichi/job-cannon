@@ -210,28 +210,61 @@ def test_non_off_platform_jobs_excluded(conn: sqlite3.Connection):
     assert len(result["cases"]) == 0
 
 
-def test_fit_floor_optional(conn: sqlite3.Connection, monkeypatch: pytest.MonkeyPatch):
-    """Function returns the four core buckets when M1's predicate is patched absent."""
+def _make_target_member(
+    conn: sqlite3.Connection,
+    dedup_key: str,
+    mean_score: int = 4,
+    classification: str = "apply",
+) -> None:
+    """Promote a seeded job to a scored target-set member: all six sub-scores set to
+    ``mean_score`` (so the mean is exactly mean_score) with a non-hard-negative band."""
+    subs = (
+        f'{{"title_fit":{mean_score},"location_fit":{mean_score},"comp_fit":{mean_score},'
+        f'"domain_match":{mean_score},"seniority_match":{mean_score},"skills_match":{mean_score}}}'
+    )
+    conn.execute(
+        "UPDATE jobs SET sub_scores_json = ?, classification = ?, scoring_model = 'qwen2.5:14b' "
+        "WHERE dedup_key = ?",
+        (subs, classification, dedup_key),
+    )
 
-    # Mock get_fit_floor to raise ImportError (simulating M1 not available)
-    def mock_get_fit_floor():
-        raise ImportError("M1 not available")
 
-    monkeypatch.setattr("job_finder.config.get_fit_floor", mock_get_fit_floor)
-
+def test_fit_floor_none_when_not_supplied(conn: sqlite3.Connection):
+    """reachable_above_fit_floor is None when the caller passes no fit_floor — the field
+    degrades to None rather than silently reporting a wrong count. The four core buckets
+    are still computed."""
     _seed_company(conn, "Acme Corp", "greenhouse", scan_enabled=1)
     _seed_off_platform_stub(conn, "Acme Corp", "acme-corp|off-platform|1000")
 
-    result = get_off_platform_miss_log(conn)
+    result = get_off_platform_miss_log(conn)  # no fit_floor supplied
 
-    # Core buckets should still be computed
     assert result["total"] == 1
     assert result["reachable"] == 1
-    assert result["unreachable_untracked"] == 0
-    assert result["unreachable_unsupported"] == 0
-    assert result["unreachable_scan_disabled"] == 0
-    # Fit-floor sub-count should be None when unavailable
     assert result["reachable_above_fit_floor"] is None
+
+
+def test_fit_floor_counts_reachable_target_members(conn: sqlite3.Connection):
+    """When fit_floor IS supplied, reachable_above_fit_floor counts only the reachable
+    misses that are target-set members (scored, mean >= floor, not a hard negative).
+
+    Regression guard: the original impl called get_fit_floor() with no args (its real
+    signature requires `config`), silently TypeError'd inside a broad except, and left
+    this field permanently None — a dead sub-feature that the old test pinned as None.
+    """
+    # Reachable AND a target-set member (mean 4.0 >= 3.5).
+    _seed_company(conn, "Acme Corp", "greenhouse", scan_enabled=1)
+    _seed_off_platform_stub(conn, "Acme Corp", "acme-corp|off-platform|1000")
+    _make_target_member(conn, "acme-corp|off-platform|1000", mean_score=4)
+
+    # Reachable but BELOW the fit-floor (mean 2.0) — must NOT be counted.
+    _seed_company(conn, "Beta Corp", "lever", scan_enabled=1)
+    _seed_off_platform_stub(conn, "Beta Corp", "beta-corp|off-platform|1000")
+    _make_target_member(conn, "beta-corp|off-platform|1000", mean_score=2)
+
+    result = get_off_platform_miss_log(conn, fit_floor=3.5)
+
+    assert result["reachable"] == 2  # both companies are scannable → reachable
+    assert result["reachable_above_fit_floor"] == 1  # but only Acme clears the fit-floor
 
 
 def test_missing_companies_table_degrades(conn: sqlite3.Connection):

@@ -672,7 +672,7 @@ def get_surfaced_concentration(conn: sqlite3.Connection) -> dict:
     }
 
 
-def get_off_platform_miss_log(conn: sqlite3.Connection) -> dict:
+def get_off_platform_miss_log(conn: sqlite3.Connection, fit_floor: float | None = None) -> dict:
     """Return off-platform miss log with reachability classification.
 
     Jobs where the JSON sources array contains 'off_platform_email' are
@@ -687,6 +687,10 @@ def get_off_platform_miss_log(conn: sqlite3.Connection) -> dict:
 
     Args:
         conn: Open sqlite3 connection.
+        fit_floor: Mean sub-score threshold for target-set membership. When supplied,
+            `reachable_above_fit_floor` is populated; when None (caller has no config),
+            that field stays None. Caller-supplied per module convention
+            (see get_target_set_size), never fetched internally.
 
     Returns:
         dict with keys:
@@ -695,7 +699,8 @@ def get_off_platform_miss_log(conn: sqlite3.Connection) -> dict:
             unreachable_untracked (int): company not tracked
             unreachable_unsupported (int): ATS not scannable
             unreachable_scan_disabled (int): scan disabled for scannable ATS
-            reachable_above_fit_floor (int | None): reachable misses above fit-floor (if M1 available)
+            reachable_above_fit_floor (int | None): reachable misses that are target-set
+                members (None when fit_floor not supplied)
             cases (list[dict]): per-case details with dedup_key, company, ats_platform,
                                 scan_enabled, bucket, first_seen
         Returns zeroed dict on pre-migration (missing companies table).
@@ -777,26 +782,22 @@ def get_off_platform_miss_log(conn: sqlite3.Connection) -> dict:
 
     total = sum(buckets.values())
 
-    # Optional: count reachable misses above fit-floor (depends on M1)
+    # Optional: of the reachable misses, how many are actual target-set members
+    # (scored, mean sub-score >= fit_floor, not a hard negative) — i.e. reachable
+    # misses that are REAL discovery bugs worth acting on, not just noise. The caller
+    # supplies fit_floor (module convention: see get_target_set_size); it stays None
+    # when the caller has no config, so the field degrades to None rather than lying.
     reachable_above_fit_floor = None
-    try:
-        from job_finder.config import get_fit_floor
-
-        fit_floor = get_fit_floor()
-        if fit_floor is not None:
-            # Count reachable misses that are target-set members
-            reachable_dedup_keys = [c["dedup_key"] for c in cases if c["bucket"] == "reachable"]
-            if reachable_dedup_keys:
-                placeholders = ",".join(["?"] * len(reachable_dedup_keys))
-                where_clause = target_membership_sql(fit_floor)
-                row = conn.execute(
-                    f"SELECT COUNT(*) FROM jobs WHERE dedup_key IN ({placeholders}) AND {where_clause}",
-                    reachable_dedup_keys,
-                ).fetchone()
-                reachable_above_fit_floor = row[0] if row else 0
-    except Exception:
-        # Fit-floor predicate unavailable (M1 not merged or config missing)
-        pass
+    if fit_floor is not None:
+        reachable_dedup_keys = [c["dedup_key"] for c in cases if c["bucket"] == "reachable"]
+        if reachable_dedup_keys:
+            placeholders = ",".join(["?"] * len(reachable_dedup_keys))
+            where_clause = target_membership_sql(fit_floor)
+            row = conn.execute(
+                f"SELECT COUNT(*) FROM jobs WHERE dedup_key IN ({placeholders}) AND {where_clause}",
+                reachable_dedup_keys,
+            ).fetchone()
+            reachable_above_fit_floor = row[0] if row else 0
 
     return {
         "total": total,
