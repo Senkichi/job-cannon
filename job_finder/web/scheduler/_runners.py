@@ -143,6 +143,7 @@ def _derive_degraded_keys(issues: list[str], degraded_sources: list[str]) -> set
       - ``db``         <- "Health check DB error: ..."
       - ``owner_idle`` <- "Owner idle: ..."
       - ``score_rot``  <- "Score rot: ..."
+      - ``funnel_unexplained`` <- "Funnel unexplained: ..." (issue #587)
       - ``source:<name>`` <- signal-3 "<action>: <n> failures in 24h" rows and
         every ``source_health.status='degraded'`` source (C2-4).
     """
@@ -154,6 +155,8 @@ def _derive_degraded_keys(issues: list[str], degraded_sources: list[str]) -> set
             keys.add("owner_idle")
         elif issue.startswith("Score rot"):
             keys.add("score_rot")
+        elif issue.startswith("Funnel unexplained"):
+            keys.add("funnel_unexplained")
         elif issue.startswith("Stale detection missed"):
             keys.add("staleness")
         elif issue.startswith("OAuth token invalid"):
@@ -393,6 +396,46 @@ def _check_score_rot(conn, config: dict) -> str | None:
     return f"Score rot: {drift}/{audited} stored verdicts ({frac:.1%}) differ from today's rule"
 
 
+def _check_funnel_unexplained(conn, config: dict) -> str | None:
+    """Funnel unexplained-drop alarm -- issue #587 reconciliation identity.
+
+    Reads the most recent ingestion run's persisted funnel metadata and checks
+    whether the unexplained drop count exceeds ``health.funnel_unexplained_max``
+    (default 0; ``< 0`` disables). The unexplained count is the self-auditing
+    invariant: jobs_in must equal jobs_passed + sum(drop_buckets) + jobs_errored.
+    Any non-zero value indicates a silent-drop bug (a code path that discards a
+    row without incrementing a counter). Read-only; returns an issue string or None.
+    """
+    import json
+
+    max_unexplained = int((config.get("health", {}) or {}).get("funnel_unexplained_max", 0))
+    if max_unexplained < 0:
+        return None
+
+    # Read the most recent ingestion run with funnel metadata
+    row = conn.execute(
+        "SELECT metadata FROM runs WHERE source = 'ingestion' AND metadata IS NOT NULL "
+        "ORDER BY timestamp DESC LIMIT 1"
+    ).fetchone()
+
+    if not row:
+        return None
+
+    try:
+        funnel = json.loads(row[0])
+        if not isinstance(funnel, dict):
+            return None
+        unexplained = funnel.get("unexplained", 0)
+        if unexplained is None or not isinstance(unexplained, int):
+            return None
+        if unexplained > max_unexplained:
+            return f"Funnel unexplained: {unexplained} rows in last ingestion run"
+    except (ValueError, TypeError, json.JSONDecodeError):
+        return None
+
+    return None
+
+
 def run_health_check(app) -> None:
     """Daily health heartbeat -- verify key subsystems ran recently.
 
@@ -483,6 +526,12 @@ def run_health_check(app) -> None:
                 score_rot = _check_score_rot(conn, config)
                 if score_rot:
                     issues.append(score_rot)
+
+                # 7. Funnel unexplained-drop: silent-drop bug detection (issue #587).
+                #    Read-only, checks persisted funnel metadata from last ingestion.
+                funnel_unexplained = _check_funnel_unexplained(conn, config)
+                if funnel_unexplained:
+                    issues.append(funnel_unexplained)
 
         except Exception as e:
             issues.append(f"Health check DB error: {e}")

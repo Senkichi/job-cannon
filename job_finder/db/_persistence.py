@@ -14,6 +14,7 @@ Re-exported via `job_finder.db.__init__` so existing
 
 from __future__ import annotations
 
+import json
 import logging
 import sqlite3
 import time
@@ -29,7 +30,14 @@ from ._assessment_writer import persist_job_assessment as persist_job_assessment
 _log = logging.getLogger(__name__)
 
 
-def log_run(conn: sqlite3.Connection, source: str, fetched: int, new: int, scored: int) -> None:
+def log_run(
+    conn: sqlite3.Connection,
+    source: str,
+    fetched: int,
+    new: int,
+    scored: int,
+    metadata: dict | None = None,
+) -> None:
     """Log a pipeline run for auditing.
 
     Args:
@@ -38,10 +46,12 @@ def log_run(conn: sqlite3.Connection, source: str, fetched: int, new: int, score
         fetched: Number of jobs fetched.
         new: Number of new jobs inserted.
         scored: Number of jobs scored.
+        metadata: Optional dict for funnel reconciliation identity (issue #587).
     """
+    metadata_json = json.dumps(metadata) if metadata else "{}"
     conn.execute(
-        "INSERT INTO runs (timestamp, source, jobs_fetched, jobs_new, jobs_scored) VALUES (?, ?, ?, ?, ?)",
-        (utc_now_iso(), source, fetched, new, scored),
+        "INSERT INTO runs (timestamp, source, jobs_fetched, jobs_new, jobs_scored, metadata) VALUES (?, ?, ?, ?, ?, ?)",
+        (utc_now_iso(), source, fetched, new, scored, metadata_json),
     )
     conn.commit()
 

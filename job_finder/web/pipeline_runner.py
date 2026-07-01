@@ -14,6 +14,7 @@ in the APScheduler background thread -- it must NOT share a connection with
 the Flask request thread.
 """
 
+import json
 import logging
 from datetime import datetime
 
@@ -53,6 +54,7 @@ from job_finder.web.ingestion_runner import (  # noqa: F401
     _submit_dataforseo_tasks,
     _upsert_job_company,
     _user_identifiers,
+    is_scannable_output,
 )
 
 logger = logging.getLogger(__name__)
@@ -144,6 +146,22 @@ def run_ingestion(
         "classified_skip": 0,
         "classified_reject": 0,
         "duration_seconds": 0.0,
+        # Issue #587: funnel reconciliation identity
+        "funnel": {
+            "jobs_in": 0,
+            "jobs_passed": 0,
+            "jobs_errored": 0,
+            "drop_buckets": {
+                "no_jd_full": 0,
+                "title_gate": 0,
+                "location_gate": 0,
+                "dedup": 0,
+                "denylist": 0,
+                "listing_tile": 0,
+                "parse_empty": 0,
+            },
+            "funnel_by_platform": {},
+        },
     }
     new_job_keys: list[str] = []
 
@@ -182,8 +200,15 @@ def run_ingestion(
         # --- Combine all jobs ---
         all_jobs = imap_jobs + gmail_jobs + serpapi_jobs + portal_jobs + dataforseo_jobs
 
+        # --- Issue #587: Filter by is_scannable_output and count parse_empty ---
+        scannable_jobs = [j for j in all_jobs if is_scannable_output(j)]
+        parse_empty_count = len(all_jobs) - len(scannable_jobs)
+        if parse_empty_count > 0:
+            summary["funnel"]["drop_buckets"]["parse_empty"] = parse_empty_count
+        summary["funnel"]["jobs_in"] = len(scannable_jobs)
+
         # --- Score and persist each job (per-job error isolation) ---
-        for job in all_jobs:
+        for job in scannable_jobs:
             _score_and_persist(job, scorer, runner_conn, summary, new_job_keys)
 
         # --- Log run totals to runs table ---
@@ -264,6 +289,42 @@ def run_ingestion(
     # a heal failure must never break ingestion. Piggybacks this detection pass;
     # no scheduler job.
     _run_heal_pass(db_path, config, summary["degraded_sources"])
+
+    # --- Issue #587: Compute funnel reconciliation identity ---
+    funnel = summary["funnel"]
+    jobs_in = funnel["jobs_in"]
+    jobs_passed = funnel["jobs_passed"]
+    jobs_errored = funnel["jobs_errored"]
+    drop_buckets = funnel["drop_buckets"]
+    total_dropped = sum(drop_buckets.values())
+    unexplained = jobs_in - (jobs_passed + total_dropped + jobs_errored)
+    funnel["unexplained"] = unexplained
+
+    # --- Issue #587: Persist funnel dict via log_run for heartbeat to read ---
+    try:
+        with standalone_connection(db_path) as funnel_conn:
+            log_run(
+                funnel_conn,
+                "ingestion",
+                jobs_in,
+                summary["jobs_new"],
+                summary["jobs_scored"],
+                metadata=funnel,
+            )
+    except Exception as e:
+        logger.warning("Failed to log funnel metadata: %s", e)
+
+    # --- Issue #587: Emit structured log line with full identity ---
+    log_level = logger.warning if unexplained != 0 else logger.info
+    log_level(
+        "Funnel identity: in=%d, passed=%d, errored=%d, drops=%s, unexplained=%d, by_platform=%s",
+        jobs_in,
+        jobs_passed,
+        jobs_errored,
+        drop_buckets,
+        unexplained,
+        json.dumps(funnel["funnel_by_platform"], sort_keys=True),
+    )
 
     total_fetched = (
         summary["gmail_fetched"]
