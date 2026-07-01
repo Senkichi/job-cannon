@@ -48,6 +48,7 @@ FIXTURES_BY_SENDER = {
         "monster_3.eml",
         "monster_4.eml",
     ],
+    "noreply@jobright.ai": ["jobright.eml"],
 }
 
 

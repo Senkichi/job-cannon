@@ -1,0 +1,57 @@
+From: JobRight <noreply@jobright.ai>
+Subject: Your top job matches for July 1
+Date: Tue, 01 Jul 2026 14:30:00 +0000
+Message-ID: <digest-20260701@jobright.ai>
+MIME-Version: 1.0
+Content-Type: text/html; charset="UTF-8"
+Content-Transfer-Encoding: 7bit
+X-Job-Cannon-Fixture: synthetic-unverified
+
+<!DOCTYPE html>
+<!-- SYNTHETIC fixture: hand-authored, NOT a real JobRight capture. Structure is
+     a plausible AI-match digest modeled without a live sample. Replace with a
+     sanitized real email to harden jobright_parser.py against the live format. -->
+<html>
+  <body>
+    <p>Here are your top job matches today, ranked by fit.</p>
+    <table>
+      <tr>
+        <td class="jobcard">
+          <a href="https://jobright.ai/jobs/info/66a1f0c2e4b0a1d2c3e4f5a6"><strong>Senior Data Scientist</strong></a>
+          <table><tr>
+            <td><span class="company">Acme Corp</span></td>
+            <td><span class="location">San Francisco, CA</span></td>
+          </tr></table>
+          <div class="salary">$150,000 - $190,000 / year</div>
+          <div class="score"><span>Match score 94%</span></div>
+          <a href="https://jobright.ai/jobs/info/66a1f0c2e4b0a1d2c3e4f5a6" class="cta">View job</a>
+        </td>
+      </tr>
+      <tr>
+        <td class="jobcard">
+          <a href="https://jobright.ai/jobs/info/66a1f0c2e4b0a1d2c3e4f5b7"><strong>Machine Learning Engineer</strong></a>
+          <table><tr>
+            <td><span class="company">Globex</span></td>
+            <td><span class="location">Remote</span></td>
+          </tr></table>
+          <div class="salary">$170,000 - $210,000 / year</div>
+          <div class="score"><span>Match score 90%</span></div>
+          <a href="https://jobright.ai/jobs/info/66a1f0c2e4b0a1d2c3e4f5b7" class="cta">View job</a>
+        </td>
+      </tr>
+      <tr>
+        <td class="jobcard">
+          <a href="https://jobright.ai/jobs/info/66a1f0c2e4b0a1d2c3e4f5c8"><strong>Staff Analytics Engineer</strong></a>
+          <table><tr>
+            <td><span class="company">Initech</span></td>
+            <td><span class="location">Austin, TX</span></td>
+          </tr></table>
+          <div class="salary">$160,000 - $200,000 / year</div>
+          <div class="score"><span>Match score 88%</span></div>
+          <a href="https://jobright.ai/jobs/info/66a1f0c2e4b0a1d2c3e4f5c8" class="cta">View job</a>
+        </td>
+      </tr>
+    </table>
+    <p>Manage preferences | Unsubscribe | JobRight AI</p>
+  </body>
+</html>

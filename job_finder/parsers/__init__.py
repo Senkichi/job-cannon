@@ -10,6 +10,7 @@ from job_finder.parsers._positional_fallback import has_job_urls, positional_fal
 from job_finder.parsers.glassdoor_parser import parse_glassdoor_alert
 from job_finder.parsers.greenhouse_parser import parse_greenhouse_alert
 from job_finder.parsers.indeed_parser import parse_indeed_alert, parse_indeed_match_alert
+from job_finder.parsers.jobright_parser import parse_jobright_alert
 from job_finder.parsers.linkedin_parser import parse_linkedin_alert
 from job_finder.parsers.monster_parser import parse_monster_alert
 from job_finder.parsers.trueup_parser import parse_trueup_alert
@@ -87,6 +88,7 @@ __all__ = [
     "parse_greenhouse_alert",
     "parse_indeed_alert",
     "parse_indeed_match_alert",
+    "parse_jobright_alert",
     "parse_linkedin_alert",
     "parse_monster_alert",
     "parse_trueup_alert",
