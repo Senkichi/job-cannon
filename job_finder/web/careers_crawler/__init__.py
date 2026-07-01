@@ -72,6 +72,14 @@ from job_finder.web.careers_crawler._api_cache import (
 )
 
 # ---------------------------------------------------------------------------
+# Embedded JSON tier (Tier 2.5) — sits between URL-param and Playwright.
+# ---------------------------------------------------------------------------
+from job_finder.web.careers_crawler._embedded_json_tier import (
+    _try_embedded_json_extract,
+    _try_embedded_json_extract_from_html,
+)
+
+# ---------------------------------------------------------------------------
 # Playwright tiers (passive + active) — extracted to _playwright_tier.
 # Re-exported so test patches like
 # @patch('job_finder.web.careers_crawler._try_playwright_active') keep
@@ -92,6 +100,15 @@ from job_finder.web.careers_crawler._playwright_tier import (
 # `job_finder.web.careers_crawler._try_sitemap_extract` resolve.
 # ---------------------------------------------------------------------------
 from job_finder.web.careers_crawler._sitemap_tier import _try_sitemap_extract
+
+# ---------------------------------------------------------------------------
+# Static extraction — extracted to _static_tier. Re-exported here so
+# both internal callers (_try_cached_tier, _crawl_companies) and the
+# public surface (test patches on _try_static_extract; lazy imports of
+# _extract_jobs_from_soup from careers_page_interactions and
+# ai_career_navigator) keep resolving from
+# job_finder.web.careers_crawler.X.
+# ---------------------------------------------------------------------------
 from job_finder.web.careers_crawler._static_tier import (
     _STATIC_MIN_TEXT_LEN,
     _STATIC_TEXT_RATIO,
@@ -109,17 +126,18 @@ from job_finder.web.careers_crawler._static_tier import (
 # re-exports — the documented alternative to per-line `noqa: F401`
 # annotations on every multi-line import block.
 # Grouped by source module:
-#   _title_filters:  _CITY_SUFFIX_RE, _LOCATION_SUFFIX_RE, _NAV_PATH_PREFIXES, _clean_title
-#   _api_cache:      _cache_api_endpoint, _clear_api_cache, _try_cached_api
-#   _playwright_tier: _INTERACTION_DELAY_S, _JS_SETTLE_MS, _PLAYWRIGHT_TIMEOUT_MS,
-#                    _try_playwright_active, _try_playwright_extract
-#   _sitemap_tier:   _try_sitemap_extract                       (Stage 5)
-#   _static_tier:    _STATIC_MIN_TEXT_LEN, _STATIC_TEXT_RATIO,
-#                    _extract_jobs_from_soup, _extract_jsonld_postings, _try_static_extract
-#   _ai_nav_tier:    _try_ai_navigation
-#   _tier_cache:     _try_cached_tier
-#   _persistence:    _upsert_and_log, _update_timestamp_on_error
-#   _scoring:        _score_new_jobs
+#   _title_filters:    _CITY_SUFFIX_RE, _LOCATION_SUFFIX_RE, _NAV_PATH_PREFIXES, _clean_title
+#   _api_cache:        _cache_api_endpoint, _clear_api_cache, _try_cached_api
+#   _playwright_tier:  _INTERACTION_DELAY_S, _JS_SETTLE_MS, _PLAYWRIGHT_TIMEOUT_MS,
+#                      _try_playwright_active, _try_playwright_extract
+#   _sitemap_tier:     _try_sitemap_extract                       (Stage 5)
+#   _static_tier:      _STATIC_MIN_TEXT_LEN, _STATIC_TEXT_RATIO,
+#                      _extract_jobs_from_soup, _extract_jsonld_postings, _try_static_extract
+#   _embedded_json_tier: _try_embedded_json_extract, _try_embedded_json_extract_from_html (Tier 2.5)
+#   _ai_nav_tier:      _try_ai_navigation
+#   _tier_cache:       _try_cached_tier
+#   _persistence:      _upsert_and_log, _update_timestamp_on_error
+#   _scoring:          _score_new_jobs
 __all__ = [
     "_CITY_SUFFIX_RE",
     "_INTERACTION_DELAY_S",
@@ -138,6 +156,8 @@ __all__ = [
     "_try_ai_navigation",
     "_try_cached_api",
     "_try_cached_tier",
+    "_try_embedded_json_extract",
+    "_try_embedded_json_extract_from_html",
     "_try_playwright_active",
     "_try_playwright_extract",
     "_try_sitemap_extract",
@@ -351,7 +371,7 @@ def crawl_careers_batch(db_path: str, config: dict) -> dict:
     logger.info(
         "careers_crawler complete: %d crawled, %d found, %d new, "
         "%d playwright, %d interactive, %d api-cached, %d sitemap, "
-        "%d url-param, %d ai-navigated, %d ai-replayed, %d ats-link-promoted, "
+        "%d url-param, %d embedded-json, %d ai-navigated, %d ai-replayed, %d ats-link-promoted, "
         "%d scored (apply=%d, consider=%d, skip=%d, reject=%d)",
         summary["companies_crawled"],
         summary["jobs_found"],
@@ -361,6 +381,7 @@ def crawl_careers_batch(db_path: str, config: dict) -> dict:
         summary.get("api_cached", 0),
         summary.get("sitemap_hits", 0),
         summary.get("url_param_hits", 0),
+        summary.get("embedded_json_hits", 0),
         summary.get("ai_navigated", 0),
         summary.get("ai_replayed", 0),
         summary.get("ats_link_promoted", 0),
@@ -392,6 +413,7 @@ _SUMMARY_KEYS = [
     "api_cached",
     "url_param_hits",
     "sitemap_hits",
+    "embedded_json_hits",
     "ai_navigated",
     "ai_replayed",
     "ats_link_promoted",
@@ -611,6 +633,18 @@ def _crawl_companies(
                                         jobs = param_jobs
                                         tier_used = "url_param"
                                         local_summary["url_param_hits"] += 1
+
+                            # Tier 2.5: Embedded JSON extraction
+                            if not jobs and tier_used != "api_cached":
+                                embedded_jobs = _try_embedded_json_extract(
+                                    careers_url,
+                                    target_titles,
+                                    title_exclusions,
+                                )
+                                if embedded_jobs:
+                                    jobs = embedded_jobs
+                                    tier_used = "embedded_json"
+                                    local_summary["embedded_json_hits"] += 1
 
                             # Tier 3: Playwright active
                             if not jobs and tier_used != "api_cached":
