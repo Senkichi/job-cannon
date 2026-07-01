@@ -144,6 +144,7 @@ def _derive_degraded_keys(issues: list[str], degraded_sources: list[str]) -> set
       - ``owner_idle`` <- "Owner idle: ..."
       - ``score_rot``  <- "Score rot: ..."
       - ``funnel_unexplained`` <- "Funnel unexplained: ..." (issue #587)
+      - ``concentration`` <- "Concentration: ..." (issue #592)
       - ``source:<name>`` <- signal-3 "<action>: <n> failures in 24h" rows and
         every ``source_health.status='degraded'`` source (C2-4).
     """
@@ -157,6 +158,8 @@ def _derive_degraded_keys(issues: list[str], degraded_sources: list[str]) -> set
             keys.add("score_rot")
         elif issue.startswith("Funnel unexplained"):
             keys.add("funnel_unexplained")
+        elif issue.startswith("Concentration"):
+            keys.add("concentration")
         elif issue.startswith("Stale detection missed"):
             keys.add("staleness")
         elif issue.startswith("OAuth token invalid"):
@@ -444,6 +447,53 @@ def _check_funnel_unexplained(conn, config: dict) -> str | None:
     return None
 
 
+def _check_concentration(conn, config: dict) -> str | None:
+    """Concentration alarm -- surfaced fit-floor cohort diversity erosion (issue #592).
+
+    Computes normalized HHI for surfaced jobs (apply/consider classifications) grouped
+    by employer and by ATS platform. Fires when either grouping's normalized HHI
+    exceeds ``health.surfaced_concentration_ceiling`` (default 0.60; ``> 1`` disables)
+    AND the total surfaced jobs is at least ``health.surfaced_concentration_min_jobs``
+    (default 25) to avoid false alarms on cold-start boards. Read-only; returns an
+    issue string or None.
+    """
+    from job_finder.db._dashboard_queries import get_surfaced_concentration
+
+    ceiling = float((config.get("health", {}) or {}).get("surfaced_concentration_ceiling", 0.60))
+    min_jobs = int((config.get("health", {}) or {}).get("surfaced_concentration_min_jobs", 25))
+
+    if ceiling > 1.0:
+        return None
+
+    concentration = get_surfaced_concentration(conn)
+
+    # Check employer grouping
+    employer = concentration["by_employer"]
+    if (
+        employer["total"] >= min_jobs
+        and employer["hhi"] is not None
+        and employer["hhi"] >= ceiling
+    ):
+        return (
+            f"Concentration: employer HHI {employer['hhi']:.2f} over {employer['total']} "
+            f"surfaced jobs (ceiling {ceiling:.2f})"
+        )
+
+    # Check platform grouping
+    platform = concentration["by_platform"]
+    if (
+        platform["total"] >= min_jobs
+        and platform["hhi"] is not None
+        and platform["hhi"] >= ceiling
+    ):
+        return (
+            f"Concentration: platform HHI {platform['hhi']:.2f} over {platform['total']} "
+            f"surfaced jobs (ceiling {ceiling:.2f})"
+        )
+
+    return None
+
+
 def run_health_check(app) -> None:
     """Daily health heartbeat -- verify key subsystems ran recently.
 
@@ -540,6 +590,12 @@ def run_health_check(app) -> None:
                 funnel_unexplained = _check_funnel_unexplained(conn, config)
                 if funnel_unexplained:
                     issues.append(funnel_unexplained)
+
+                # 8. Concentration alarm: surfaced fit-floor cohort diversity erosion
+                #    (issue #592). Read-only, checks normalized HHI for employer/platform.
+                concentration = _check_concentration(conn, config)
+                if concentration:
+                    issues.append(concentration)
 
         except Exception as e:
             issues.append(f"Health check DB error: {e}")
