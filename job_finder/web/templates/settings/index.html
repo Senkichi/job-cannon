@@ -218,31 +218,6 @@
                 <span class="text-sm text-slate-300">Enabled</span>
               </label>
             </div>
-            <div>
-              <label class="block text-xs font-medium text-slate-400 mb-1">Lookback Days</label>
-              <input type="number" name="imap_lookback_days" min="1" max="365"
-                     value="{{ config.get('sources', {}).get('imap', {}).get('lookback_days', DEFAULT_LOOKBACK_DAYS) }}"
-                     class="w-32 bg-slate-900 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:border-violet-500 focus:outline-none">
-            </div>
-          </div>
-          {% set imap_senders = config.get('sources', {}).get('imap', {}).get('senders', {}) %}
-          <div class="mt-3 grid grid-cols-2 gap-3">
-            {% set sender_fields = [
-              ('linkedin_alerts', 'LinkedIn Alerts'),
-              ('linkedin_jobs', 'LinkedIn Jobs'),
-              ('glassdoor', 'Glassdoor'),
-              ('indeed', 'Indeed'),
-              ('ziprecruiter', 'ZipRecruiter'),
-              ('jobright', 'JobRight')
-            ] %}
-            {% for key, label in sender_fields %}
-            <div>
-              <label class="block text-xs font-medium text-slate-400 mb-1">{{ label }}</label>
-              <input type="email" name="imap_sender_{{ key }}"
-                     value="{{ imap_senders.get(key, '') }}"
-                     class="w-full bg-slate-900 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:border-violet-500 focus:outline-none">
-            </div>
-            {% endfor %}
           </div>
         </div>
 
@@ -307,6 +282,33 @@
                      value="{{ imap_cfg.get('folder', 'INBOX') }}"
                      class="w-full bg-slate-900 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:border-violet-500 focus:outline-none">
             </div>
+          </div>
+          <div class="grid grid-cols-2 gap-4 mt-3">
+            <div>
+              <label class="block text-xs font-medium text-slate-400 mb-1">Lookback Days</label>
+              <input type="number" name="imap_lookback_days" min="1" max="365"
+                     value="{{ imap_cfg.get('lookback_days', DEFAULT_LOOKBACK_DAYS) }}"
+                     class="w-32 bg-slate-900 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:border-violet-500 focus:outline-none">
+            </div>
+          </div>
+          {% set imap_senders = imap_cfg.get('senders', {}) %}
+          <div class="mt-3 grid grid-cols-2 gap-3">
+            {% set sender_fields = [
+              ('linkedin_alerts', 'LinkedIn Alerts'),
+              ('linkedin_jobs', 'LinkedIn Jobs'),
+              ('glassdoor', 'Glassdoor'),
+              ('indeed', 'Indeed'),
+              ('ziprecruiter', 'ZipRecruiter'),
+              ('jobright', 'JobRight')
+            ] %}
+            {% for key, label in sender_fields %}
+            <div>
+              <label class="block text-xs font-medium text-slate-400 mb-1">{{ label }}</label>
+              <input type="email" name="imap_sender_{{ key }}"
+                     value="{{ imap_senders.get(key, '') }}"
+                     class="w-full bg-slate-900 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:border-violet-500 focus:outline-none">
+            </div>
+            {% endfor %}
           </div>
         </div>
 
