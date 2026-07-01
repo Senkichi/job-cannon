@@ -303,6 +303,22 @@ class TestScoreAndPersistJob:
         assert result is not None
         assert result.status == "ok"
 
+    def test_missing_dedup_key_field_short_circuits_before_scoring(self, db_conn, base_config):
+        """A job dict with no ``dedup_key`` (or a falsy one) is rejected before
+        scoring runs — there is no row to persist an assessment against, so
+        invoking the scorer would be wasted work. Mirrors the same guard in
+        ``_apply_location_fit_override``."""
+        conn, _ = db_conn
+        mock_scorer = MagicMock()
+        result = so.score_and_persist_job(
+            {"title": "No dedup key here"},
+            conn,
+            base_config,
+            scorer_fn=mock_scorer,
+        )
+        assert result is None
+        mock_scorer.assert_not_called()
+
     def test_reject_classification_from_legitimacy_note(
         self,
         db_conn,
