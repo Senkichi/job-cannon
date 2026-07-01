@@ -20,6 +20,7 @@ from scripts.reresolve_dead_careers_urls import (
     _is_careers_page,
     _is_parked_domain,
     _process_company,
+    main,
 )
 
 
@@ -662,3 +663,57 @@ def test_adversarial_parked_domain_rejected(migrated_db):
     # Verify miss_reason set
     row = conn.execute("SELECT miss_reason FROM companies WHERE id = ?", (company_id,)).fetchone()
     assert row[0] == "careers_url_dead_unresolvable"
+
+
+def test_main_start_id_checkpoint(migrated_db):
+    """main() honors --start-id: only companies with id STRICTLY greater than
+    the checkpoint are processed; the default (0) processes every company.
+    Guards the changed SELECT (id > ? filter, param binding, arg default) —
+    a `>` -> `>=` regression or a dropped bind param fails this test.
+    """
+    path, conn = migrated_db
+
+    for name in ("Alpha Co", "Bravo Co", "Charlie Co"):
+        conn.execute(
+            """INSERT INTO companies (name, name_raw, careers_url, homepage_url, created_at, updated_at)
+               VALUES (?, ?, ?, ?, '2026-06-18T00:00:00', '2026-06-18T00:00:00')""",
+            (
+                name,
+                name,
+                f"https://{name.split()[0].lower()}.example.com/careers",
+                "https://example.com",
+            ),
+        )
+    conn.commit()
+    ids = [
+        r[0]
+        for r in conn.execute(
+            "SELECT id FROM companies WHERE careers_url IS NOT NULL AND careers_url != '' ORDER BY id"
+        ).fetchall()
+    ]
+    assert len(ids) >= 3
+
+    def _run(argv):
+        processed: list[int] = []
+
+        def _spy(conn, company_id, *args, **kwargs):
+            processed.append(company_id)
+            return {"company_id": company_id, "outcome": "already_live"}
+
+        with (
+            patch("scripts.reresolve_dead_careers_urls._process_company", side_effect=_spy),
+            patch("sys.argv", ["reresolve_dead_careers_urls.py", *argv]),
+        ):
+            assert main() == 0
+        return processed
+
+    # Default start-id (0): every company with a careers_url is processed,
+    # preserving pre-flag behavior (company ids start at 1, so id > 0 matches all).
+    assert _run(["--db", str(path)]) == ids
+
+    # Checkpoint at the second id: STRICTLY-greater filter — the checkpoint
+    # company itself is excluded, only later ids run.
+    assert _run(["--db", str(path), "--start-id", str(ids[-2])]) == [ids[-1]]
+
+    # Checkpoint at the max id: nothing left to process.
+    assert _run(["--db", str(path), "--start-id", str(ids[-1])]) == []
