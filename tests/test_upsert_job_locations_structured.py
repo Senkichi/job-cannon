@@ -476,6 +476,59 @@ def test_upsert_update_branch_upgrades_unspecified_to_hybrid_same_city(
     assert structured[0].city == "San Francisco"
 
 
+def test_upsert_update_branch_preserves_distinct_unresolved_geo_locations(
+    conn: sqlite3.Connection,
+):
+    """Regression test for issue #639 remediation-pass finding: all-None geo-key collision.
+
+    Two locations with no resolvable city/region/country (e.g. 'Remote' and an
+    unresolved 'Onsite - location TBD' segment) but different specific
+    workplace_type values must NOT collapse into one entry — they are
+    genuinely distinct postings information, not duplicates.
+    """
+    remote_unresolved = [
+        JobLocation(
+            city=None,
+            region=None,
+            region_code=None,
+            country=None,
+            country_code=None,
+            workplace_type="REMOTE",
+            raw="Remote",
+            unresolved=True,
+        )
+    ]
+    parsed_first = _make_parsed(
+        company="TestCo", title="Senior Eng", locations_structured=remote_unresolved
+    )
+    result_first = upsert_job(conn, parsed_first)
+    assert result_first.kind == "inserted"
+
+    onsite_unresolved = [
+        JobLocation(
+            city=None,
+            region=None,
+            region_code=None,
+            country=None,
+            country_code=None,
+            workplace_type="ONSITE",
+            raw="Onsite - location TBD",
+            unresolved=True,
+        )
+    ]
+    parsed_second = _make_parsed(
+        company="TestCo", title="Senior Eng", locations_structured=onsite_unresolved
+    )
+    result_second = upsert_job(conn, parsed_second)
+    assert result_second.kind == "updated"
+
+    row_second = _select_loc_cols(conn, parsed_first.dedup_key)
+    structured = locations_from_json(row_second["locations_structured"])
+    assert len(structured) == 2
+    workplace_types = {loc.workplace_type for loc in structured}
+    assert workplace_types == {"REMOTE", "ONSITE"}
+
+
 def test_upsert_update_branch_malformed_locations_structured_logs_warning(
     conn: sqlite3.Connection, caplog: pytest.LogCaptureFixture
 ):

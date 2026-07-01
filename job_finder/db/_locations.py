@@ -128,11 +128,22 @@ def merge_locations_structured(
     Returns:
         A new list — neither input is mutated (immutability).
     """
-    # Group by geographic identity (country_code, region_code, city) only.
-    # workplace_type is refinable, not part of the dedup key.
-    geo_groups: dict[tuple[str | None, str | None, str | None], list[JobLocation]] = {}
+    # Group by geographic identity (country_code, region_code, city) only —
+    # workplace_type is refinable, not part of the dedup key. Exception: when
+    # all three geo fields are unresolved (None), there is no geographic
+    # identity to upgrade in place, so fall back to the full 4-tuple key
+    # (matching dedupe_locations) — otherwise distinct unresolved-geo entries
+    # with different specific workplace_type values would silently collapse
+    # (issue #639 remediation-pass finding: all-None geo-key collision).
+    geo_groups: dict[
+        tuple[str | None, str | None, str | None] | tuple[str | None, str | None, str | None, str],
+        list[JobLocation],
+    ] = {}
     for loc in existing + incoming:
-        geo_key = (loc.country_code, loc.region_code, loc.city)
+        if loc.country_code is None and loc.region_code is None and loc.city is None:
+            geo_key = (loc.country_code, loc.region_code, loc.city, loc.workplace_type)
+        else:
+            geo_key = (loc.country_code, loc.region_code, loc.city)
         if geo_key not in geo_groups:
             geo_groups[geo_key] = []
         geo_groups[geo_key].append(loc)
