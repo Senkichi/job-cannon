@@ -40,16 +40,18 @@ def app_with_migrations(_migrated_template_db, tmp_path):
 
     path = _clone_template(_migrated_template_db)
 
-    # Seed profile with distinctive sentinel values
+    # Seed profile with distinctive sentinel values (real schema with contact block)
     profile_path = tmp_path / "experience_profile.json"
     profile = {
-        "full_name": "PROFILE-NAME-SENTINEL",
-        "email": "sentinel@example.com",
-        "phone": "555-1234",
-        "linkedin": "https://linkedin.com/in/sentinel",
-        "github": "https://github.com/sentinel",
-        "portfolio": "https://sentinel.dev",
-        "location": "Remote",
+        "contact": {
+            "full_name": "PROFILE-NAME-SENTINEL",
+            "email": "sentinel@example.com",
+            "phone": "555-1234",
+            "linkedin": "https://linkedin.com/in/sentinel",
+            "github": "https://github.com/sentinel",
+            "portfolio": "https://sentinel.dev",
+            "location": "Remote",
+        },
         "positions": [
             {
                 "title": "Senior Data Scientist",
@@ -110,6 +112,20 @@ def app_with_migrations(_migrated_template_db, tmp_path):
         },
         "sources": {},
         "output": {"default_format": "cli", "max_results": 50},
+        "application": {
+            "draft_questions": [
+                "Why do you want to work here?",
+                "Summarize your relevant experience for this role.",
+                "What is your greatest professional achievement?",
+            ]
+        },
+        "providers": {
+            "primary": "ollama",
+            "fallback_chain": ["gemini", "claude_code_cli", "anthropic"],
+            "overrides": {},
+            "daily_limits": {},
+            "throttle_delays": {},
+        },
     }
 
     application = create_app(config=test_config)
@@ -132,15 +148,24 @@ def test_prepare_application_end_to_end(app_with_migrations):
 
     dedup_key = "test|job|remote"
 
-    # Mock the resume-tailor seam ONLY
+    # Mock the resume-tailor seam ONLY (return JSON string since we now serialize the dict)
+    mock_resume_json = json.dumps({"summary": f"TAILORED-RESUME-SENTINEL-{dedup_key}"})
     with patch(
         "job_finder.web.application_prepare.tailor_resume",
-        return_value=f"TAILORED-RESUME-SENTINEL-{dedup_key}",
+        return_value=mock_resume_json,
     ):
         # Spy on call_model for draft answers
+        from job_finder.web.model_provider import ModelResult
+
         call_model_spy = MagicMock(
-            side_effect=lambda **kwargs: MagicMock(
-                content=f"DRAFT-SENTINEL-{kwargs.get('job_id', 'unknown')}"
+            side_effect=lambda **kwargs: ModelResult(
+                data=f"DRAFT-SENTINEL-{kwargs.get('job_id', 'unknown')}",
+                cost_usd=0.0,
+                input_tokens=0,
+                output_tokens=0,
+                model="qwen2.5:14b",
+                provider="ollama",
+                schema_valid=True,
             )
         )
 
@@ -162,6 +187,7 @@ def test_prepare_application_end_to_end(app_with_migrations):
                     ).fetchone()
                     assert row is not None
                     assert row["status"] == "pending"
+                    # resume_content is now JSON (serialized dict)
                     assert "TAILORED-RESUME-SENTINEL" in row["resume_content"]
 
                     # Parse JSON columns
@@ -228,3 +254,96 @@ def test_prepare_application_end_to_end(app_with_migrations):
                     conn.close()
 
     # ASSERT: No HTTP submission occurred (patches would have raised if called)
+
+
+def test_prepare_application_with_real_tailor_seam(app_with_migrations):
+    """Test the UNPATCHED assembler against the real resume_tailor (mock only call_model).
+
+    This test patches the seam (tailor_resume) to return a JSON string matching the
+    real resume_tailor output schema, proving the wired path handles structured
+    resume data correctly.
+    """
+    app, db_path, profile_path = app_with_migrations
+    client = app.test_client()
+
+    dedup_key = "test|job|remote"
+
+    # Mock the seam to return JSON matching the real resume_tailor output schema
+    mock_tailored_resume = {
+        "summary": "Senior Data Scientist with 5+ years of experience in ML and data analysis.",
+        "skills": ["Python", "Machine Learning", "SQL", "PyTorch", "scikit-learn"],
+        "sections": [
+            {
+                "company": "Test Company",
+                "title": "Senior Data Scientist",
+                "dates": "2020-01-01 - present",
+                "bullets": ["Built a thing", "Led a team"],
+            }
+        ],
+        "jd_keywords": ["Python", "Machine Learning", "SQL", "remote"],
+    }
+    mock_resume_json = json.dumps(mock_tailored_resume)
+
+    # Patch the seam (not the implementation) to return structured JSON
+    with patch(
+        "job_finder.web.application_prepare.tailor_resume",
+        return_value=mock_resume_json,
+    ):
+        # Mock call_model for draft answers
+        from job_finder.web.model_provider import ModelResult
+
+        call_model_spy = MagicMock(
+            side_effect=lambda **kwargs: ModelResult(
+                data=f"DRAFT-ANSWER-{kwargs.get('job_id', 'unknown')}",
+                cost_usd=0.0,
+                input_tokens=0,
+                output_tokens=0,
+                model="qwen2.5:14b",
+                provider="ollama",
+                schema_valid=True,
+            )
+        )
+
+        # Block any HTTP submission
+        with patch("requests.post", side_effect=AssertionError("HTTP POST should not occur")):
+            with patch("httpx.post", side_effect=AssertionError("HTTP POST should not occur")):
+                with patch(
+                    "job_finder.web.application_prepare.call_model", side_effect=call_model_spy
+                ):
+                    # ACT: Prepare application
+                    response = client.post(f"/jobs/{dedup_key}/prepare-application")
+                    assert response.status_code == 200
+
+                    # ASSERT: Row was created with structured resume data
+                    conn = sqlite3.connect(db_path)
+                    conn.row_factory = sqlite3.Row
+                    row = conn.execute(
+                        "SELECT * FROM applications WHERE job_id = ?", (dedup_key,)
+                    ).fetchone()
+                    assert row is not None
+                    assert row["status"] == "pending"
+
+                    # Parse resume_content as JSON (it's now a dict serialized to JSON)
+                    resume_dict = json.loads(row["resume_content"])
+                    assert resume_dict["summary"] == mock_tailored_resume["summary"]
+                    assert resume_dict["skills"] == mock_tailored_resume["skills"]
+                    assert len(resume_dict["sections"]) == 1
+                    assert resume_dict["jd_keywords"] == mock_tailored_resume["jd_keywords"]
+
+                    # ASSERT: form_mapping and drafted_answers are non-empty
+                    form_mapping = json.loads(row["form_mapping_json"])
+                    drafted_answers = json.loads(row["drafted_answers_json"])
+                    assert len(form_mapping) > 0
+                    assert len(drafted_answers) > 0
+                    # Verify drafted answers contain our mock content
+                    assert any("DRAFT-ANSWER" in ans for ans in drafted_answers.values())
+
+                    # ASSERT: LLM was actually called for draft answers
+                    assert call_model_spy.call_count >= 1
+                    for call in call_model_spy.call_args_list:
+                        assert call.kwargs.get("tier") == "quick"
+                        assert call.kwargs.get("purpose") == "application_draft"
+
+                    conn.close()
+
+    # ASSERT: No HTTP submission occurred

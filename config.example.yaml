@@ -403,6 +403,17 @@ ats:
     max_unique_urls_per_company: 500
     max_companies_per_promote_run: 500
 
+# --- Application package preparation (issue #599) ---
+application:
+  # Free-text questions to draft answers for during application package assembly.
+  # These are passed to the LLM with the job description and profile to generate
+  # tailored answers. Override this list in config.yaml to customize for your
+  # target roles/companies.
+  draft_questions:
+    - "Why do you want to work here?"
+    - "Summarize your relevant experience for this role."
+    - "What is your greatest professional achievement?"
+
 # --- Direct company-posting link (primary-source resolution) ---
 direct_link:
   # Apply-button precedence. A 'strict' direct_url (unambiguous title match on

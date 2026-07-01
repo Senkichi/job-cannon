@@ -19,6 +19,15 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 PROFILE_SCHEMA = {
+    "contact": {
+        "full_name": "str",
+        "email": "str",
+        "phone": "str",
+        "linkedin": "str",
+        "github": "str",
+        "portfolio": "str",
+        "location": "str",
+    },
     "positions": [
         {
             "title": "str",
@@ -38,6 +47,7 @@ PROFILE_SCHEMA = {
 # ---------------------------------------------------------------------------
 
 EMPTY_PROFILE = {
+    "contact": {},
     "positions": [],
     "skills": [],
     "education": [],

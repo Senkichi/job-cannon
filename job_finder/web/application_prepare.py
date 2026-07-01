@@ -9,27 +9,42 @@ is a single monkeypatchable seam: ``tailor_resume`` (module-level attribute).
 Tests should patch ``job_finder.web.application_prepare.tailor_resume``.
 """
 
+import json
 import logging
 import sqlite3
 
 from job_finder.web.direct_link import apply_url_for
 from job_finder.web.model_provider import call_model
 from job_finder.web.profile_schema import load_profile
+from job_finder.web.resume_tailor import tailor_resume as _real_tailor_resume
 
 logger = logging.getLogger(__name__)
 
 
-# Resume-tailor seam — patched in CI gate test until the resume-tailor PR lands.
-# The real implementation lives in job_finder.web.resume_tailor (issue #598).
 def _tailor_resume(*, conn: sqlite3.Connection, config: dict, job: dict, profile: dict) -> str:
-    """Shim: raises NotImplementedError until resume-tailor transform is available.
+    """Seam wrapper around the real resume-tailor implementation.
 
-    The CI gate test monkeypatches this module attribute to return a sentinel,
-    so the implementation path can be tested before the resume-tailor PR lands.
+    The real function (job_finder.web.resume_tailor.tailor_resume) takes positional
+    args and returns a structured dict. This wrapper adapts the call signature and
+    serializes the dict to JSON for storage/display.
+
+    Args:
+        conn: sqlite3 connection
+        config: app config dict
+        job: job dict (must have jd_full)
+        profile: experience profile dict
+
+    Returns:
+        JSON string of the tailored resume dict.
+
+    Raises:
+        ValueError: if profile has no positions/skills or job has no jd_full
+            (propagated from the real implementation).
     """
-    raise NotImplementedError(
-        "resume-tailor transform not yet available (blocked on the resume-tailor issue #598)"
-    )
+    # Real function takes positional args: (job, profile, config, conn)
+    result_dict = _real_tailor_resume(job, profile, config, conn)
+    # Serialize to JSON for storage/display
+    return json.dumps(result_dict, indent=2)
 
 
 # Module-level attribute for test monkeypatching
@@ -74,19 +89,12 @@ def _build_form_mapping(job: dict, profile: dict) -> dict:
     """
     mapping = {}
 
-    # Basic contact info from profile
-    if "full_name" in profile:
-        mapping["full_name"] = profile["full_name"]
-    if "email" in profile:
-        mapping["email"] = profile["email"]
-    if "phone" in profile:
-        mapping["phone"] = profile["phone"]
-    if "linkedin" in profile:
-        mapping["linkedin"] = profile["linkedin"]
-    if "github" in profile:
-        mapping["github"] = profile["github"]
-    if "portfolio" in profile:
-        mapping["portfolio"] = profile["portfolio"]
+    # Contact fields from profile (derived from schema)
+    contact = profile.get("contact", {})
+    contact_fields = ["full_name", "email", "phone", "linkedin", "github", "portfolio", "location"]
+    for field in contact_fields:
+        if field in contact:
+            mapping[field] = contact[field]
 
     # Experience summary
     if profile.get("positions"):
@@ -99,10 +107,6 @@ def _build_form_mapping(job: dict, profile: dict) -> dict:
     # Skills
     if "skills" in profile:
         mapping["skills"] = ", ".join(profile["skills"])
-
-    # Location
-    if "location" in profile:
-        mapping["location"] = profile["location"]
 
     # Years of experience (derived from positions)
     if profile.get("positions"):
@@ -121,15 +125,21 @@ def _draft_free_text_answers(
 ) -> dict:
     """Draft free-text answers for common application questions.
 
-    Uses call_model(tier="quick") to draft answers. The set of questions
-    may come from config/job apply metadata in the future; for now,
-    we draft answers for a fixed set of common questions.
+    Uses call_model(tier="quick") to draft answers. Questions are sourced from
+    config.application.draft_questions (defaults to a fixed set if not configured).
+
+    Returns a dict of question -> answer. All answers MUST be non-empty for a
+    successful package; if any draft fails, the caller should surface an error.
     """
-    questions = [
-        "Why do you want to work here?",
-        "Summarize your relevant experience for this role.",
-        "What is your greatest professional achievement?",
-    ]
+    # Source questions from config, with fallback to defaults
+    questions = config.get("application", {}).get(
+        "draft_questions",
+        [
+            "Why do you want to work here?",
+            "Summarize your relevant experience for this role.",
+            "What is your greatest professional achievement?",
+        ],
+    )
 
     answers = {}
     for question in questions:
@@ -159,7 +169,9 @@ def _draft_free_text_answers(
                 job_id=job.get("dedup_key"),
                 purpose="application_draft",
             )
-            answers[question] = result.content
+            # ModelResult has a `data` attribute (dict for structured output, str for text)
+            # For text responses (no output_schema), data contains the text content
+            answers[question] = result.data if isinstance(result.data, str) else str(result.data)
         except Exception as e:
             logger.warning("Failed to draft answer for %s: %s", question, e)
             answers[question] = ""

@@ -778,18 +778,39 @@ def prepare_application(dedup_key: str):
     job = get_job(conn, dedup_key)
     if job is None:
         return "", 404
-    pkg = prepare_application_package(conn, current_app.config, job)  # assemble
-    app_id = upsert_application(
-        conn,
-        dedup_key,
-        pkg["resume_content"],
-        pkg["form_mapping"],
-        pkg["drafted_answers"],
-    )
-    application = get_application(conn, app_id)
-    return render_template(
-        "jobs/_application_review.html", job=job, application=application
-    )  # 200
+    try:
+        pkg = prepare_application_package(conn, current_app.config, job)  # assemble
+
+        # Enforce non-empty contract: resume and at least one drafted answer must be non-empty
+        if not pkg["resume_content"] or pkg["resume_content"].strip() == "":
+            raise ValueError("Resume content is empty — cannot prepare application package.")
+        if not pkg["drafted_answers"] or all(
+            not ans or ans.strip() == "" for ans in pkg["drafted_answers"].values()
+        ):
+            raise ValueError(
+                "All drafted answers are empty — LLM provider may be unavailable. "
+                "Check your provider configuration and retry."
+            )
+
+        app_id = upsert_application(
+            conn,
+            dedup_key,
+            pkg["resume_content"],
+            pkg["form_mapping"],
+            pkg["drafted_answers"],
+        )
+        application = get_application(conn, app_id)
+        return render_template(
+            "jobs/_application_review.html", job=job, application=application
+        )  # 200
+    except ValueError as e:
+        # resume_tailor raises ValueError on empty profile or missing jd_full
+        # Render error fragment with 200 for HTMX outerHTML swap
+        return render_template(
+            "jobs/_application_error.html",
+            job=job,
+            error_message=str(e),
+        )  # 200
 
 
 @jobs_bp.route(
