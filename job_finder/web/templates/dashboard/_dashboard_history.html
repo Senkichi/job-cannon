@@ -1,9 +1,9 @@
-{# Dashboard history/activity block — pipeline summary + the three activity
-   tables. Rendered inline on full page load and re-fetched by the polling
-   wrapper (#dashboard-history) in index.html so these tables live-update
-   without a full reload. Context: pipeline_summary, recent_runs,
-   user_activity, pipeline_events — supplied by both dashboard.index() and
-   dashboard.history_fragment(). #}
+{# Dashboard history/activity block — pipeline summary + conversion signal +
+   the three activity tables. Rendered inline on full page load and re-fetched
+   by the polling wrapper (#dashboard-history) in index.html so these tables
+   live-update without a full reload. Context: pipeline_summary,
+   conversion_by_band, recent_runs, user_activity, pipeline_events — supplied
+   by both dashboard.index() and dashboard.history_fragment(). #}
 
   <!-- ── Pipeline Summary ── -->
   <section aria-label="Pipeline summary">
@@ -19,6 +19,53 @@
       </div>
     {% else %}
       <p class="text-slate-500 text-sm">No pipeline data yet — jobs will appear here once ingestion runs.</p>
+    {% endif %}
+  </section>
+
+  <!-- ── Conversion Signal ── -->
+  <section aria-label="Conversion signal">
+    <h2 class="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-3">Conversion Signal</h2>
+    {% if conversion_by_band %}
+      <div class="bg-slate-800 rounded-xl border border-slate-700 overflow-hidden">
+        <table class="w-full text-sm">
+          <thead>
+            <tr class="border-b border-slate-700 text-left">
+              <th class="px-4 py-3 text-slate-400 font-medium">Band</th>
+              <th class="px-4 py-3 text-slate-400 font-medium text-right">Scored</th>
+              <th class="px-4 py-3 text-slate-400 font-medium text-right">Applied</th>
+              <th class="px-4 py-3 text-slate-400 font-medium text-right">Converted</th>
+              <th class="px-4 py-3 text-slate-400 font-medium text-right">App Rate</th>
+              <th class="px-4 py-3 text-slate-400 font-medium text-right">Callback Rate</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for band, metrics in conversion_by_band.items() %}
+              <tr class="border-b border-slate-700/50 hover:bg-slate-700/30 transition-colors">
+                <td class="px-4 py-3 text-slate-200 font-medium">{{ band | replace('_', ' ') | title }}</td>
+                <td class="px-4 py-3 text-slate-300 text-right">{{ metrics.scored }}</td>
+                <td class="px-4 py-3 text-slate-300 text-right">{{ metrics.applied }}</td>
+                <td class="px-4 py-3 text-slate-300 text-right">{{ metrics.converted }}</td>
+                <td class="px-4 py-3 text-slate-300 text-right">
+                  {% if metrics.application_rate is not None %}
+                    {{ "%.1f%%" | format(metrics.application_rate * 100) }}
+                  {% else %}
+                    <span class="text-slate-500">—</span>
+                  {% endif %}
+                </td>
+                <td class="px-4 py-3 text-slate-300 text-right">
+                  {% if metrics.callback_rate is not None %}
+                    {{ "%.1f%%" | format(metrics.callback_rate * 100) }}
+                  {% else %}
+                    <span class="text-slate-500">—</span>
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <p class="text-slate-500 text-sm">No conversion data yet — metrics will appear once jobs are scored and applied to.</p>
     {% endif %}
   </section>
 

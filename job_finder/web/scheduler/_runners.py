@@ -494,6 +494,70 @@ def _check_concentration(conn, config: dict) -> str | None:
     return None
 
 
+def _check_conversion_signal(conn, config: dict) -> str | None:
+    """Conversion-signal alarm -- does the fit-grade predict outcomes?
+
+    Reads per-band application- and callback-rate (from compute_conversion_by_band)
+    and flags when the apply/consider bands' callback rate is NOT higher than
+    the skip/reject bands' -- i.e. the grade is failing to predict real outcomes.
+    Gated on config["health"]["conversion_min_applied"] (default 10; <= 0 disables).
+    Read-only; returns an issue string or None.
+    """
+    from job_finder.db import compute_conversion_by_band
+
+    min_applied = int((config.get("health", {}) or {}).get("conversion_min_applied", 10))
+    if min_applied <= 0:
+        return None
+
+    try:
+        by_band = compute_conversion_by_band(conn)
+    except Exception:
+        # Defensive: any error in the read-only computation should not break the heartbeat
+        return None
+
+    # Check if we have enough data in the apply/consider bands
+    high_fit_bands = ["apply", "consider"]
+    low_fit_bands = ["skip", "reject"]
+
+    high_fit_applied = sum(by_band[band]["applied"] for band in high_fit_bands)
+    low_fit_applied = sum(by_band[band]["applied"] for band in low_fit_bands)
+
+    if high_fit_applied < min_applied:
+        return None  # Not enough data to be meaningful
+
+    # Compute average callback rates
+    high_fit_callback_sum = 0.0
+    high_fit_callback_count = 0
+    for band in high_fit_bands:
+        rate = by_band[band]["callback_rate"]
+        if rate is not None:
+            high_fit_callback_sum += rate
+            high_fit_callback_count += 1
+
+    low_fit_callback_sum = 0.0
+    low_fit_callback_count = 0
+    for band in low_fit_bands:
+        rate = by_band[band]["callback_rate"]
+        if rate is not None:
+            low_fit_callback_sum += rate
+            low_fit_callback_count += 1
+
+    if high_fit_callback_count == 0 or low_fit_callback_count == 0:
+        return None  # Not enough callback data
+
+    high_fit_avg = high_fit_callback_sum / high_fit_callback_count
+    low_fit_avg = low_fit_callback_sum / low_fit_callback_count
+
+    # Fire alarm if high-fit callback rate is not higher than low-fit
+    if high_fit_avg <= low_fit_avg:
+        return (
+            f"Conversion signal degraded: high-fit callback rate ({high_fit_avg:.1%}) "
+            f"not higher than low-fit ({low_fit_avg:.1%})"
+        )
+
+    return None
+
+
 def run_health_check(app) -> None:
     """Daily health heartbeat -- verify key subsystems ran recently.
 
@@ -596,6 +660,12 @@ def run_health_check(app) -> None:
                 concentration = _check_concentration(conn, config)
                 if concentration:
                     issues.append(concentration)
+
+                # 9. Conversion-signal: does the fit-grade predict real outcomes?
+                #    Read-only, checks per-band application- and callback-rate.
+                conversion = _check_conversion_signal(conn, config)
+                if conversion:
+                    issues.append(conversion)
 
         except Exception as e:
             issues.append(f"Health check DB error: {e}")
