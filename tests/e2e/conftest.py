@@ -18,15 +18,25 @@ from playwright.sync_api import Page  # noqa: F401 — triggers browser_e2e dete
 from job_finder.web import create_app
 from job_finder.web.db_migrate import run_migrations
 
-E2E_PORT = 5001
+
+def _reserve_ephemeral_port() -> int:
+    """Ask the OS for a free port and immediately release it.
+
+    Racy in theory (another process could grab it before Flask binds), but
+    avoids the fixed-port collision that made concurrent xdist workers (each
+    spinning up their own session-scoped Flask) fight over the same port.
+    """
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        return sock.getsockname()[1]
 
 
 def _wait_for_port(port: int, timeout: float = 10.0) -> None:
-    """Block until localhost:port accepts connections."""
+    """Block until 127.0.0.1:port accepts connections."""
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         try:
-            conn = socket.create_connection(("localhost", port), timeout=1)
+            conn = socket.create_connection(("127.0.0.1", port), timeout=1)
             conn.close()
             return
         except (ConnectionRefusedError, OSError):
@@ -175,7 +185,8 @@ def e2e_db_path():
 
 @pytest.fixture(scope="session")
 def live_server(e2e_db_path):
-    """Start Flask in a background thread on port 5001 for the test session."""
+    """Start Flask in a background thread on an ephemeral port for the test session."""
+    port = _reserve_ephemeral_port()
     test_config = {
         "db": {"path": e2e_db_path},
         "scoring": {
@@ -202,13 +213,13 @@ def live_server(e2e_db_path):
 
     server_thread = threading.Thread(
         target=app.run,
-        kwargs={"port": E2E_PORT, "use_reloader": False},
+        kwargs={"host": "127.0.0.1", "port": port, "use_reloader": False},
         daemon=True,
     )
     server_thread.start()
-    _wait_for_port(E2E_PORT)
+    _wait_for_port(port)
 
-    yield f"http://localhost:{E2E_PORT}"
+    yield f"http://127.0.0.1:{port}"
 
 
 @pytest.fixture(scope="session")
