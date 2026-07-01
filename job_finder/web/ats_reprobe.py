@@ -31,13 +31,17 @@ source so every future crawl and probe uses the correct page — and either
 promotes the embedded board or re-enables ``scan_enabled`` exactly as the first
 two passes do.
 
-No new scanner, no LLM, no Playwright. The static fetch is a *coverage floor*: it
-catches server-rendered links/listings and misses JS-injected ones. Those are
-caught later by the daily Playwright careers crawl once the company is
-``scan_enabled`` again. ATS promotion is the single audited writer, so every
-platform flip is live-verified and collision-guarded exactly like the crawler
-path; the generic-extraction re-enable only flips ``scan_enabled`` (no platform
-claim) and so cannot mis-route a company to the wrong scanner.
+A FOURTH pass (fallback) handles JS/bot-gated pages: when static extraction
+yields nothing on both the original and deeper pages, the module renders the page
+with Playwright and re-extracts from the rendered DOM. This is the most expensive
+tier and runs last, catching pages that require JavaScript to expose job listings.
+The existing ``_try_playwright_extract`` from the careers crawler is reused; no
+new Playwright path is built.
+
+ATS promotion is the single audited writer, so every platform flip is live-verified
+and collision-guarded exactly like the crawler path; the generic-extraction
+re-enable only flips ``scan_enabled`` (no platform claim) and so cannot mis-route
+a company to the wrong scanner.
 """
 
 from __future__ import annotations
@@ -54,6 +58,7 @@ from bs4 import BeautifulSoup
 from job_finder.json_utils import utc_now_iso
 from job_finder.web.ats_identity_reconcile import promote_from_careers_link
 from job_finder.web.careers_crawler._ats_link_discovery import best_ats_candidate
+from job_finder.web.careers_crawler._playwright_tier import _try_playwright_extract
 from job_finder.web.careers_crawler._static_tier import _extract_jobs_from_soup
 from job_finder.web.db_helpers import standalone_connection
 from job_finder.web.http_fetch import fetch_with_deadline
@@ -150,6 +155,37 @@ def _static_extractable(
     return len(jobs)
 
 
+def _playwright_extractable(
+    url: str, target_titles: list[str], exclusions: list[str], db_path: str | None = None
+) -> int:
+    """Render page with Playwright and count target-matching jobs.
+
+    Expensive fallback for JS/bot-gated pages where static extraction yields
+    nothing. Launches a browser context on-demand, renders the page, and
+    re-extracts from the rendered DOM. Returns the matched-job count (0 on any
+    error or timeout); the caller treats >0 as "this JS page is a viable source".
+    """
+    try:
+        from playwright.sync_api import sync_playwright
+
+        with sync_playwright() as pw:
+            browser = pw.chromium.launch(headless=True)
+            try:
+                jobs = _try_playwright_extract(
+                    browser,
+                    url,
+                    target_titles,
+                    exclusions,
+                    db_path=db_path,
+                )
+                return len(jobs)
+            finally:
+                browser.close()
+    except Exception as exc:  # Playwright is optional; never fatal to the batch
+        logger.debug("reprobe playwright-extract failed url=%s: %s", url, exc)
+        return 0
+
+
 def _find_openings_link(html: str, base_url: str) -> str | None:
     """Return the single strongest job-listings link on a careers page.
 
@@ -202,6 +238,7 @@ def _attempt_rediscovery(
     target_titles: list[str],
     title_exclusions: list[str],
     config: dict | None,
+    db_path: str | None = None,
 ) -> str | None:
     """Follow the page's top job-listings link one hop and retry discovery there.
 
@@ -273,6 +310,26 @@ def _attempt_rediscovery(
         )
         return "rediscovered_custom"
 
+    # Fallback: static extraction yielded nothing on the deeper page.
+    # Try Playwright rendering for JS/bot-gated pages.
+    if target_titles and _playwright_extractable(
+        deeper_url, target_titles, title_exclusions, db_path=db_path
+    ):
+        conn.execute(
+            "UPDATE companies SET careers_url = ?, scan_enabled = 1, updated_at = ? WHERE id = ?",
+            (deeper_url, utc_now_iso(), company_id),
+        )
+        conn.commit()
+        logger.info(
+            "reprobe rediscovered custom listings for company_id=%d (%s): repointed %s -> %s "
+            "via Playwright fallback",
+            company_id,
+            name,
+            careers_url,
+            deeper_url,
+        )
+        return "rediscovered_custom"
+
     return None
 
 
@@ -302,6 +359,7 @@ def reprobe_custom_miss_cohort(
         "custom_extractable": 0,
         "rediscovered_ats": 0,
         "rediscovered_custom": 0,
+        "playwright_fallback": 0,
         "skipped_already_hit": 0,
         "disabled": 0,
     }
@@ -381,8 +439,32 @@ def reprobe_custom_miss_cohort(
                         target_titles,
                         title_exclusions,
                         config,
+                        db_path=db_path,
                     )
-                    summary[outcome if outcome else "no_candidate"] += 1
+                    if outcome:
+                        summary[outcome] += 1
+                    else:
+                        # Fourth pass (fallback): static extraction yielded nothing
+                        # and rediscovery found no deeper page. Try Playwright rendering
+                        # for JS/bot-gated pages that need a rendered DOM to expose jobs.
+                        # This is the most expensive tier, so it runs last.
+                        if target_titles and _playwright_extractable(
+                            careers_url, target_titles, title_exclusions, db_path=db_path
+                        ):
+                            conn.execute(
+                                "UPDATE companies SET scan_enabled = 1, updated_at = ? WHERE id = ?",
+                                (utc_now_iso(), company_id),
+                            )
+                            conn.commit()
+                            summary["playwright_fallback"] += 1
+                            logger.info(
+                                "reprobe re-enabled custom-extractable company_id=%d (%s) "
+                                "via Playwright fallback",
+                                company_id,
+                                row["name_raw"],
+                            )
+                        else:
+                            summary["no_candidate"] += 1
                 if delay:
                     time.sleep(delay)
                 continue
