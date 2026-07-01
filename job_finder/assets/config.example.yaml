@@ -233,6 +233,17 @@ health:
   # Minimum applied-job sample size before the conversion signal fires.
   # Guards against noise from tiny samples. Set <= 0 to disable the alarm.
   conversion_min_applied: 10
+  # Cost-ledger free/paid health watch (Detector C): the heartbeat groups the
+  # scoring_costs ledger by provider over this trailing window (days) and flags
+  # two regressions -- a paid-provider row appearing (surprise spend) or the
+  # free providers vanishing while scoring activity continues (broken free rung).
+  # Set <= 0 to disable the entire cost-health check. Default 7.
+  cost_health_window_days: 7
+  # Minimum total scoring-cost rows (any provider) that must exist in the window
+  # before the 'free providers absent' condition is alarmed -- keeps a fresh/idle
+  # install with no scoring activity from being flagged. Does NOT gate paid-leak
+  # detection (any paid row alarms regardless of activity). Default 1.
+  cost_health_min_activity: 1
 
 # --- Metrics ---
 metrics:

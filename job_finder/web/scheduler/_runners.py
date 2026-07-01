@@ -143,6 +143,7 @@ def _derive_degraded_keys(issues: list[str], degraded_sources: list[str]) -> set
       - ``db``         <- "Health check DB error: ..."
       - ``owner_idle`` <- "Owner idle: ..."
       - ``score_rot``  <- "Score rot: ..."
+      - ``cost_health`` <- "Cost health: ..." (issue #581)
       - ``funnel_unexplained`` <- "Funnel unexplained: ..." (issue #587)
       - ``concentration`` <- "Concentration: ..." (issue #592)
       - ``conversion_signal`` <- "Conversion signal degraded: ..." (issue #597)
@@ -157,6 +158,8 @@ def _derive_degraded_keys(issues: list[str], degraded_sources: list[str]) -> set
             keys.add("owner_idle")
         elif issue.startswith("Score rot"):
             keys.add("score_rot")
+        elif issue.startswith("Cost health"):
+            keys.add("cost_health")
         elif issue.startswith("Funnel unexplained"):
             keys.add("funnel_unexplained")
         elif issue.startswith("Concentration"):
@@ -497,6 +500,61 @@ def _check_concentration(conn, config: dict) -> str | None:
     return None
 
 
+def _check_cost_health(conn, config: dict) -> str | None:
+    """Cost-ledger free/paid health watch -- Detector C.
+
+    Groups the scoring_costs ledger by provider over a trailing N-day window and
+    flags two regressions of the free-first AI provider cascade:
+      1. Paid inference detected: any paid-provider row appears (surprise spend).
+      2. Free providers absent: zero free-provider rows despite scoring activity
+         (broken free rung).
+
+    The window is controlled by health.cost_health_window_days (default 7; <= 0
+    disables). The 'free providers absent' arm is gated by
+    health.cost_health_min_activity (default 1) to avoid alarming a fresh/idle
+    install with no scoring history. Paid-leak detection is activity-independent.
+    Read-only; returns an issue string or None.
+    """
+    from job_finder.web.claude_client import FREE_PROVIDERS
+
+    window_days = int((config.get("health", {}) or {}).get("cost_health_window_days", 7))
+    if window_days <= 0:
+        return None
+
+    min_activity = int((config.get("health", {}) or {}).get("cost_health_min_activity", 1))
+
+    rows = conn.execute(
+        "SELECT provider, COUNT(*) AS calls "
+        "FROM scoring_costs "
+        "WHERE timestamp >= strftime('%Y-%m-%dT%H:%M:%SZ','now','-' || ? || ' days') "
+        "GROUP BY provider",
+        (window_days,),
+    ).fetchall()
+
+    problems: list[str] = []
+    total_calls = 0
+    free_calls = 0
+
+    for provider, calls in rows:
+        total_calls += calls
+        if provider in FREE_PROVIDERS:
+            free_calls += calls
+        else:
+            # Paid leak: activity-independent (single paid call cracks the $0 invariant)
+            problems.append(f"paid inference detected: {provider} ({calls} calls)")
+
+    # Free rung broke: only alarm if there's enough total activity to be meaningful
+    if total_calls >= min_activity and free_calls == 0:
+        problems.append(
+            f"free providers absent despite {total_calls} scoring calls in last {window_days}d"
+        )
+
+    if not problems:
+        return None
+
+    return "Cost health: " + "; ".join(sorted(problems))
+
+
 def _check_conversion_signal(conn, config: dict) -> str | None:
     """Conversion-signal alarm -- does the fit-grade predict outcomes?
 
@@ -662,6 +720,13 @@ def run_health_check(app) -> None:
                 conversion = _check_conversion_signal(conn, config)
                 if conversion:
                     issues.append(conversion)
+
+                # 10. Cost-ledger free/paid health watch (Detector C): read-only
+                #     check of the scoring_costs ledger for paid leaks and broken
+                #     free rung.
+                cost_health = _check_cost_health(conn, config)
+                if cost_health:
+                    issues.append(cost_health)
 
         except Exception as e:
             issues.append(f"Health check DB error: {e}")
