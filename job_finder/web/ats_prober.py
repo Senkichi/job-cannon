@@ -6,10 +6,12 @@ import time  # noqa: F401 — available for callers that may need it
 from datetime import UTC, datetime, timedelta
 
 import requests
+from bs4 import BeautifulSoup
 
 from job_finder.json_utils import utc_now_iso
-from job_finder.web.ats_detection import derive_slug_candidates
+from job_finder.web.ats_detection import derive_slug_candidates, extract_ats_from_url_best
 from job_finder.web.brand_blocklist import is_blocked_brand
+from job_finder.web.http_fetch import fetch_with_deadline
 
 logger = logging.getLogger(__name__)
 
@@ -181,6 +183,438 @@ def _reset_retry_state(
     conn.commit()
 
 
+def _try_static_first_fallthrough(
+    company_id: int,
+    company_name: str,
+    careers_url: str,
+    conn: sqlite3.Connection,
+    config: dict,
+    now: str,
+) -> dict:
+    """Static-first fall-through for companies without a known ATS platform.
+
+    Implements the cheap→expensive ordering per issue #565:
+    1. Re-detect known ATS on subdomain (careers_url + discovered links)
+    2. Static HTML extract (L1/L4 from careers_crawler)
+    3. Embedded-JSON tier (Tier 2.5)
+    4. Playwright tier (if static extraction signals JS-heavy)
+
+    On success, promotes the company to the detected ATS or persists jobs from
+    custom careers pages. Custom pages are NOT marked as 'hit' (that state
+    requires a real ATS platform with platform+slug); instead they are marked
+    as 'miss' with scan_enabled=1 and jobs persisted, so the careers_crawler
+    picks them up for ongoing extraction. Sets specific miss_reason on failure.
+
+    Args:
+        company_id: Company row ID.
+        company_name: Company name (for logging).
+        careers_url: The company's careers URL.
+        conn: Open SQLite connection.
+        config: Application config dict.
+        now: Current UTC ISO timestamp string.
+
+    Returns:
+        Dict with "status" key: "hit" (promoted to ATS), "miss" (custom page
+        with jobs persisted, or all tiers failed), or "error" (transient failure).
+    """
+    from job_finder.web._http_constants import _HEADERS, _TIMEOUT
+    from job_finder.web.ats_identity_reconcile import promote_from_careers_link
+    from job_finder.web.careers_crawler import _new_summary
+    from job_finder.web.careers_crawler._embedded_json_tier import _try_embedded_json_extract
+    from job_finder.web.careers_crawler._persistence import _upsert_and_log
+    from job_finder.web.careers_crawler._static_tier import _try_static_extract
+
+    # Extract target titles and exclusions from config for title filtering
+    profile_cfg = config.get("profile", {})
+    target_titles = profile_cfg.get("target_titles", [])
+    exclusions_cfg = profile_cfg.get("exclusions", {})
+    title_exclusions = (
+        exclusions_cfg.get("title_keywords", []) if isinstance(exclusions_cfg, dict) else []
+    )
+
+    # Get DB path for job persistence (needed by _upsert_and_log)
+    db_path = config.get("DB_PATH")
+
+    # Fetch company row for conditional logic (Fix 3 and Fix 4)
+    company = conn.execute("SELECT * FROM companies WHERE id = ?", (company_id,)).fetchone()
+
+    # Track Tier 1 outcome for meaningful non-promoted results (Fix 4)
+    tier1_outcome = None
+
+    # ------------------------------------------------------------
+    # Tier 1: Re-detect known ATS on subdomain
+    # ------------------------------------------------------------
+    logger.debug("static_fallthrough: tier1 re-detect ATS for %s", company_name)
+    try:
+        # Check the careers_url itself
+        ats_hit = extract_ats_from_url_best(careers_url)
+        if ats_hit:
+            platform, slug, _ = ats_hit
+            logger.info(
+                "static_fallthrough: detected ATS on careers_url %s -> %s/%s",
+                careers_url,
+                platform,
+                slug[:48],
+            )
+            # Compute reenable_scan based on company state (Fix 3)
+            # Only re-enable for the m074 cohort: no known platform, prior miss
+            reenable = company["ats_platform"] is None and company["ats_probe_status"] == "miss"
+            res = promote_from_careers_link(
+                conn,
+                company_id,
+                platform,
+                slug,
+                page_url=careers_url,
+                config=config,
+                reenable_scan=reenable,
+            )
+            if res.get("outcome") == "promoted":
+                return {"status": "hit", "source": "ats_redetect_careers_url"}
+            else:
+                # Surface non-promoted outcomes (Finding 5, Fix 4)
+                tier1_outcome = res.get("outcome", "unknown")
+                logger.debug(
+                    "static_fallthrough: tier1 ATS detection on careers_url returned non-promoted outcome: %s",
+                    tier1_outcome,
+                )
+                # Continue to next tier - this is a custom page, not a detected ATS
+                pass
+
+        # Fetch the careers page to discover subdomain links
+        try:
+            resp = fetch_with_deadline(
+                careers_url, getter=requests.get, timeout=_TIMEOUT, headers=_HEADERS
+            )
+            if resp.status_code == 200:
+                html = resp.text
+                soup = BeautifulSoup(html, "html.parser")
+                # Extract all links from the page
+                for tag in soup.find_all("a", href=True):
+                    href = tag["href"].strip()
+                    if not href or href.startswith(("#", "javascript:", "mailto:", "tel:")):
+                        continue
+                    # Resolve relative URLs
+                    if href.startswith("/"):
+                        from urllib.parse import urljoin
+
+                        href = urljoin(careers_url, href)
+                    # Check if this link points to a known ATS
+                    ats_hit = extract_ats_from_url_best(href)
+                    if ats_hit:
+                        platform, slug, _ = ats_hit
+                        logger.info(
+                            "static_fallthrough: detected ATS on subdomain link %s -> %s/%s",
+                            href,
+                            platform,
+                            slug[:48],
+                        )
+                        # Compute reenable_scan based on company state (Fix 3)
+                        # Only re-enable for the m074 cohort: no known platform, prior miss
+                        reenable = (
+                            company["ats_platform"] is None
+                            and company["ats_probe_status"] == "miss"
+                        )
+                        res = promote_from_careers_link(
+                            conn,
+                            company_id,
+                            platform,
+                            slug,
+                            page_url=href,
+                            config=config,
+                            reenable_scan=reenable,
+                        )
+                        if res.get("outcome") == "promoted":
+                            return {"status": "hit", "source": "ats_redetect_subdomain"}
+                        else:
+                            # Surface non-promoted outcomes (Finding 5, Fix 4)
+                            tier1_outcome = res.get("outcome", "unknown")
+                            logger.debug(
+                                "static_fallthrough: tier1 ATS detection on subdomain returned non-promoted outcome: %s",
+                                tier1_outcome,
+                            )
+                            # Continue to next tier - this is a custom page, not a detected ATS
+                            pass
+        except Exception as e:
+            logger.debug("static_fallthrough: tier1 fetch failed for %s: %s", company_name, e)
+    except Exception as e:
+        logger.debug("static_fallthrough: tier1 failed for %s: %s", company_name, e)
+
+    # ------------------------------------------------------------
+    # Tier 2: Static HTML extract (L1/L4)
+    # ------------------------------------------------------------
+    logger.debug("static_fallthrough: tier2 static extract for %s", company_name)
+    try:
+        static_jobs = _try_static_extract(careers_url, target_titles, title_exclusions)
+        if static_jobs is not None:
+            # static_jobs is a list (may be empty) -> page was statically rendered
+            if len(static_jobs) > 0:
+                # Found jobs statically -> persist them and enable scan for custom careers page
+                # This is NOT an ATS 'hit' (no platform+slug), so we mark as 'miss' with
+                # scan_enabled=1 and a specific miss_reason, so careers_crawler picks it up.
+                if db_path:
+                    summary = _new_summary()
+                    all_new_job_keys = []
+                    _upsert_and_log(
+                        static_jobs,
+                        company_id,
+                        company_name,
+                        now,
+                        db_path,
+                        summary,
+                        all_new_job_keys,
+                        "static_fallthrough_tier2",
+                    )
+                    logger.info(
+                        "static_fallthrough: tier2 persisted %d jobs for %s (custom careers)",
+                        len(static_jobs),
+                        company_name,
+                    )
+                else:
+                    logger.warning(
+                        "static_fallthrough: tier2 found %d jobs but no DB_PATH configured, cannot persist",
+                        len(static_jobs),
+                    )
+
+                conn.execute(
+                    """UPDATE companies
+                       SET ats_probe_status = 'miss',
+                           scan_enabled = 1,
+                           miss_reason = 'static_fallthrough_tier2_jobs_persisted',
+                           updated_at = ?
+                       WHERE id = ?""",
+                    (now, company_id),
+                )
+                conn.commit()
+                return {
+                    "status": "miss",
+                    "reason": "static_fallthrough_tier2_jobs_persisted",
+                    "jobs_found": len(static_jobs),
+                }
+            else:
+                # Statically rendered but no matching jobs -> genuinely empty
+                conn.execute(
+                    """UPDATE companies
+                       SET ats_probe_status = 'miss',
+                           miss_reason = 'static_fallthrough_tier2_no_matches',
+                           updated_at = ?
+                       WHERE id = ?""",
+                    (now, company_id),
+                )
+                conn.commit()
+                logger.debug("static_fallthrough: tier2 no matches for %s", company_name)
+                return {"status": "miss", "reason": "static_fallthrough_tier2_no_matches"}
+        # static_jobs is None -> page appears JS-heavy, continue to next tier
+    except Exception as e:
+        logger.debug("static_fallthrough: tier2 failed for %s: %s", company_name, e)
+        # Surface exception-specific miss_reason (Finding 5)
+        conn.execute(
+            """UPDATE companies
+               SET ats_probe_status = 'miss',
+                   miss_reason = 'static_fallthrough_tier2_exception',
+                   updated_at = ?
+               WHERE id = ?""",
+            (now, company_id),
+        )
+        conn.commit()
+        return {"status": "miss", "reason": "static_fallthrough_tier2_exception"}
+
+    # ------------------------------------------------------------
+    # Tier 3: Embedded-JSON extraction (Tier 2.5)
+    # ------------------------------------------------------------
+    logger.debug("static_fallthrough: tier3 embedded JSON for %s", company_name)
+    try:
+        json_jobs = _try_embedded_json_extract(careers_url, target_titles, title_exclusions)
+        if json_jobs is not None:
+            # json_jobs is a list (may be empty) -> embedded JSON found
+            if len(json_jobs) > 0:
+                # Found jobs in embedded JSON -> persist them and enable scan for custom careers page
+                # This is NOT an ATS 'hit' (no platform+slug), so we mark as 'miss' with
+                # scan_enabled=1 and a specific miss_reason, so careers_crawler picks it up.
+                if db_path:
+                    summary = _new_summary()
+                    all_new_job_keys = []
+                    _upsert_and_log(
+                        json_jobs,
+                        company_id,
+                        company_name,
+                        now,
+                        db_path,
+                        summary,
+                        all_new_job_keys,
+                        "static_fallthrough_tier3",
+                    )
+                    logger.info(
+                        "static_fallthrough: tier3 persisted %d jobs for %s (embedded JSON)",
+                        len(json_jobs),
+                        company_name,
+                    )
+                else:
+                    logger.warning(
+                        "static_fallthrough: tier3 found %d jobs but no DB_PATH configured, cannot persist",
+                        len(json_jobs),
+                    )
+
+                conn.execute(
+                    """UPDATE companies
+                       SET ats_probe_status = 'miss',
+                           scan_enabled = 1,
+                           miss_reason = 'static_fallthrough_tier3_jobs_persisted',
+                           updated_at = ?
+                       WHERE id = ?""",
+                    (now, company_id),
+                )
+                conn.commit()
+                return {
+                    "status": "miss",
+                    "reason": "static_fallthrough_tier3_jobs_persisted",
+                    "jobs_found": len(json_jobs),
+                }
+            else:
+                # Embedded JSON found but no matching jobs
+                conn.execute(
+                    """UPDATE companies
+                       SET ats_probe_status = 'miss',
+                           miss_reason = 'static_fallthrough_tier3_no_matches',
+                           updated_at = ?
+                       WHERE id = ?""",
+                    (now, company_id),
+                )
+                conn.commit()
+                logger.debug("static_fallthrough: tier3 no matches for %s", company_name)
+                return {"status": "miss", "reason": "static_fallthrough_tier3_no_matches"}
+        # json_jobs is None -> no embedded JSON found, continue to next tier
+    except Exception as e:
+        logger.debug("static_fallthrough: tier3 failed for %s: %s", company_name, e)
+        # Surface exception-specific miss_reason (Finding 5)
+        conn.execute(
+            """UPDATE companies
+               SET ats_probe_status = 'miss',
+                   miss_reason = 'static_fallthrough_tier3_exception',
+                   updated_at = ?
+               WHERE id = ?""",
+            (now, company_id),
+        )
+        conn.commit()
+        return {"status": "miss", "reason": "static_fallthrough_tier3_exception"}
+
+    # ------------------------------------------------------------
+    # Tier 4: Playwright (most expensive - only if earlier tiers failed)
+    # ------------------------------------------------------------
+    logger.debug("static_fallthrough: tier4 Playwright for %s", company_name)
+    try:
+        from job_finder.web.careers_crawler._playwright_tier import _try_playwright_extract
+
+        try:
+            from playwright.sync_api import sync_playwright
+        except ImportError:
+            # Playwright not installed - skip this tier
+            logger.debug("static_fallthrough: Playwright not installed, skipping tier4")
+        else:
+            with sync_playwright() as pw:
+                browser = pw.chromium.launch(headless=True)
+                try:
+                    playwright_jobs = _try_playwright_extract(
+                        browser, careers_url, target_titles, title_exclusions
+                    )
+                    if len(playwright_jobs) > 0:
+                        # Found jobs via Playwright -> persist them and enable scan for custom careers page
+                        # This is NOT an ATS 'hit' (no platform+slug), so we mark as 'miss' with
+                        # scan_enabled=1 and a specific miss_reason, so careers_crawler picks it up.
+                        if db_path:
+                            summary = _new_summary()
+                            all_new_job_keys = []
+                            _upsert_and_log(
+                                playwright_jobs,
+                                company_id,
+                                company_name,
+                                now,
+                                db_path,
+                                summary,
+                                all_new_job_keys,
+                                "static_fallthrough_tier4",
+                            )
+                            logger.info(
+                                "static_fallthrough: tier4 persisted %d jobs for %s (Playwright)",
+                                len(playwright_jobs),
+                                company_name,
+                            )
+                        else:
+                            logger.warning(
+                                "static_fallthrough: tier4 found %d jobs but no DB_PATH configured, cannot persist",
+                                len(playwright_jobs),
+                            )
+
+                        conn.execute(
+                            """UPDATE companies
+                               SET ats_probe_status = 'miss',
+                                   scan_enabled = 1,
+                                   miss_reason = 'static_fallthrough_tier4_jobs_persisted',
+                                   updated_at = ?
+                               WHERE id = ?""",
+                            (now, company_id),
+                        )
+                        conn.commit()
+                        return {
+                            "status": "miss",
+                            "reason": "static_fallthrough_tier4_jobs_persisted",
+                            "jobs_found": len(playwright_jobs),
+                        }
+                    else:
+                        # Playwright rendered but no matching jobs
+                        conn.execute(
+                            """UPDATE companies
+                               SET ats_probe_status = 'miss',
+                                   miss_reason = 'static_fallthrough_tier4_no_matches',
+                                   updated_at = ?
+                               WHERE id = ?""",
+                            (now, company_id),
+                        )
+                        conn.commit()
+                        logger.debug("static_fallthrough: tier4 no matches for %s", company_name)
+                        return {"status": "miss", "reason": "static_fallthrough_tier4_no_matches"}
+                finally:
+                    browser.close()
+    except Exception as e:
+        logger.debug("static_fallthrough: tier4 failed for %s: %s", company_name, e)
+        # Surface exception-specific miss_reason (Finding 5)
+        conn.execute(
+            """UPDATE companies
+               SET ats_probe_status = 'miss',
+                   miss_reason = 'static_fallthrough_tier4_exception',
+                   updated_at = ?
+               WHERE id = ?""",
+            (now, company_id),
+        )
+        conn.commit()
+        return {"status": "miss", "reason": "static_fallthrough_tier4_exception"}
+
+    # ------------------------------------------------------------
+    # All tiers failed
+    # ------------------------------------------------------------
+    # Fold meaningful Tier 1 outcomes into miss_reason (Fix 4)
+    # Meaningful outcomes: slug_collision, abstain_conflict, disabled
+    # Not meaningful: "no ATS candidate found at all" (tiers 2-4 have their own reasons)
+    meaningful_outcomes = {"slug_collision", "abstain_conflict", "disabled"}
+    if tier1_outcome in meaningful_outcomes:
+        final_reason = f"static_fallthrough_exhausted_tier1_{tier1_outcome}"
+    else:
+        final_reason = "static_fallthrough_all_tiers_exhausted"
+
+    conn.execute(
+        """UPDATE companies
+           SET ats_probe_status = 'miss',
+               miss_reason = ?,
+               updated_at = ?
+           WHERE id = ?""",
+        (final_reason, now, company_id),
+    )
+    conn.commit()
+    logger.info(
+        "static_fallthrough: all tiers exhausted for %s (reason: %s)", company_name, final_reason
+    )
+    return {"status": "miss", "reason": final_reason}
+
+
 def probe_single_company(
     company_id: int,
     conn: sqlite3.Connection,
@@ -240,15 +674,26 @@ def probe_single_company(
                         # B4: Workday probe returns False when tenant/board
                         # combination yields no postings — symptomatically the
                         # same as 404 (slug doesn't resolve to a Workday board).
-                        conn.execute(
-                            """UPDATE companies
-                               SET ats_probe_status = 'miss',
-                                   miss_reason = 'platform_slug_404'
-                               WHERE id = ?""",
-                            (company_id,),
-                        )
-                        conn.commit()
-                        return {"status": "miss"}
+                        # Try static-first fallthrough if careers_url exists (company may have migrated ATS)
+                        careers_url = company["careers_url"]
+                        if careers_url:
+                            logger.info(
+                                "probe_single_company: workday slug 404 for %s, trying static-first fallthrough",
+                                company_name,
+                            )
+                            return _try_static_first_fallthrough(
+                                company_id, company_name, careers_url, conn, config, now
+                            )
+                        else:
+                            conn.execute(
+                                """UPDATE companies
+                                   SET ats_probe_status = 'miss',
+                                       miss_reason = 'platform_slug_404'
+                                   WHERE id = ?""",
+                                (company_id,),
+                            )
+                            conn.commit()
+                            return {"status": "miss"}
                 except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
                     _handle_scan_error(conn, company_id, company_name, str(e), now)
                     return {"status": "error", "detail": str(e)}
@@ -266,15 +711,26 @@ def probe_single_company(
                         _reset_retry_state(conn, company_id, now)
                         logger.info("probe_single_company: %s -> hit (icims)", company_name)
                         return {"status": "hit", "jobs_found": 0}
-                    conn.execute(
-                        """UPDATE companies
-                           SET ats_probe_status = 'miss',
-                               miss_reason = 'platform_slug_404'
-                           WHERE id = ?""",
-                        (company_id,),
-                    )
-                    conn.commit()
-                    return {"status": "miss"}
+                    # Try static-first fallthrough if careers_url exists (company may have migrated ATS)
+                    careers_url = company["careers_url"]
+                    if careers_url:
+                        logger.info(
+                            "probe_single_company: icims slug 404 for %s, trying static-first fallthrough",
+                            company_name,
+                        )
+                        return _try_static_first_fallthrough(
+                            company_id, company_name, careers_url, conn, config, now
+                        )
+                    else:
+                        conn.execute(
+                            """UPDATE companies
+                               SET ats_probe_status = 'miss',
+                                   miss_reason = 'platform_slug_404'
+                               WHERE id = ?""",
+                            (company_id,),
+                        )
+                        conn.commit()
+                        return {"status": "miss"}
                 except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
                     _handle_scan_error(conn, company_id, company_name, str(e), now)
                     return {"status": "error", "detail": str(e)}
@@ -291,15 +747,26 @@ def probe_single_company(
                             "probe_single_company: %s -> hit (successfactors)", company_name
                         )
                         return {"status": "hit", "jobs_found": 0}
-                    conn.execute(
-                        """UPDATE companies
-                           SET ats_probe_status = 'miss',
-                               miss_reason = 'platform_slug_404'
-                           WHERE id = ?""",
-                        (company_id,),
-                    )
-                    conn.commit()
-                    return {"status": "miss"}
+                    # Try static-first fallthrough if careers_url exists (company may have migrated ATS)
+                    careers_url = company["careers_url"]
+                    if careers_url:
+                        logger.info(
+                            "probe_single_company: successfactors slug 404 for %s, trying static-first fallthrough",
+                            company_name,
+                        )
+                        return _try_static_first_fallthrough(
+                            company_id, company_name, careers_url, conn, config, now
+                        )
+                    else:
+                        conn.execute(
+                            """UPDATE companies
+                               SET ats_probe_status = 'miss',
+                                   miss_reason = 'platform_slug_404'
+                               WHERE id = ?""",
+                            (company_id,),
+                        )
+                        conn.commit()
+                        return {"status": "miss"}
                 except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
                     _handle_scan_error(conn, company_id, company_name, str(e), now)
                     return {"status": "error", "detail": str(e)}
@@ -314,15 +781,26 @@ def probe_single_company(
                         _reset_retry_state(conn, company_id, now)
                         logger.info("probe_single_company: %s -> hit (adp)", company_name)
                         return {"status": "hit", "jobs_found": 0}
-                    conn.execute(
-                        """UPDATE companies
-                           SET ats_probe_status = 'miss',
-                               miss_reason = 'platform_slug_404'
-                           WHERE id = ?""",
-                        (company_id,),
-                    )
-                    conn.commit()
-                    return {"status": "miss"}
+                    # Try static-first fallthrough if careers_url exists (company may have migrated ATS)
+                    careers_url = company["careers_url"]
+                    if careers_url:
+                        logger.info(
+                            "probe_single_company: adp slug 404 for %s, trying static-first fallthrough",
+                            company_name,
+                        )
+                        return _try_static_first_fallthrough(
+                            company_id, company_name, careers_url, conn, config, now
+                        )
+                    else:
+                        conn.execute(
+                            """UPDATE companies
+                               SET ats_probe_status = 'miss',
+                                   miss_reason = 'platform_slug_404'
+                               WHERE id = ?""",
+                            (company_id,),
+                        )
+                        conn.commit()
+                        return {"status": "miss"}
                 except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
                     _handle_scan_error(conn, company_id, company_name, str(e), now)
                     return {"status": "error", "detail": str(e)}
@@ -337,15 +815,26 @@ def probe_single_company(
                         _reset_retry_state(conn, company_id, now)
                         logger.info("probe_single_company: %s -> hit (ibm)", company_name)
                         return {"status": "hit", "jobs_found": 0}
-                    conn.execute(
-                        """UPDATE companies
-                           SET ats_probe_status = 'miss',
-                               miss_reason = 'platform_slug_404'
-                           WHERE id = ?""",
-                        (company_id,),
-                    )
-                    conn.commit()
-                    return {"status": "miss"}
+                    # Try static-first fallthrough if careers_url exists (company may have migrated ATS)
+                    careers_url = company["careers_url"]
+                    if careers_url:
+                        logger.info(
+                            "probe_single_company: ibm slug 404 for %s, trying static-first fallthrough",
+                            company_name,
+                        )
+                        return _try_static_first_fallthrough(
+                            company_id, company_name, careers_url, conn, config, now
+                        )
+                    else:
+                        conn.execute(
+                            """UPDATE companies
+                               SET ats_probe_status = 'miss',
+                                   miss_reason = 'platform_slug_404'
+                               WHERE id = ?""",
+                            (company_id,),
+                        )
+                        conn.commit()
+                        return {"status": "miss"}
                 except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
                     _handle_scan_error(conn, company_id, company_name, str(e), now)
                     return {"status": "error", "detail": str(e)}
@@ -353,11 +842,23 @@ def probe_single_company(
                 # B4: platform value is set but not one we know how to probe —
                 # ATS catalog drift (probably the company's platform was
                 # removed from the supported set after being tagged).
-                return {
-                    "status": "miss",
-                    "detail": f"unknown platform: {platform}",
-                    "miss_reason": "unknown_platform",
-                }
+                # Try static-first fallthrough if careers_url exists
+                careers_url = company["careers_url"]
+                if careers_url:
+                    logger.info(
+                        "probe_single_company: unknown platform %s for %s, trying static-first fallthrough",
+                        platform,
+                        company_name,
+                    )
+                    return _try_static_first_fallthrough(
+                        company_id, company_name, careers_url, conn, config, now
+                    )
+                else:
+                    return {
+                        "status": "miss",
+                        "detail": f"unknown platform: {platform}",
+                        "miss_reason": "unknown_platform",
+                    }
 
             # Let Timeout/ConnectionError propagate — caught below as transient
             resp = requests.get(url, timeout=_PROBE_TIMEOUT)
@@ -381,15 +882,26 @@ def probe_single_company(
                 return {"status": "hit", "jobs_found": jobs_count}
             elif resp.status_code in _PERMANENT_MISS_CODES:
                 # B4: 404/410 -> tenant not found on this platform.
-                conn.execute(
-                    """UPDATE companies
-                       SET ats_probe_status = 'miss',
-                           miss_reason = 'platform_slug_404'
-                       WHERE id = ?""",
-                    (company_id,),
-                )
-                conn.commit()
-                return {"status": "miss"}
+                # Try static-first fallthrough if careers_url exists (company may have migrated ATS)
+                careers_url = company["careers_url"]
+                if careers_url:
+                    logger.info(
+                        "probe_single_company: platform slug 404 for %s, trying static-first fallthrough",
+                        company_name,
+                    )
+                    return _try_static_first_fallthrough(
+                        company_id, company_name, careers_url, conn, config, now
+                    )
+                else:
+                    conn.execute(
+                        """UPDATE companies
+                           SET ats_probe_status = 'miss',
+                               miss_reason = 'platform_slug_404'
+                           WHERE id = ?""",
+                        (company_id,),
+                    )
+                    conn.commit()
+                    return {"status": "miss"}
             elif resp.status_code in _TRANSIENT_CODES:
                 detail = f"HTTP {resp.status_code}"
                 _handle_scan_error(conn, company_id, company_name, detail, now)
@@ -398,15 +910,26 @@ def probe_single_company(
                 # Other non-200 (403, 401, etc.) — treat as permanent miss.
                 # B4: distinct reason so audits can tell 404 (slug doesn't exist)
                 # apart from 403/blocked (slug exists but probe blocked).
-                conn.execute(
-                    """UPDATE companies
-                       SET ats_probe_status = 'miss',
-                           miss_reason = 'platform_slug_blocked'
+                # Try static-first fallthrough if careers_url exists (company may have migrated ATS)
+                careers_url = company["careers_url"]
+                if careers_url:
+                    logger.info(
+                        "probe_single_company: platform slug blocked for %s, trying static-first fallthrough",
+                        company_name,
+                    )
+                    return _try_static_first_fallthrough(
+                        company_id, company_name, careers_url, conn, config, now
+                    )
+                else:
+                    conn.execute(
+                        """UPDATE companies
+                           SET ats_probe_status = 'miss',
+                               miss_reason = 'platform_slug_blocked'
                        WHERE id = ?""",
-                    (company_id,),
-                )
-                conn.commit()
-                return {"status": "miss"}
+                        (company_id,),
+                    )
+                    conn.commit()
+                    return {"status": "miss"}
 
         except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
             _handle_scan_error(conn, company_id, company_name, str(e), now)
@@ -423,14 +946,25 @@ def probe_single_company(
         # with small-company ATS tenants are common. See brand_blocklist.py.
         if is_blocked_brand(company_name):
             logger.info("probe_single_company: %s blocked by brand blocklist", company_name)
-            conn.execute(
-                """UPDATE companies
-                   SET ats_probe_status='miss', miss_reason='blocked_brand'
-                   WHERE id=?""",
-                (company_id,),
-            )
-            conn.commit()
-            return {"status": "miss", "detail": "blocked_brand"}
+            # Try static-first fallthrough if careers_url exists (brand blocklist only applies to speculative probing)
+            careers_url = company["careers_url"]
+            if careers_url:
+                logger.info(
+                    "probe_single_company: brand-blocked %s has careers_url, trying static-first fallthrough",
+                    company_name,
+                )
+                return _try_static_first_fallthrough(
+                    company_id, company_name, careers_url, conn, config, now
+                )
+            else:
+                conn.execute(
+                    """UPDATE companies
+                       SET ats_probe_status='miss', miss_reason='blocked_brand'
+                       WHERE id=?""",
+                    (company_id,),
+                )
+                conn.commit()
+                return {"status": "miss", "detail": "blocked_brand"}
         candidates = derive_slug_candidates(company_name)
         for slug_candidate in candidates:
             try:
@@ -505,13 +1039,27 @@ def probe_single_company(
                 _handle_scan_error(conn, company_id, company_name, str(e), now)
                 return {"status": "error", "detail": str(e)}
 
-        # All candidates exhausted — permanent miss
-        conn.execute(
-            "UPDATE companies SET ats_probe_status = 'miss' WHERE id = ?",
-            (company_id,),
-        )
-        conn.commit()
-        return {"status": "miss"}
+        # All candidates exhausted — try static-first fallthrough if careers_url exists
+        careers_url = company["careers_url"]
+        if careers_url:
+            logger.info(
+                "probe_single_company: speculative probing failed for %s, trying static-first fallthrough",
+                company_name,
+            )
+            return _try_static_first_fallthrough(
+                company_id, company_name, careers_url, conn, config, now
+            )
+        else:
+            # No careers_url — permanent miss with specific reason
+            conn.execute(
+                """UPDATE companies
+                   SET ats_probe_status = 'miss',
+                       miss_reason = 'speculative_probing_exhausted_no_careers_url'
+                   WHERE id = ?""",
+                (company_id,),
+            )
+            conn.commit()
+            return {"status": "miss", "reason": "speculative_probing_exhausted_no_careers_url"}
 
 
 def _probe_lever_with_result(slug: str) -> bool:

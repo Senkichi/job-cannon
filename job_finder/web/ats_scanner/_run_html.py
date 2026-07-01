@@ -70,6 +70,7 @@ def _run_html_fallback_scan(
            )
              AND homepage_url IS NOT NULL
              AND scan_enabled = 1
+             AND careers_crawl_last_at IS NULL
              AND {_high_score_history_clause()}""",
         (*non_scannable, high_score_threshold),
     ).fetchall()
