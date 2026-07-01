@@ -140,6 +140,61 @@ def test_nominal_writes_success_row_and_completed_run_end(migrated_db, events_fi
 
 
 # ---------------------------------------------------------------------------
+# Check #3 (error-burst) separator safety
+# ---------------------------------------------------------------------------
+
+
+def test_error_burst_excludes_failures_older_than_24h(migrated_db, events_file):
+    """Check #3 must use epoch math, not a 'T'-vs-space string compare.
+
+    A failure row is stored 'T'-separated ('...T12:00'); datetime('now','-24 hours')
+    renders space-separated ('... 14:00'). With a raw string compare, 'T' (0x54)
+    sorts after space (0x20), so a genuinely >24h-old failure was wrongly counted.
+    Epoch math (strftime('%s')) excludes it. 5 failures 26h ago must NOT fire.
+    """
+    db_path, conn = migrated_db
+    app = _make_app(db_path)
+
+    stale_iso = _utc_naive(-26)  # genuinely older than the 24h window
+    conn.executemany(
+        "INSERT INTO user_activity (action, entity_id, metadata, occurred_at) VALUES (?, ?, ?, ?)",
+        [("linkedin_sync", None, '{"status": "failed"}', stale_iso) for _ in range(5)],
+    )
+    conn.commit()
+
+    with patch("job_finder.gmail_auth.get_credentials", return_value=object()):
+        run_health_check(app)
+
+    meta = json.loads(_fetch_health_rows(conn)[0]["metadata"])
+    issue_text = " ; ".join(meta["issues"])
+    assert "failures in 24h" not in issue_text, (
+        f"26h-old failures must not be counted (separator bug); issues: {meta['issues']}"
+    )
+
+
+def test_error_burst_fires_on_recent_failures(migrated_db, events_file):
+    """Positive control: 5 recent failures of one action DO fire check #3."""
+    db_path, conn = migrated_db
+    app = _make_app(db_path)
+
+    recent_iso = _utc_naive(-1)  # well within the 24h window
+    conn.executemany(
+        "INSERT INTO user_activity (action, entity_id, metadata, occurred_at) VALUES (?, ?, ?, ?)",
+        [("linkedin_sync", None, '{"status": "failed"}', recent_iso) for _ in range(5)],
+    )
+    conn.commit()
+
+    with patch("job_finder.gmail_auth.get_credentials", return_value=object()):
+        run_health_check(app)
+
+    meta = json.loads(_fetch_health_rows(conn)[0]["metadata"])
+    issue_text = " ; ".join(meta["issues"])
+    assert "linkedin_sync: 5 failures in 24h" in issue_text, (
+        f"recent failure burst must fire; issues: {meta['issues']}"
+    )
+
+
+# ---------------------------------------------------------------------------
 # Best-effort contract
 # ---------------------------------------------------------------------------
 

@@ -244,10 +244,11 @@ health:
   # install with no scoring activity from being flagged. Does NOT gate paid-leak
   # detection (any paid row alarms regardless of activity). Default 1.
   cost_health_min_activity: 1
-  # Supply-side per-source deadman alarm: the heartbeat checks ATS scanner fleet,
-  # feed ingestion, and company_scan_log age against the derived cadence window
-  # (from scheduler.cadence_preset). Fires when age > window * tolerance.
-  # Set <= 0 to disable. Default 2.0 (allows two missed cadence cycles).
+  # Supply-side per-source deadman alarm: the heartbeat checks ATS scanner fleet
+  # and company_scan_log age against the fixed daily ATS-scan window (24h) times
+  # tolerance (feed-ingestion recency is owned by the "No ingestion" alarm).
+  # Fires when age > window * tolerance. Set <= 0 to disable the deadman.
+  # Default 2.0 (allows two missed daily ATS scans).
   source_deadman_tolerance: 2.0
 
 # --- Metrics ---

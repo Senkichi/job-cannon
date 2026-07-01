@@ -663,44 +663,48 @@ def _check_source_deadman(conn, config: dict) -> list[str]:
         window_hours = expected_ats_scan_window_hours()
         window_seconds = window_hours * 3600
         allowed_age_seconds = window_seconds * tolerance
+    except Exception:
+        # A malformed tolerance value must not break the heartbeat.
+        return []
 
-        issues: list[str] = []
+    issues: list[str] = []
 
-        # 1. ATS scanner fleet: MAX(last_scanned_at) over scannable companies
+    # Each recency class is guarded independently so schema drift in one
+    # (e.g. a missing table) cannot discard a real outage detected by the other.
+    # 1. ATS scanner fleet: MAX(last_scanned_at) over scannable companies
+    try:
         row = conn.execute(
             "SELECT MAX(last_scanned_at) FROM companies WHERE ats_probe_status = 'hit'"
         ).fetchone()
         if row and row[0]:
-            last_scan = row[0]
             age_seconds = conn.execute(
-                "SELECT CAST(strftime('%s', 'now') - strftime('%s', ?) AS INTEGER)", (last_scan,)
+                "SELECT CAST(strftime('%s', 'now') - strftime('%s', ?) AS INTEGER)", (row[0],)
             ).fetchone()[0]
             if age_seconds is not None and age_seconds > allowed_age_seconds:
-                age_hours = age_seconds / 3600
                 issues.append(
-                    f"Source deadman: ATS scanner fleet — no successful scan in {age_hours:.1f}h "
-                    f"(window {window_hours}h)"
+                    f"Source deadman: ATS scanner fleet — no successful scan in "
+                    f"{age_seconds / 3600:.1f}h (window {window_hours}h)"
                 )
+    except Exception:
+        pass
 
-        # 2. company_scan_log age: MAX(scanned_at) for ATS-surface deadman
+    # 2. company_scan_log age: MAX(scanned_at) for ATS-surface deadman
+    try:
         row = conn.execute("SELECT MAX(scanned_at) FROM company_scan_log").fetchone()
         if row and row[0]:
-            last_log_scan = row[0]
             age_seconds = conn.execute(
                 "SELECT CAST(strftime('%s', 'now') - strftime('%s', ?) AS INTEGER)",
-                (last_log_scan,),
+                (row[0],),
             ).fetchone()[0]
             if age_seconds is not None and age_seconds > allowed_age_seconds:
-                age_hours = age_seconds / 3600
                 issues.append(
-                    f"Source deadman: ATS scan log — no scan in {age_hours:.1f}h "
-                    f"(window {window_hours}h)"
+                    f"Source deadman: ATS scan log — no scan in "
+                    f"{age_seconds / 3600:.1f}h (window {window_hours}h)"
                 )
-
-        return issues
     except Exception:
-        # Schema drift (e.g. missing company_scan_log table) must not break the heartbeat
-        return []
+        pass
+
+    return issues
 
 
 def run_health_check(app) -> None:
@@ -781,10 +785,13 @@ def run_health_check(app) -> None:
                     issues.append("Stale detection missed last night")
 
                 # 3. Are there recent consecutive errors from the same source?
+                # Uses epoch math to avoid separator bugs (occurred_at is
+                # 'T'-separated, datetime('now') is space-separated).
                 rows = conn.execute(
                     "SELECT action, COUNT(*) as cnt FROM user_activity "
                     "WHERE json_extract(metadata, '$.status') = 'failed' "
-                    "AND occurred_at >= datetime('now', '-24 hours') "
+                    "AND CAST(strftime('%s', occurred_at) AS INTEGER) >= "
+                    "CAST(strftime('%s', 'now') - 86400 AS INTEGER) "
                     "GROUP BY action HAVING cnt >= 5"
                 ).fetchall()
                 for r in rows:
@@ -836,8 +843,8 @@ def run_health_check(app) -> None:
                     issues.append(cost_health)
 
                 # 11. Supply-side per-source deadman: detects silent source failures
-                #     (issue #588). Read-only, checks ATS scanner fleet, feed ingestion,
-                #     and company_scan_log age against derived cadence windows.
+                #     (issue #588). Read-only, checks ATS scanner fleet and
+                #     company_scan_log age against the fixed daily ATS-scan window.
                 source_deadman_issues = _check_source_deadman(conn, config)
                 issues.extend(source_deadman_issues)
 
