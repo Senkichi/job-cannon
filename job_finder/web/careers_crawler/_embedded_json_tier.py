@@ -151,6 +151,18 @@ def _walk_for_job_array(data: Any) -> list[dict] | None:
     - Contains objects with job-like keys (title + url/slug)
 
     Returns None if no such array is found.
+
+    Precision-over-recall by design: when a page has several job-like {title, url}
+    arrays (e.g. a small featured-jobs list beside a larger nav/category menu),
+    this picks the SINGLE largest and discards the rest. That can drop the real
+    jobs if a non-job array outsizes them, but that miss is benign — the caller's
+    ``if not jobs`` fall-through escalates to the Playwright tier and recovers
+    them. The dangerous direction is the opposite: pulling a nav/category array in
+    as fake jobs would poison the north-star coverage metric. The largest-array
+    heuristic plus the downstream role-aware ``_title_matches`` filter guards that
+    direction. Do NOT "fix" this into a union-of-all-arrays: that trades the benign
+    false-negative for a false-positive regression the title filter can't fully
+    contain.
     """
     if isinstance(data, list):
         # Check if this array itself is a candidate
