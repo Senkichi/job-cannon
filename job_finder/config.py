@@ -309,7 +309,10 @@ def normalize_email_senders(cfg: dict) -> dict:
     Relocates ``sources.gmail.senders`` and ``sources.gmail.lookback_days`` to
     ``sources.imap.senders`` and ``sources.imap.lookback_days``, and POPs the legacy
     sub-keys (delete-after-move). The ``sources.gmail`` block itself is NOT deleted
-    (``sources.gmail.enabled`` stays). Idempotent.
+    (``sources.gmail.enabled`` stays). Idempotent. Never overwrites an existing
+    ``sources.imap`` value with a stale legacy one — if both blocks are populated
+    simultaneously (e.g. a hand-restored backup, a partially migrated file), the
+    current ``sources.imap`` value wins and the legacy key is still popped.
 
     Args:
         cfg: Full config dict (may be empty). Never mutated.
@@ -338,14 +341,19 @@ def normalize_email_senders(cfg: dict) -> dict:
 
     new_imap = {**new_sources["imap"]}
 
-    # Relocate senders if present
+    # Relocate senders if present, but never clobber a value the current
+    # sources.imap key already holds — a config with both blocks populated
+    # (e.g. a hand-restored backup, a partially migrated file) must keep the
+    # current value, not silently revert to the stale legacy one on every load.
     if has_legacy_senders:
-        new_imap["senders"] = gmail["senders"]
+        if "senders" not in new_imap:
+            new_imap["senders"] = gmail["senders"]
         new_gmail = {k: v for k, v in new_gmail.items() if k != "senders"}
 
-    # Relocate lookback_days if present
+    # Relocate lookback_days if present, same non-clobber guard.
     if has_legacy_lookback:
-        new_imap["lookback_days"] = gmail["lookback_days"]
+        if "lookback_days" not in new_imap:
+            new_imap["lookback_days"] = gmail["lookback_days"]
         new_gmail = {k: v for k, v in new_gmail.items() if k != "lookback_days"}
 
     # Reassemble the config

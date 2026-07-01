@@ -506,7 +506,14 @@ def _parse_form_to_config(form) -> dict:
     if _has("imap_lookback_days"):
         imap["lookback_days"] = safe_int(form["imap_lookback_days"], DEFAULT_LOOKBACK_DAYS)
     senders = {}
-    for sender_key in ("linkedin_alerts", "linkedin_jobs", "glassdoor", "indeed", "ziprecruiter"):
+    for sender_key in (
+        "linkedin_alerts",
+        "linkedin_jobs",
+        "glassdoor",
+        "indeed",
+        "ziprecruiter",
+        "jobright",
+    ):
         fk = f"imap_sender_{sender_key}"
         if _has(fk):
             senders[sender_key] = form[fk]

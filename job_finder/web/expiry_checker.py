@@ -35,6 +35,7 @@ import requests
 
 from job_finder.db import persist_job_expiry_state, update_pipeline_status
 from job_finder.json_utils import utc_now_iso
+from job_finder.web.ats_registry import EXPIRY_CHECKER_POSTING_ID_PATTERNS
 from job_finder.web.db_helpers import standalone_connection
 from job_finder.web.http_fetch import fetch_with_deadline
 
@@ -72,19 +73,6 @@ _GREENHOUSE_ERROR_RE = re.compile(r"[?&]error=true")
 # Posting ID extraction
 # ---------------------------------------------------------------------------
 
-_LEVER_POSTING_RE = re.compile(r"jobs\.lever\.co/[^/]+/([a-f0-9-]+)", re.IGNORECASE)
-_GREENHOUSE_POSTING_RE = re.compile(r"boards\.greenhouse\.io/[^/]+/jobs/(\d+)", re.IGNORECASE)
-_ASHBY_POSTING_RE = re.compile(
-    r"jobs\.ashbyhq\.com/[^/]+/([a-f0-9-]+)"
-    # No IGNORECASE — Ashby slugs are case-sensitive
-)
-
-_POSTING_PATTERNS = {
-    "lever": _LEVER_POSTING_RE,
-    "greenhouse": _GREENHOUSE_POSTING_RE,
-    "ashby": _ASHBY_POSTING_RE,
-}
-
 
 def _extract_posting_id(url: str, ats_platform: str) -> str | None:
     """Extract the individual posting ID from an ATS URL.
@@ -94,7 +82,7 @@ def _extract_posting_id(url: str, ats_platform: str) -> str | None:
     don't expose equivalent single-posting endpoints; they rely on Phase B
     batch reconciliation via job_finder.web.ats_reconciler.
     """
-    pattern = _POSTING_PATTERNS.get(ats_platform)
+    pattern = EXPIRY_CHECKER_POSTING_ID_PATTERNS.get(ats_platform)
     if pattern is None:
         return None
     match = pattern.search(url)

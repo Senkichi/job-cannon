@@ -26,6 +26,7 @@ from collections.abc import Callable
 from job_finder.json_utils import safe_json_load, utc_now_iso
 from job_finder.web.ats_platforms import SCANNERS_BY_NAME
 from job_finder.web.ats_platforms._registry import run_platform_scan
+from job_finder.web.ats_registry import RECONCILER_POSTING_ID_PATTERNS
 from job_finder.web.db_helpers import standalone_connection
 
 logger = logging.getLogger(__name__)
@@ -38,13 +39,6 @@ INCONCLUSIVE = "inconclusive"
 # A completeness-aware live-id fetcher: slug -> (live posting IDs, complete).
 _LiveIdFetcher = Callable[[str], tuple[set[str], bool]]
 
-# Posting-ID extraction patterns. Applied to BOTH sides of the set-diff
-# (scan output source_url, and stored source_urls entries) so the same
-# normalization rule governs both — immune to trailing slashes, UTM
-# tracking params, etc.
-# Lever: UUID in https://jobs.lever.co/<slug>/<uuid>
-_LEVER_POSTING_RE = re.compile(r"jobs\.lever\.co/[^/]+/([a-f0-9-]+)", re.IGNORECASE)
-
 # Greenhouse: multiple real-world URL shapes exist because companies can
 # route their public board to their own careers domain. The posting ID
 # (Greenhouse's numeric 'id') is the stable identifier:
@@ -54,41 +48,11 @@ _LEVER_POSTING_RE = re.compile(r"jobs\.lever\.co/[^/]+/([a-f0-9-]+)", re.IGNOREC
 #   https://boards.greenhouse.io/embed/job_app?for=<slug>&token=<id>   embed flow
 # Accept any of those by trying the path pattern first, then the gh_jid
 # query param as a fallback.
+# NOTE: This special-case chain is NOT folded into the registry — it's checked
+# before the dict lookup in _extract_posting_id and must stay local code.
 _GREENHOUSE_PATH_RE = re.compile(r"greenhouse\.io/[^/]+/jobs/(\d+)", re.IGNORECASE)
 _GREENHOUSE_GH_JID_RE = re.compile(r"[?&]gh_jid=(\d+)", re.IGNORECASE)
 _GREENHOUSE_EMBED_RE = re.compile(r"[?&]token=(\d+)", re.IGNORECASE)
-
-# Ashby: UUID after the (case-sensitive) slug, https://jobs.ashbyhq.com/<Slug>/<uuid>
-_ASHBY_POSTING_RE = re.compile(r"jobs\.ashbyhq\.com/[^/]+/([a-f0-9-]+)")
-
-# Workday: canonical IDs look like "Senior-Data-Scientist_JR101664" or "..._R-123456"
-# and are the LAST path segment of a myworkdayjobs.com URL. Must be anchored to the
-# Workday domain — an unanchored /job/ match picked up garbage from Google search
-# redirects (/job/li/m1/1) and ZipRecruiter path fragments (/Job/<slug>/-in-City).
-# Also works around scan_workday's URL-construction quirk that produces
-# ".../job//job/<location>/<slug>" (double /job/), since the final segment is
-# the same identifier either way.
-_WORKDAY_POSTING_RE = re.compile(
-    r"myworkdayjobs\.com/[^?#]*?/([^/?#]+)(?:/?(?:[?#]|$))", re.IGNORECASE
-)
-
-# SmartRecruiters: https://jobs.smartrecruiters.com/<slug>/<id>[-<slug-text>]
-# The canonical stable ID is the alphanumeric prefix. Stored URLs often keep
-# the trailing `-slug-text` suffix (SEO-friendly) that scan_smartrecruiters
-# strips — capture must stop at the first dash so both forms normalize to
-# the same ID.
-_SMARTRECRUITERS_POSTING_RE = re.compile(
-    r"jobs\.smartrecruiters\.com/[^/]+/([A-Za-z0-9_]+)", re.IGNORECASE
-)
-
-_SIMPLE_POSTING_ID_PATTERNS: dict[str, re.Pattern] = {
-    "lever": _LEVER_POSTING_RE,
-    "ashby": _ASHBY_POSTING_RE,
-    # Workday: used by _extract_posting_id on stored source_urls (both sides of
-    # the set-diff must use the same normalization rule).
-    "workday": _WORKDAY_POSTING_RE,
-    "smartrecruiters": _SMARTRECRUITERS_POSTING_RE,
-}
 
 # Platforms safe to batch-reconcile.
 # Workday and SmartRecruiters are included but use a completeness-gated path in
@@ -117,7 +81,7 @@ def _extract_posting_id(url: str, platform: str) -> str | None:
                 return match.group(1)
         return None
 
-    pattern = _SIMPLE_POSTING_ID_PATTERNS.get(platform)
+    pattern = RECONCILER_POSTING_ID_PATTERNS.get(platform)
     if pattern is None:
         return None
     match = pattern.search(url)

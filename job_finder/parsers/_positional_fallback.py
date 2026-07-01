@@ -35,6 +35,13 @@ logger = logging.getLogger(__name__)
 #   ziprecruiter — ziprecruiter.com/jobs|apply|job|c/.../Job
 #   glassdoor partner — glassdoor.com/partner/jobListing
 #   workday   — myworkdayjobs.com
+#
+# NOTE: jobright.ai URLs are deliberately NOT listed here. This generic fallback
+# infers title/company from the LINES around a URL, which mis-attributes
+# JobRight's plaintext layout (it emitted a location as the title and the next
+# job's title as the company). Since the HTML jobright_parser is the real path
+# and "ingest nothing + a zero-yield WARNING" beats ingesting garbage, JobRight
+# plaintext bodies are left to fall through to [] rather than this fallback.
 _JOB_URL_RE = re.compile(
     r"https?://\S*linkedin\.com/jobs/view/\S*"
     r"|https?://\S*indeed\.com/\S*[?&]jk=\S*"

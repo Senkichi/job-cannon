@@ -125,6 +125,35 @@ def test_normalize_email_senders_empty_config():
     assert normalized == {"sources": {}}
 
 
+def test_normalize_email_senders_does_not_clobber_current_imap_values():
+    """When both legacy gmail and current imap keys are populated simultaneously
+    (e.g. a hand-restored backup, a partially migrated file), the current
+    sources.imap value must survive -- not be silently reverted to the stale
+    legacy one. The legacy key is still popped from sources.gmail either way."""
+    cfg = {
+        "sources": {
+            "gmail": {
+                "senders": {"linkedin_alerts": "old@x.com"},
+                "lookback_days": 14,
+            },
+            "imap": {
+                "senders": {"linkedin_alerts": "custom@x.com"},
+                "lookback_days": 30,
+            },
+        }
+    }
+
+    normalized = normalize_email_senders(cfg)
+
+    # Current imap values are preserved, not clobbered by the stale legacy ones.
+    assert normalized["sources"]["imap"]["senders"] == {"linkedin_alerts": "custom@x.com"}
+    assert normalized["sources"]["imap"]["lookback_days"] == 30
+
+    # Legacy keys are still popped from sources.gmail regardless.
+    assert "senders" not in normalized.get("sources", {}).get("gmail", {})
+    assert "lookback_days" not in normalized.get("sources", {}).get("gmail", {})
+
+
 def test_normalize_email_senders_partial_legacy():
     """Config with only one legacy key (senders OR lookback_days) is handled."""
     # Only senders legacy

@@ -190,3 +190,187 @@ def test_parity_verify_fastpath_dispatch(monkeypatch):
         monkeypatch.setattr(ats_prober, attr, lambda slug: True)
         assert ats_registry.verify_fastpath_live(name, "s") is False, name
         assert _probe._verify_fastpath_live(name, "s") is False, name
+
+
+def test_parity_url_detection_order():
+    """The registry's URL_DETECTION_ORDER must preserve the exact resolution order
+    of the legacy extract_ats_from_url_best if-ladder. A silent reorder is the failure
+    mode this registry exists to prevent — this test captures the current order byte-for-byte."""
+    from job_finder.web.ats_detection import extract_ats_from_url_best
+
+    # Representative URLs that exercise each branch in the legacy if-ladder
+    test_urls = [
+        ("https://api.lever.co/v0/postings/abc123", "lever", "abc123", 10),
+        ("https://boards-api.greenhouse.io/v1/boards/testco/jobs/123", "greenhouse", "testco", 10),
+        (
+            "https://testco.myworkdayjobs.com/wday/cxs/tenant/testco/jobs",
+            "workday",
+            "testco/testco",
+            10,
+        ),
+        ("https://api.smartrecruiters.com/v1/companies/testco", "smartrecruiters", "testco", 10),
+        ("https://jobs.lever.co/testco", "lever", "testco", 5),
+        ("https://boards.greenhouse.io/testco", "greenhouse", "testco", 5),
+        ("https://jobs.ashbyhq.com/TestCo", "ashby", "TestCo", 5),  # Case-sensitive
+        ("https://testco.myworkdayjobs.com/en-US/testco", "workday", "testco/testco", 5),
+        ("https://jobs.smartrecruiters.com/testco", "smartrecruiters", "testco", 5),
+        ("https://testco.recruitee.com", "recruitee", "testco", 5),
+        ("https://testco.breezy.hr", "breezy", "testco", 5),
+        ("https://testco.applytojob.com", "jazzhr", "testco", 5),
+        ("https://testco.pinpointhq.com", "pinpoint", "testco", 5),
+        ("https://testco.jobs.personio.de", "personio", "testco", 5),
+        ("https://testco.bamboohr.com", "bamboohr", "testco", 5),
+        ("https://testco.teamtailor.com", "teamtailor", "testco", 5),
+        ("https://apply.workable.com/testco", "workable", "testco", 5),
+        ("https://jobs.jobvite.com/testco", "jobvite", "testco", 5),
+        (
+            "https://recruiting.paylocity.com/recruiting/jobs/All/550e8400-e29b-41d4-a716-446655440000",
+            "paylocity",
+            "550e8400-e29b-41d4-a716-446655440000",
+            5,
+        ),
+        ("https://ats.rippling.com/testco", "rippling", "testco", 5),
+        (
+            "https://recruiting2.ultipro.com/TENANT/JobBoard/550e8400-e29b-41d4-a716-446655440000",
+            "ultipro",
+            "recruiting2.ultipro.com/TENANT/550e8400-e29b-41d4-a716-446655440000",
+            5,
+        ),
+        ("https://pod.fa.us.oraclecloud.com", "oracle_cloud", "pod.fa.us.oraclecloud.com|CX_1", 5),
+        ("https://careers-testco.icims.com", "icims", "testco", 5),
+        (
+            "https://career1.successfactors.com?company=testco",
+            "successfactors",
+            "career1.successfactors.com|testco",
+            5,
+        ),
+        ("https://careers.conduent.com", "phenom", "careers.conduent.com", 5),
+        (
+            "https://workforcenow.adp.com/jobs?cid=550e8400-e29b-41d4-a716-446655440000",
+            "adp",
+            "550e8400-e29b-41d4-a716-446655440000",
+            5,
+        ),
+        # MIXED-CASE regression guards: lever/greenhouse slugs and the workday
+        # TENANT must preserve case byte-for-byte (a `.lower()` here silently
+        # mis-slugs the scanner's API URL -> 404 -> silent scan loss, and drifts
+        # DB slug identity). The pre-fix registry lowercased these; the legacy
+        # extract_ats_from_url_best preserved them. Lowercase-only inputs (as the
+        # rest of this list used) could not catch that — these mixed-case rows do.
+        ("https://jobs.lever.co/NimbleAI", "lever", "NimbleAI", 5),
+        ("https://api.lever.co/v0/postings/NimbleAI", "lever", "NimbleAI", 10),
+        ("https://boards.greenhouse.io/MixedCo", "greenhouse", "MixedCo", 5),
+        (
+            "https://boards-api.greenhouse.io/v1/boards/MixedCo/jobs/1",
+            "greenhouse",
+            "MixedCo",
+            10,
+        ),
+        (
+            "https://MixedTen.myworkdayjobs.com/en-US/MixedBoard",
+            "workday",
+            "MixedTen/MixedBoard",
+            5,
+        ),
+    ]
+
+    for url, expected_platform, expected_slug, expected_spec in test_urls:
+        result = extract_ats_from_url_best(url)
+        assert result is not None, f"Legacy implementation returned None for {url}"
+        platform, slug, spec = result
+        assert platform == expected_platform, (
+            f"URL {url}: expected platform {expected_platform}, got {platform}"
+        )
+        assert slug == expected_slug, f"URL {url}: expected slug {expected_slug}, got {slug}"
+        assert spec == expected_spec, f"URL {url}: expected spec {expected_spec}, got {spec}"
+
+
+def test_equivalence_reconciler_posting_id_patterns():
+    """The registry's RECONCILER_POSTING_ID_PATTERNS must exactly match the legacy
+    _SIMPLE_POSTING_ID_PATTERNS from ats_reconciler (platform-key set and regex patterns).
+    Greenhouse is excluded — ats_reconciler special-cases it with a 3-pattern chain."""
+    import re
+
+    # Golden baseline from pre-PR-5 ats_reconciler._SIMPLE_POSTING_ID_PATTERNS
+    golden_patterns = {
+        "lever": re.compile(r"jobs\.lever\.co/[^/]+/([a-f0-9-]+)", re.IGNORECASE),
+        "ashby": re.compile(r"jobs\.ashbyhq\.com/[^/]+/([a-f0-9-]+)"),
+        "workday": re.compile(
+            r"myworkdayjobs\.com/[^?#]*?/([^/?#]+)(?:/?(?:[?#]|$))", re.IGNORECASE
+        ),
+        "smartrecruiters": re.compile(
+            r"jobs\.smartrecruiters\.com/[^/]+/([A-Za-z0-9_]+)", re.IGNORECASE
+        ),
+    }
+
+    derived = ats_registry.RECONCILER_POSTING_ID_PATTERNS
+
+    # Platform-key set must match exactly
+    assert set(derived.keys()) == set(golden_patterns.keys()), (
+        f"Platform key mismatch: derived={set(derived.keys())}, "
+        f"golden={set(golden_patterns.keys())}"
+    )
+
+    # Regex patterns must be byte-identical (pattern string + flags)
+    for platform in golden_patterns:
+        assert derived[platform].pattern == golden_patterns[platform].pattern, (
+            f"{platform}: pattern mismatch - derived={derived[platform].pattern}, "
+            f"golden={golden_patterns[platform].pattern}"
+        )
+        assert derived[platform].flags == golden_patterns[platform].flags, (
+            f"{platform}: flags mismatch - derived={derived[platform].flags}, "
+            f"golden={golden_patterns[platform].flags}"
+        )
+
+
+def test_equivalence_expiry_checker_posting_id_patterns():
+    """The registry's EXPIRY_CHECKER_POSTING_ID_PATTERNS must exactly match the legacy
+    _POSTING_PATTERNS from expiry_checker (platform-key set and regex patterns).
+    Workday and SmartRecruiters are excluded — they rely on Phase B batch reconciliation."""
+    import re
+
+    # Golden baseline from pre-PR-5 expiry_checker._POSTING_PATTERNS
+    golden_patterns = {
+        "lever": re.compile(r"jobs\.lever\.co/[^/]+/([a-f0-9-]+)", re.IGNORECASE),
+        "greenhouse": re.compile(r"boards\.greenhouse\.io/[^/]+/jobs/(\d+)", re.IGNORECASE),
+        "ashby": re.compile(r"jobs\.ashbyhq\.com/[^/]+/([a-f0-9-]+)"),
+    }
+
+    derived = ats_registry.EXPIRY_CHECKER_POSTING_ID_PATTERNS
+
+    # Platform-key set must match exactly
+    assert set(derived.keys()) == set(golden_patterns.keys()), (
+        f"Platform key mismatch: derived={set(derived.keys())}, "
+        f"golden={set(golden_patterns.keys())}"
+    )
+
+    # Regex patterns must be byte-identical (pattern string + flags)
+    for platform in golden_patterns:
+        assert derived[platform].pattern == golden_patterns[platform].pattern, (
+            f"{platform}: pattern mismatch - derived={derived[platform].pattern}, "
+            f"golden={golden_patterns[platform].pattern}"
+        )
+        assert derived[platform].flags == golden_patterns[platform].flags, (
+            f"{platform}: flags mismatch - derived={derived[platform].flags}, "
+            f"golden={golden_patterns[platform].flags}"
+        )
+
+
+def test_expiry_checker_excludes_workday_and_smartrecruiters():
+    """Regression test: expiry_checker must NOT resolve posting IDs for workday or
+    smartrecruiters (per its docstring: they rely on Phase B batch reconciliation).
+    This guards against a future refactor that might naively expose all posting_id_pattern
+    platforms to expiry_checker."""
+    from job_finder.web.expiry_checker import _extract_posting_id
+
+    # Workday URL with posting ID
+    workday_url = "https://testco.myworkdayjobs.com/en-US/testco/job/Senior-Data-Scientist_R-12345"
+    assert _extract_posting_id(workday_url, "workday") is None, (
+        "expiry_checker must return None for workday (relies on Phase B reconciliation)"
+    )
+
+    # SmartRecruiters URL with posting ID
+    sr_url = "https://jobs.smartrecruiters.com/testco/12345-senior-data-scientist"
+    assert _extract_posting_id(sr_url, "smartrecruiters") is None, (
+        "expiry_checker must return None for smartrecruiters (relies on Phase B reconciliation)"
+    )

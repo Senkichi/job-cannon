@@ -63,6 +63,7 @@ sources:
       glassdoor: noreply@glassdoor.com
       indeed: alert@indeed.com
       ziprecruiter: no-reply@ziprecruiter.com
+      jobright: noreply@jobright.ai
   gmail:
     # Gmail API source (OAuth power-user path - requires python -m job_finder.gmail_auth)
     enabled: false

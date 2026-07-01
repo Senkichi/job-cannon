@@ -19,7 +19,7 @@ class TestSmartRecruitersUrlDetection:
         urls = ["https://jobs.smartrecruiters.com/LinkedIn3/744000115714244-staff-data-scientist"]
         platform, slug = extract_ats_from_urls(urls)
         assert platform == "smartrecruiters"
-        assert slug == "LinkedIn3"
+        assert slug == "LinkedIn3"  # Case preserved after PR-4 registry migration
 
     def test_careers_url_returns_smartrecruiters_and_slug(self):
         """careers.smartrecruiters.com/{slug}/... returns ('smartrecruiters', slug)."""

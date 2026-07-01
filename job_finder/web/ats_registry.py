@@ -28,6 +28,8 @@ that monkeypatches ``ats_prober._probe_lever`` still takes effect.
 
 from __future__ import annotations
 
+import re
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 
 import job_finder.web.ats_prober as _prober
@@ -37,6 +39,75 @@ from job_finder.web.ats_platforms._platforms_icims import SCANNER as _ICIMS_SCAN
 from job_finder.web.ats_platforms._platforms_icims import PlaywrightPlatformScanner
 from job_finder.web.ats_platforms._platforms_phenom import SCANNER as _PHENOM_SCANNER
 from job_finder.web.ats_platforms._registry import PlatformScanner
+
+# ---------------------------------------------------------------------------
+# URL detection patterns (migrated from ats_detection.py)
+# ---------------------------------------------------------------------------
+_SPECIFICITY_API = 10
+_SPECIFICITY_BOARD = 5
+
+
+def _extract_slug_default(match: re.Match, url: str) -> str:
+    """Default slug extractor: return the first capture group, lowercased."""
+    return match.group(1).lower()
+
+
+def _extract_slug_preserve_case(match: re.Match, url: str) -> str:
+    """Slug extractor that preserves case (for platforms where case matters)."""
+    return match.group(1)
+
+
+def _extract_slug_ashby(match: re.Match, url: str) -> str:
+    """Ashby slug: case-sensitive (no lowercasing)."""
+    return match.group(1)  # Preserve case
+
+
+def _extract_slug_workday_api(match: re.Match, url: str) -> str:
+    """Workday API slug: {subdomain}/{board} (middle tenant ignored)."""
+    return f"{match.group(1)}/{match.group(2)}"  # tenant + board case preserved (legacy parity)
+
+
+def _extract_slug_workday_human(match: re.Match, url: str) -> str | None:
+    """Workday human slug: {subdomain}/{board}. Skip if URL has /wday/ (API handles those)."""
+    if "/wday/" in url.lower():
+        return None  # Signal to skip - API pattern should have matched
+    return f"{match.group(1)}/{match.group(2)}"  # tenant + board case preserved (legacy parity)
+
+
+def _extract_slug_ultipro(match: re.Match, url: str) -> str:
+    """UltiPro slug: {host}/{tenant}/{board} (tenant case-sensitive)"""
+    host = match.group(1).lower()
+    tenant = match.group(2)  # case-sensitive
+    board = match.group(3).lower()
+    return f"{host}/{tenant}/{board}"
+
+
+def _extract_slug_oracle_cloud(match: re.Match, url: str) -> str:
+    """Oracle Cloud slug: {host}|{site} (default CX_1)"""
+    host = match.group(1).lower()
+    site_match = re.search(r"(?:/sites/|siteNumber=)([A-Za-z0-9_]+)", url, re.IGNORECASE)
+    site = site_match.group(1) if site_match else "CX_1"
+    return f"{host}|{site}"
+
+
+def _extract_slug_phenom(match: re.Match, url: str) -> str:
+    """Phenom slug: full host from URL"""
+    from urllib.parse import urlparse
+
+    parsed = urlparse(url)
+    return parsed.netloc.lower()
+
+
+def _extract_slug_successfactors(match: re.Match, url: str) -> str:
+    """SuccessFactors slug: {host}|{company_id}"""
+    host = match.group(1).lower()
+    company_id = match.group(2)
+    return f"{host}|{company_id}"
+
+
+def _extract_slug_paylocity(match: re.Match, url: str) -> str:
+    """Paylocity slug: GUID (preserve case)"""
+    return match.group(1)  # GUID, keep as-is
 
 
 @dataclass(frozen=True)
@@ -62,6 +133,11 @@ class PlatformSpec:
     reconcilable: bool = False
     non_scannable: bool = False
     keyword_adapter: bool = False
+    # POSTING-ID EXTRACTION — regex for extracting stable posting IDs from URLs.
+    # Used by expiry_checker (Signal 1 per-posting ATS API) and ats_reconciler
+    # (set-diff staleness detection). The pattern must match the URL shape
+    # that the platform's single-posting endpoint accepts.
+    posting_id_pattern: re.Pattern | None = None
 
 
 # --- The registry. ONE entry per platform; capability flags only here. ---------
@@ -76,6 +152,7 @@ _SPECS: tuple[PlatformSpec, ...] = (
         speculative_order=0,
         url_fastpath=True,
         reconcilable=True,
+        posting_id_pattern=re.compile(r"jobs\.lever\.co/[^/]+/([a-f0-9-]+)", re.IGNORECASE),
     ),
     PlatformSpec(
         "greenhouse",
@@ -84,6 +161,7 @@ _SPECS: tuple[PlatformSpec, ...] = (
         speculative_order=1,
         url_fastpath=True,
         reconcilable=True,
+        posting_id_pattern=re.compile(r"boards\.greenhouse\.io/[^/]+/jobs/(\d+)", re.IGNORECASE),
     ),
     PlatformSpec(
         "ashby",
@@ -92,6 +170,7 @@ _SPECS: tuple[PlatformSpec, ...] = (
         speculative_order=2,
         url_fastpath=True,
         reconcilable=True,
+        posting_id_pattern=re.compile(r"jobs\.ashbyhq\.com/[^/]+/([a-f0-9-]+)"),
     ),
     PlatformSpec(
         "jazzhr",
@@ -115,12 +194,23 @@ _SPECS: tuple[PlatformSpec, ...] = (
         url_fastpath=True,
     ),
     # Reconcile-only enterprise boards (POST APIs; not speculative-probed).
-    PlatformSpec("workday", probe_attr="_probe_workday", url_fastpath=True, reconcilable=True),
+    PlatformSpec(
+        "workday",
+        probe_attr="_probe_workday",
+        url_fastpath=True,
+        reconcilable=True,
+        posting_id_pattern=re.compile(
+            r"myworkdayjobs\.com/[^?#]*?/([^/?#]+)(?:/?(?:[?#]|$))", re.IGNORECASE
+        ),
+    ),
     PlatformSpec(
         "smartrecruiters",
         probe_attr="_probe_smartrecruiters",
         url_fastpath=True,
         reconcilable=True,
+        posting_id_pattern=re.compile(
+            r"jobs\.smartrecruiters\.com/[^/]+/([A-Za-z0-9_]+)", re.IGNORECASE
+        ),
     ),
     # FP-prone: evidence/URL-path promotable only (never speculative-guessed).
     PlatformSpec("bamboohr", probe_attr="_probe_bamboohr", fp_prone=True, url_fastpath=True),
@@ -227,6 +317,215 @@ KEYWORD_ADAPTER_PLATFORMS: frozenset[str] = frozenset(
     n for n, s in PLATFORMS.items() if s.keyword_adapter
 )
 
+# URL detection ordering: load-bearing flat list of (platform, pattern, specificity, extractor)
+# for extract_ats_from_url_best. Replaces the hand-maintained if-ladder in ats_detection.py.
+# The order is byte-for-byte preserved by the parity test.
+_URL_DETECTION_PATTERNS: list[
+    tuple[str, re.Pattern, int, Callable[[re.Match, str], str | None]]
+] = [
+    # Order 0: Lever API
+    (
+        "lever",
+        re.compile(r"https?://api\.lever\.co/v0/postings/([^/?#]+)", re.IGNORECASE),
+        _SPECIFICITY_API,
+        _extract_slug_preserve_case,
+    ),
+    # Order 1: Greenhouse API
+    (
+        "greenhouse",
+        re.compile(r"https?://boards-api\.greenhouse\.io/v1/boards/([^/?#]+)", re.IGNORECASE),
+        _SPECIFICITY_API,
+        _extract_slug_preserve_case,
+    ),
+    # Order 2: Workday API
+    (
+        "workday",
+        re.compile(
+            r"https?://([^/]+)\.myworkdayjobs\.com/wday/cxs/[^/]+/([^/?#]+)", re.IGNORECASE
+        ),
+        _SPECIFICITY_API,
+        _extract_slug_workday_api,
+    ),
+    # Order 3: SmartRecruiters API
+    (
+        "smartrecruiters",
+        re.compile(r"https?://api\.smartrecruiters\.com/v1/companies/([^/?#]+)", re.IGNORECASE),
+        _SPECIFICITY_API,
+        _extract_slug_preserve_case,
+    ),
+    # Order 4: Lever board
+    (
+        "lever",
+        re.compile(r"https?://jobs\.lever\.co/([^/?#]+)", re.IGNORECASE),
+        _SPECIFICITY_BOARD,
+        _extract_slug_preserve_case,
+    ),
+    # Order 5: Greenhouse board
+    (
+        "greenhouse",
+        re.compile(r"https?://(?:job-)?boards\.greenhouse\.io/([^/?#]+)", re.IGNORECASE),
+        _SPECIFICITY_BOARD,
+        _extract_slug_preserve_case,
+    ),
+    # Order 6: Ashby (case-sensitive)
+    (
+        "ashby",
+        re.compile(r"https?://jobs\.ashbyhq\.com/([^/?#]+)"),
+        _SPECIFICITY_BOARD,
+        _extract_slug_ashby,
+    ),
+    # Order 7: Workday human (with /wday/ skip)
+    (
+        "workday",
+        re.compile(r"https?://([^/]+)\.myworkdayjobs\.com/(?:en-US/)?([^/?#]+)", re.IGNORECASE),
+        _SPECIFICITY_BOARD,
+        _extract_slug_workday_human,
+    ),
+    # Order 8: SmartRecruiters board
+    (
+        "smartrecruiters",
+        re.compile(r"https?://(?:jobs|careers)\.smartrecruiters\.com/([^/?#]+)", re.IGNORECASE),
+        _SPECIFICITY_BOARD,
+        _extract_slug_preserve_case,
+    ),
+    # Order 9: Recruitee
+    (
+        "recruitee",
+        re.compile(r"https?://([a-z0-9-]+)\.recruitee\.com", re.IGNORECASE),
+        _SPECIFICITY_BOARD,
+        _extract_slug_default,
+    ),
+    # Order 10: Breezy
+    (
+        "breezy",
+        re.compile(r"https?://([a-z0-9-]+)\.breezy\.hr", re.IGNORECASE),
+        _SPECIFICITY_BOARD,
+        _extract_slug_default,
+    ),
+    # Order 11: JazzHR
+    (
+        "jazzhr",
+        re.compile(r"https?://([a-z0-9-]+)\.applytojob\.com", re.IGNORECASE),
+        _SPECIFICITY_BOARD,
+        _extract_slug_default,
+    ),
+    # Order 12: Pinpoint
+    (
+        "pinpoint",
+        re.compile(r"https?://([a-z0-9-]+)\.pinpointhq\.com", re.IGNORECASE),
+        _SPECIFICITY_BOARD,
+        _extract_slug_default,
+    ),
+    # Order 13: Personio
+    (
+        "personio",
+        re.compile(r"https?://([a-z0-9-]+)\.jobs\.personio\.(?:de|com)", re.IGNORECASE),
+        _SPECIFICITY_BOARD,
+        _extract_slug_default,
+    ),
+    # Order 14: BambooHR
+    (
+        "bamboohr",
+        re.compile(r"https?://([a-z0-9-]+)\.bamboohr\.com", re.IGNORECASE),
+        _SPECIFICITY_BOARD,
+        _extract_slug_default,
+    ),
+    # Order 15: Teamtailor
+    (
+        "teamtailor",
+        re.compile(r"https?://([a-z0-9-]+)\.teamtailor\.com", re.IGNORECASE),
+        _SPECIFICITY_BOARD,
+        _extract_slug_default,
+    ),
+    # Order 16: Workable
+    (
+        "workable",
+        re.compile(r"https?://apply\.workable\.com/([^/?#]+)", re.IGNORECASE),
+        _SPECIFICITY_BOARD,
+        _extract_slug_default,
+    ),
+    # Order 17: Jobvite
+    (
+        "jobvite",
+        re.compile(r"https?://jobs\.jobvite\.com/([^/?#]+)", re.IGNORECASE),
+        _SPECIFICITY_BOARD,
+        _extract_slug_default,
+    ),
+    # Order 18: Paylocity
+    (
+        "paylocity",
+        re.compile(
+            r"https?://(?:[^/]*)recruiting\.paylocity\.com/[Rr]ecruiting/[Jj]obs/All/([0-9a-f-]{36})",
+            re.IGNORECASE,
+        ),
+        _SPECIFICITY_BOARD,
+        _extract_slug_paylocity,
+    ),
+    # Order 19: Rippling
+    (
+        "rippling",
+        re.compile(r"https?://ats\.rippling\.com/([^/?#]+)", re.IGNORECASE),
+        _SPECIFICITY_BOARD,
+        _extract_slug_default,
+    ),
+    # Order 20: UltiPro
+    (
+        "ultipro",
+        re.compile(
+            r"https?://(recruiting\d*\.ultipro\.com)/([A-Za-z0-9]+)/JobBoard/([0-9a-fA-F-]{36})",
+            re.IGNORECASE,
+        ),
+        _SPECIFICITY_BOARD,
+        _extract_slug_ultipro,
+    ),
+    # Order 21: Oracle Cloud
+    (
+        "oracle_cloud",
+        re.compile(
+            r"https?://([a-z0-9][a-z0-9-]*\.fa\.[a-z0-9-]+\.oraclecloud\.com)", re.IGNORECASE
+        ),
+        _SPECIFICITY_BOARD,
+        _extract_slug_oracle_cloud,
+    ),
+    # Order 22: iCIMS
+    (
+        "icims",
+        re.compile(r"https?://(?:careers|jobs)-([a-z0-9][a-z0-9-]*)\.icims\.com", re.IGNORECASE),
+        _SPECIFICITY_BOARD,
+        _extract_slug_default,
+    ),
+    # Order 23: SAP SuccessFactors demo (returns None) - must be before Phenom
+    (
+        "successfactors",
+        re.compile(r"https?://(?:sapsfdemojobs\.com|jobs\.hr\.cloud\.sap\.com)", re.IGNORECASE),
+        _SPECIFICITY_BOARD,
+        lambda m, u: None,
+    ),
+    # Order 24: Phenom
+    (
+        "phenom",
+        re.compile(r"https?://(?:careers|jobs)\.([a-z0-9.-]+)", re.IGNORECASE),
+        _SPECIFICITY_BOARD,
+        _extract_slug_phenom,
+    ),
+    # Order 25: SuccessFactors
+    (
+        "successfactors",
+        re.compile(
+            r"https?://(career\d*\.successfactors\.(?:com|eu))\b.*company=([^&]+)", re.IGNORECASE
+        ),
+        _SPECIFICITY_BOARD,
+        _extract_slug_successfactors,
+    ),
+    # Order 26: ADP
+    (
+        "adp",
+        re.compile(r"https?://workforcenow\.adp\.com/.*[?&]cid=([0-9a-fA-F-]{36})", re.IGNORECASE),
+        _SPECIFICITY_BOARD,
+        _extract_slug_default,
+    ),
+]
+
 # Speculative ladder: ordered (platform, probe_fn) pairs, fastest first. Probe
 # refs captured here (import-time) match the prior _PROBES behaviour exactly.
 SPECULATIVE_PROBES: list[tuple[str, object]] = [
@@ -251,3 +550,24 @@ SCANNABLE_PLATFORMS: frozenset[str] = frozenset(
 # ``_TARGET_PLATFORMS = (SCANNERS_BY_NAME - NON_SCANNABLE) | {icims}`` — a
 # careers link to a platform in this set is promotable; one to a stub is not.
 SCANNABLE_TARGET_PLATFORMS: frozenset[str] = SCANNABLE_PLATFORMS - NON_SCANNABLE_PLATFORMS
+
+# Posting-ID extraction patterns for ats_reconciler (set-diff staleness detection).
+# Greenhouse is excluded here — ats_reconciler._extract_posting_id special-cases
+# greenhouse with a 3-pattern try-in-order chain (_GREENHOUSE_PATH_RE / _GREENHOUSE_GH_JID_RE /
+# _GREENHOUSE_EMBED_RE) checked before any dict lookup. Workday and SmartRecruiters
+# are included but use completeness-gated paths in reconcile_company.
+RECONCILER_POSTING_ID_PATTERNS: dict[str, re.Pattern] = {
+    n: s.posting_id_pattern
+    for n, s in PLATFORMS.items()
+    if s.posting_id_pattern is not None and n in {"lever", "ashby", "workday", "smartrecruiters"}
+}
+
+# Posting-ID extraction patterns for expiry_checker (Signal 1 per-posting ATS API).
+# Covers the three platforms whose APIs accept a posting-id lookup. Workday and
+# SmartRecruiters don't expose equivalent single-posting endpoints; they rely on
+# Phase B batch reconciliation via ats_reconciler (per expiry_checker docstring).
+EXPIRY_CHECKER_POSTING_ID_PATTERNS: dict[str, re.Pattern] = {
+    n: s.posting_id_pattern
+    for n, s in PLATFORMS.items()
+    if s.posting_id_pattern is not None and n in {"lever", "greenhouse", "ashby"}
+}

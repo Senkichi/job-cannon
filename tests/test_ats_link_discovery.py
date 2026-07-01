@@ -39,7 +39,11 @@ class TestDiscoverAtsLinks:
             "</script></head><body>Careers</body></html>"
         )
         results = discover_ats_links_from_html(html, "https://acme.com/careers")
-        assert ("workday", "acme.wd5/External", 5) in results
+        assert (
+            "workday",
+            "acme.wd5/External",
+            5,
+        ) in results  # Board case preserved (original behavior)
 
     def test_sorted_specificity_descending(self):
         # API-shaped Workday URL (spec 10) and a distinct board-shaped one
@@ -51,8 +55,16 @@ class TestDiscoverAtsLinks:
             "</body></html>"
         )
         results = discover_ats_links_from_html(html, "https://x.com/careers")
-        assert results[0] == ("workday", "alpha.wd1/Alpha", 10)
-        assert ("workday", "beta.wd1/Beta", 5) in results
+        assert results[0] == (
+            "workday",
+            "alpha.wd1/Alpha",
+            10,
+        )  # Board case preserved (original behavior)
+        assert (
+            "workday",
+            "beta.wd1/Beta",
+            5,
+        ) in results  # Board case preserved (original behavior)
         # specificity is non-increasing
         specs = [spec for _p, _s, spec in results]
         assert specs == sorted(specs, reverse=True)
