@@ -155,6 +155,22 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Override the user-data directory (else JOB_CANNON_USER_DATA_DIR "
         "or the platformdirs default).",
     )
+    healthcheck.add_argument(
+        "--notify",
+        action="store_true",
+        default=False,
+        help="On a DOWN verdict, send a desktop/email notification (per "
+        "`notifications:` config), deduplicated so it fires once per outage "
+        "and once on recovery. For the OS-scheduled deadman probe.",
+    )
+    healthcheck.add_argument(
+        "--degraded",
+        action="store_true",
+        default=False,
+        help="With `--notify`, also notify on a DEGRADED verdict (stale "
+        "heartbeat / degraded source), not only DOWN. Off by default to avoid "
+        "double-notifying alongside the in-app escalation.",
+    )
 
     # ``serve`` — like the bare invocation, but first reclaims :5000 from a
     # crashed Job Cannon orphan (the Werkzeug reloader parent AND worker that
