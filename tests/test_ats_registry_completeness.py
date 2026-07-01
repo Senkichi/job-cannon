@@ -251,6 +251,27 @@ def test_parity_url_detection_order():
             "550e8400-e29b-41d4-a716-446655440000",
             5,
         ),
+        # MIXED-CASE regression guards: lever/greenhouse slugs and the workday
+        # TENANT must preserve case byte-for-byte (a `.lower()` here silently
+        # mis-slugs the scanner's API URL -> 404 -> silent scan loss, and drifts
+        # DB slug identity). The pre-fix registry lowercased these; the legacy
+        # extract_ats_from_url_best preserved them. Lowercase-only inputs (as the
+        # rest of this list used) could not catch that — these mixed-case rows do.
+        ("https://jobs.lever.co/NimbleAI", "lever", "NimbleAI", 5),
+        ("https://api.lever.co/v0/postings/NimbleAI", "lever", "NimbleAI", 10),
+        ("https://boards.greenhouse.io/MixedCo", "greenhouse", "MixedCo", 5),
+        (
+            "https://boards-api.greenhouse.io/v1/boards/MixedCo/jobs/1",
+            "greenhouse",
+            "MixedCo",
+            10,
+        ),
+        (
+            "https://MixedTen.myworkdayjobs.com/en-US/MixedBoard",
+            "workday",
+            "MixedTen/MixedBoard",
+            5,
+        ),
     ]
 
     for url, expected_platform, expected_slug, expected_spec in test_urls:

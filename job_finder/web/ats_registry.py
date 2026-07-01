@@ -64,14 +64,14 @@ def _extract_slug_ashby(match: re.Match, url: str) -> str:
 
 def _extract_slug_workday_api(match: re.Match, url: str) -> str:
     """Workday API slug: {subdomain}/{board} (middle tenant ignored)."""
-    return f"{match.group(1).lower()}/{match.group(2)}"  # Board case preserved
+    return f"{match.group(1)}/{match.group(2)}"  # tenant + board case preserved (legacy parity)
 
 
 def _extract_slug_workday_human(match: re.Match, url: str) -> str | None:
     """Workday human slug: {subdomain}/{board}. Skip if URL has /wday/ (API handles those)."""
     if "/wday/" in url.lower():
         return None  # Signal to skip - API pattern should have matched
-    return f"{match.group(1).lower()}/{match.group(2)}"  # Board case preserved
+    return f"{match.group(1)}/{match.group(2)}"  # tenant + board case preserved (legacy parity)
 
 
 def _extract_slug_ultipro(match: re.Match, url: str) -> str:
@@ -309,14 +309,14 @@ _URL_DETECTION_PATTERNS: list[
         "lever",
         re.compile(r"https?://api\.lever\.co/v0/postings/([^/?#]+)", re.IGNORECASE),
         _SPECIFICITY_API,
-        _extract_slug_default,
+        _extract_slug_preserve_case,
     ),
     # Order 1: Greenhouse API
     (
         "greenhouse",
         re.compile(r"https?://boards-api\.greenhouse\.io/v1/boards/([^/?#]+)", re.IGNORECASE),
         _SPECIFICITY_API,
-        _extract_slug_default,
+        _extract_slug_preserve_case,
     ),
     # Order 2: Workday API
     (
@@ -339,14 +339,14 @@ _URL_DETECTION_PATTERNS: list[
         "lever",
         re.compile(r"https?://jobs\.lever\.co/([^/?#]+)", re.IGNORECASE),
         _SPECIFICITY_BOARD,
-        _extract_slug_default,
+        _extract_slug_preserve_case,
     ),
     # Order 5: Greenhouse board
     (
         "greenhouse",
         re.compile(r"https?://(?:job-)?boards\.greenhouse\.io/([^/?#]+)", re.IGNORECASE),
         _SPECIFICITY_BOARD,
-        _extract_slug_default,
+        _extract_slug_preserve_case,
     ),
     # Order 6: Ashby (case-sensitive)
     (
