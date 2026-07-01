@@ -378,3 +378,84 @@ def test_rediscovery_deeper_offtarget_stays_frozen(mock_get, db):
     row = _row(db, cid)
     assert row["scan_enabled"] == 0
     assert row["careers_url"] == "https://offdeep.com/careers"  # unchanged
+
+
+@patch("job_finder.web.ats_reprobe.requests.get")
+@patch("job_finder.web.ats_reprobe._playwright_extractable")
+def test_playwright_fallback_when_static_yields_nothing(mock_pw, mock_get, db):
+    # Static extraction yields nothing, but Playwright rendering finds jobs.
+    # Playwright should be invoked as the fallback tier.
+    cid = _seed(db, "JSCo", "https://jsco.com/careers", scan_enabled=0)
+    mock_get.side_effect = _fake_get({"https://jsco.com/careers": _NO_ATS_HTML})
+    mock_pw.return_value = 1  # Playwright finds 1 job
+
+    summary = reprobe_custom_miss_cohort(db, _CONFIG_WITH_PROFILE)
+
+    assert summary["playwright_fallback"] == 1
+    assert summary["no_candidate"] == 0
+    mock_pw.assert_called_once()
+    row = _row(db, cid)
+    assert row["scan_enabled"] == 1
+
+
+@patch("job_finder.web.ats_reprobe.requests.get")
+@patch("job_finder.web.ats_reprobe._playwright_extractable")
+def test_playwright_not_invoked_when_static_succeeds(mock_pw, mock_get, db):
+    # ADVERSARIAL: static extraction already returns jobs; Playwright must NOT
+    # be invoked (it's expensive and should only run as a fallback).
+    cid = _seed(db, "StaticCo", "https://staticco.com/careers", scan_enabled=0)
+    mock_get.side_effect = _fake_get({"https://staticco.com/careers": _CUSTOM_LIST_HTML})
+    mock_pw.return_value = 0  # Should never be called
+
+    summary = reprobe_custom_miss_cohort(db, _CONFIG_WITH_PROFILE)
+
+    assert summary["custom_extractable"] == 1
+    assert summary["playwright_fallback"] == 0
+    mock_pw.assert_not_called()  # Key adversarial assertion
+    row = _row(db, cid)
+    assert row["scan_enabled"] == 1
+
+
+@patch("job_finder.web.ats_reprobe.requests.get")
+@patch("job_finder.web.ats_reprobe._playwright_extractable")
+def test_playwright_fallback_in_rediscovery_path(mock_pw, mock_get, db):
+    # Rediscovery path: deeper page has no static jobs, but Playwright finds them.
+    cid = _seed(db, "DeepJSCo", "https://deepjsco.com/careers", scan_enabled=0)
+    mock_get.side_effect = _fake_get(
+        {
+            "https://deepjsco.com/careers": _MARKETING_WITH_OPENINGS,
+            "https://deepjsco.com/careers/openings": _NO_ATS_HTML,
+        }
+    )
+    mock_pw.return_value = 1  # Playwright finds 1 job on deeper page
+
+    summary = reprobe_custom_miss_cohort(db, _CONFIG_WITH_PROFILE)
+
+    assert summary["rediscovered_custom"] == 1
+    assert summary["no_candidate"] == 0
+    mock_pw.assert_called_once_with(
+        "https://deepjsco.com/careers/openings",
+        ["Data Scientist"],
+        [],
+        db_path=db,
+    )
+    row = _row(db, cid)
+    assert row["scan_enabled"] == 1
+    assert row["careers_url"] == "https://deepjsco.com/careers/openings"  # repointed
+
+
+@patch("job_finder.web.ats_reprobe.requests.get")
+@patch("job_finder.web.ats_reprobe._playwright_extractable")
+def test_playwright_fallback_yields_nothing_stays_frozen(mock_pw, mock_get, db):
+    # Playwright fallback also yields nothing; company stays frozen.
+    cid = _seed(db, "EmptyJSCo", "https://emptyjsco.com/careers", scan_enabled=0)
+    mock_get.side_effect = _fake_get({"https://emptyjsco.com/careers": _NO_ATS_HTML})
+    mock_pw.return_value = 0  # Playwright finds nothing
+
+    summary = reprobe_custom_miss_cohort(db, _CONFIG_WITH_PROFILE)
+
+    assert summary["playwright_fallback"] == 0
+    assert summary["no_candidate"] == 1
+    mock_pw.assert_called_once()
+    row = _row(db, cid)
+    assert row["scan_enabled"] == 0
