@@ -1,10 +1,7 @@
 """Tests for ATS scanner autoheal trigger (issue #582)."""
 
 import inspect
-import sqlite3
 from unittest.mock import patch
-
-import pytest
 
 from job_finder.web.ats_scanner._run import run_ats_scan
 
@@ -50,18 +47,13 @@ def test_run_ats_scan_flips_armed_ats_source_to_degraded(migrated_db):
     }
 
     # Stub the actual scan helpers to no-ops (no network calls)
-    with patch(
-        "job_finder.web.ats_scanner._run._run_ats_api_scan"
-    ), patch(
-        "job_finder.web.ats_scanner._run._run_playwright_scan"
-    ), patch(
-        "job_finder.web.ats_scanner._run._run_homepage_discovery_phase"
-    ), patch(
-        "job_finder.web.ats_scanner._run._run_html_fallback_scan"
-    ), patch(
-        "job_finder.web.ats_scanner._run._score_new_ats_jobs"
-    ), patch(
-        "job_finder.web.ats_scanner._run._log_ats_scan_run"
+    with (
+        patch("job_finder.web.ats_scanner._run._run_ats_api_scan"),
+        patch("job_finder.web.ats_scanner._run._run_playwright_scan"),
+        patch("job_finder.web.ats_scanner._run._run_homepage_discovery_phase"),
+        patch("job_finder.web.ats_scanner._run._run_html_fallback_scan"),
+        patch("job_finder.web.ats_scanner._run._score_new_ats_jobs"),
+        patch("job_finder.web.ats_scanner._run._log_ats_scan_run"),
     ):
         summary = run_ats_scan(db_path, config)
 
@@ -86,18 +78,13 @@ def test_run_ats_scan_flips_armed_ats_source_to_degraded(migrated_db):
 
     config["autoheal"]["heal_enabled"] = False
 
-    with patch(
-        "job_finder.web.ats_scanner._run._run_ats_api_scan"
-    ), patch(
-        "job_finder.web.ats_scanner._run._run_playwright_scan"
-    ), patch(
-        "job_finder.web.ats_scanner._run._run_homepage_discovery_phase"
-    ), patch(
-        "job_finder.web.ats_scanner._run._run_html_fallback_scan"
-    ), patch(
-        "job_finder.web.ats_scanner._run._score_new_ats_jobs"
-    ), patch(
-        "job_finder.web.ats_scanner._run._log_ats_scan_run"
+    with (
+        patch("job_finder.web.ats_scanner._run._run_ats_api_scan"),
+        patch("job_finder.web.ats_scanner._run._run_playwright_scan"),
+        patch("job_finder.web.ats_scanner._run._run_homepage_discovery_phase"),
+        patch("job_finder.web.ats_scanner._run._run_html_fallback_scan"),
+        patch("job_finder.web.ats_scanner._run._score_new_ats_jobs"),
+        patch("job_finder.web.ats_scanner._run._log_ats_scan_run"),
     ):
         summary = run_ats_scan(db_path, config)
 
