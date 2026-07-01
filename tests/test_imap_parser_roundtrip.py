@@ -367,6 +367,47 @@ GOLDEN_EXPECTED = {
             ),
         ],
     },
+    "noreply@jobright.ai": {
+        "fixture": "jobright.eml",
+        "jobs": [
+            (
+                "Product Data Scientist, Google Play, DSA",
+                "Google",
+                "https://jobright.ai/jobs/info/6a453e93c2d11a6a466687b1",
+                "2026-07-01T16:37:39",
+            ),
+            (
+                "Product Analytics Lead",
+                "Napster Corp.",
+                "https://jobright.ai/jobs/info/6a4541ee4f64ba41dcb4cbfb",
+                "2026-07-01T16:37:39",
+            ),
+            (
+                "Staff Analytics, Product & Marketing",
+                "EarnIn",
+                "https://jobright.ai/jobs/info/6a2b15dec07d4b6ae1c4921b",
+                "2026-07-01T16:37:39",
+            ),
+            (
+                "Lead Analyst (Supply Analytics, Bangkok-based, Relocation provided)",
+                "Agoda",
+                "https://jobright.ai/jobs/info/698e21a2f64d441a16505b3b",
+                "2026-07-01T16:37:39",
+            ),
+            (
+                "Senior Advisor, Business Analytics - Digital Product",
+                "The Cigna Group",
+                "https://jobright.ai/jobs/info/6a43f147ef17a815538a2589",
+                "2026-07-01T16:37:39",
+            ),
+            (
+                "Data Scientist 4/5 - Identity DSE",
+                "Netflix",
+                "https://jobright.ai/jobs/info/6a2a4ca00c4972328e7e826e",
+                "2026-07-01T16:37:39",
+            ),
+        ],
+    },
 }
 
 # Map each sender to one or more fixture files
