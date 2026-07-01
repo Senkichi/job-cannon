@@ -137,7 +137,7 @@ def _derive_degraded_keys(issues: list[str], degraded_sources: list[str]) -> set
     matching against the known signal shapes is stable. Returns a *new* set
     (no mutation of inputs):
 
-      - ``ingestion``  <- "No ingestion in last 14h"
+      - ``ingestion``  <- "No ingestion in last Xh" (X is derived from cadence_preset)
       - ``staleness``  <- "Stale detection missed last night"
       - ``oauth``      <- "OAuth token invalid: ..."
       - ``db``         <- "Health check DB error: ..."
@@ -147,6 +147,7 @@ def _derive_degraded_keys(issues: list[str], degraded_sources: list[str]) -> set
       - ``funnel_unexplained`` <- "Funnel unexplained: ..." (issue #587)
       - ``concentration`` <- "Concentration: ..." (issue #592)
       - ``conversion_signal`` <- "Conversion signal degraded: ..." (issue #597)
+      - ``coverage`` <- "Source deadman: ..." (issue #588)
       - ``source:<name>`` <- signal-3 "<action>: <n> failures in 24h" rows and
         every ``source_health.status='degraded'`` source (C2-4).
     """
@@ -166,6 +167,8 @@ def _derive_degraded_keys(issues: list[str], degraded_sources: list[str]) -> set
             keys.add("concentration")
         elif issue.startswith("Conversion signal degraded"):
             keys.add("conversion_signal")
+        elif issue.startswith("Source deadman"):
+            keys.add("coverage")
         elif issue.startswith("Stale detection missed"):
             keys.add("staleness")
         elif issue.startswith("OAuth token invalid"):
@@ -630,6 +633,80 @@ def _check_conversion_signal(conn, config: dict) -> str | None:
     return None
 
 
+def _check_source_deadman(conn, config: dict) -> list[str]:
+    """Supply-side per-source deadman alarm -- detects silent source failures.
+
+    Checks two ATS supply-side recency classes for age-since-last-success:
+      1. ATS scanner fleet: MAX(companies.last_scanned_at) over scannable
+         companies (ats_probe_status='hit'). This is the fleet-level "are scanners
+         producing" signal -- a single stale company is normal (cohort rotation),
+         but a fleet with no recent successful scan is the deadman.
+      2. company_scan_log age: MAX(scanned_at) for the ATS-surface deadman input.
+
+    The alarm fires when age > derived_window * tolerance, where:
+      - derived_window = expected_ats_scan_window_hours() (24h daily cadence)
+      - tolerance = health.source_deadman_tolerance (default 2.0; <= 0 disables)
+
+    Feed ingestion recency is owned by signal #1 in run_health_check (the
+    "No ingestion in last Xh" alarm) and is NOT checked here to avoid double-count.
+
+    Returns a list of issue strings (one per dead class) or empty list.
+    Read-only; never raises (swallows schema drift errors).
+    """
+    from job_finder.web.scheduler._schedule import expected_ats_scan_window_hours
+
+    try:
+        tolerance = float((config.get("health", {}) or {}).get("source_deadman_tolerance", 2.0))
+        if tolerance <= 0:
+            return []
+
+        window_hours = expected_ats_scan_window_hours()
+        window_seconds = window_hours * 3600
+        allowed_age_seconds = window_seconds * tolerance
+    except Exception:
+        # A malformed tolerance value must not break the heartbeat.
+        return []
+
+    issues: list[str] = []
+
+    # Each recency class is guarded independently so schema drift in one
+    # (e.g. a missing table) cannot discard a real outage detected by the other.
+    # 1. ATS scanner fleet: MAX(last_scanned_at) over scannable companies
+    try:
+        row = conn.execute(
+            "SELECT MAX(last_scanned_at) FROM companies WHERE ats_probe_status = 'hit'"
+        ).fetchone()
+        if row and row[0]:
+            age_seconds = conn.execute(
+                "SELECT CAST(strftime('%s', 'now') - strftime('%s', ?) AS INTEGER)", (row[0],)
+            ).fetchone()[0]
+            if age_seconds is not None and age_seconds > allowed_age_seconds:
+                issues.append(
+                    f"Source deadman: ATS scanner fleet — no successful scan in "
+                    f"{age_seconds / 3600:.1f}h (window {window_hours}h)"
+                )
+    except Exception:
+        pass
+
+    # 2. company_scan_log age: MAX(scanned_at) for ATS-surface deadman
+    try:
+        row = conn.execute("SELECT MAX(scanned_at) FROM company_scan_log").fetchone()
+        if row and row[0]:
+            age_seconds = conn.execute(
+                "SELECT CAST(strftime('%s', 'now') - strftime('%s', ?) AS INTEGER)",
+                (row[0],),
+            ).fetchone()[0]
+            if age_seconds is not None and age_seconds > allowed_age_seconds:
+                issues.append(
+                    f"Source deadman: ATS scan log — no scan in "
+                    f"{age_seconds / 3600:.1f}h (window {window_hours}h)"
+                )
+    except Exception:
+        pass
+
+    return issues
+
+
 def run_health_check(app) -> None:
     """Daily health heartbeat -- verify key subsystems ran recently.
 
@@ -668,34 +745,53 @@ def run_health_check(app) -> None:
 
         try:
             from job_finder.web.db_helpers import standalone_connection as _sc
+            from job_finder.web.scheduler._schedule import (
+                expected_ingestion_window_hours,
+                expected_staleness_window_hours,
+            )
 
             with _sc(db_path) as conn:
-                # 1. Did ingestion run in the last 14 hours?
+                # 1. Did ingestion run in the last derived window?
+                # Window is derived from cadence_preset (default standard = 8h max gap).
+                # This is a separate pre-existing alarm and is NOT multiplied by
+                # source_deadman_tolerance (that knob only affects the deadman).
+                # Uses epoch math to avoid separator bugs (occurred_at is 'T'-separated,
+                # datetime('now') is space-separated).
+                preset = (config.get("scheduler", {}) or {}).get("cadence_preset", "standard")
+                ingestion_window_hours = expected_ingestion_window_hours(preset)
+                ingestion_window_seconds = ingestion_window_hours * 3600
                 row = conn.execute(
                     "SELECT MAX(occurred_at) FROM user_activity "
                     "WHERE action IN ('scheduled_sync', 'sync') "
-                    "AND occurred_at >= datetime('now', '-14 hours')"
+                    f"AND CAST(strftime('%s', occurred_at) AS INTEGER) >= CAST(strftime('%s', 'now') - {ingestion_window_seconds} AS INTEGER)"
                 ).fetchone()
                 if not row[0]:
-                    issues.append("No ingestion in last 14h")
+                    issues.append(f"No ingestion in last {ingestion_window_hours:.0f}h")
 
                 # 2. Did stale detection run last night?
+                # Window is derived from expected_staleness_window_hours() (26h = 24h + 2h tolerance)
                 # Writer uses ACTION_SCHEDULED_STALENESS = 'scheduled_staleness'
                 # (see activity_tracker.py). The legacy 'scheduled_stale_detection'
                 # string is no longer emitted by any code path.
+                # Uses epoch math to avoid separator bugs.
+                staleness_window_hours = expected_staleness_window_hours()
+                staleness_window_seconds = staleness_window_hours * 3600
                 row = conn.execute(
                     "SELECT MAX(occurred_at) FROM user_activity "
                     "WHERE action = 'scheduled_staleness' "
-                    "AND occurred_at >= datetime('now', '-26 hours')"
+                    f"AND CAST(strftime('%s', occurred_at) AS INTEGER) >= CAST(strftime('%s', 'now') - {staleness_window_seconds} AS INTEGER)"
                 ).fetchone()
                 if not row[0]:
                     issues.append("Stale detection missed last night")
 
                 # 3. Are there recent consecutive errors from the same source?
+                # Uses epoch math to avoid separator bugs (occurred_at is
+                # 'T'-separated, datetime('now') is space-separated).
                 rows = conn.execute(
                     "SELECT action, COUNT(*) as cnt FROM user_activity "
                     "WHERE json_extract(metadata, '$.status') = 'failed' "
-                    "AND occurred_at >= datetime('now', '-24 hours') "
+                    "AND CAST(strftime('%s', occurred_at) AS INTEGER) >= "
+                    "CAST(strftime('%s', 'now') - 86400 AS INTEGER) "
                     "GROUP BY action HAVING cnt >= 5"
                 ).fetchall()
                 for r in rows:
@@ -745,6 +841,12 @@ def run_health_check(app) -> None:
                 cost_health = _check_cost_health(conn, config)
                 if cost_health:
                     issues.append(cost_health)
+
+                # 11. Supply-side per-source deadman: detects silent source failures
+                #     (issue #588). Read-only, checks ATS scanner fleet and
+                #     company_scan_log age against the fixed daily ATS-scan window.
+                source_deadman_issues = _check_source_deadman(conn, config)
+                issues.extend(source_deadman_issues)
 
         except Exception as e:
             issues.append(f"Health check DB error: {e}")

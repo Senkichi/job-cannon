@@ -29,6 +29,9 @@ from job_finder.web.scheduler._schedule import (
     assert_schedule_matches_registered,
     cron_kwargs,
     enrichment_hour_expr,
+    expected_ats_scan_window_hours,
+    expected_ingestion_window_hours,
+    expected_staleness_window_hours,
     ingestion_hour_expr,
 )
 
@@ -287,3 +290,32 @@ def test_completeness_guard_fires_on_missing_registrar():
     sched = _FakeScheduler(_boot_registered_ids()[:-1])
     with pytest.raises(AssertionError, match="in-SCHEDULE-but-not-registered"):
         assert_schedule_matches_registered(sched)
+
+
+# ---------------------------------------------------------------------------
+# expected_ingestion_window_hours — derived cadence window for deadman alarm
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "preset, expected_window",
+    [
+        ("light", 24),  # single slot → full-day wrap
+        ("standard", 8),  # evenly spaced 0,8,16 → max gap 8
+        ("heavy", 4),  # every 4h → max gap 4
+        ("unknown", 8),  # falls back to standard
+    ],
+)
+def test_expected_ingestion_window_hours(preset, expected_window):
+    """Derived max gap between consecutive ingestion slots for each preset."""
+    assert expected_ingestion_window_hours(preset) == expected_window
+
+
+def test_expected_staleness_window_hours():
+    """Staleness window is fixed at 26h (24h + 2h tolerance)."""
+    assert expected_staleness_window_hours() == 26
+
+
+def test_expected_ats_scan_window_hours():
+    """ATS scan window is fixed at 24h (daily cadence)."""
+    assert expected_ats_scan_window_hours() == 24

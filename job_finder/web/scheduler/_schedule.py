@@ -179,6 +179,52 @@ def enrichment_hour_expr(preset: str) -> str:
     return ",".join(str(h) for h in hours)
 
 
+def expected_ingestion_window_hours(preset: str) -> int:
+    """Return the maximum gap between consecutive ingestion slots for a cadence preset.
+
+    Parses the hour expression from ``ingestion_hour_expr(preset)`` and computes
+    the largest gap between adjacent slots, including the midnight wrap-around
+    (24 - last_hour + first_hour). This is the derived cadence window used by
+    the supply-side deadman alarm to detect when a source has gone silent.
+
+    Examples:
+        light    (8)        → 24 (single slot → full-day wrap)
+        standard (0,8,16)   → 8  (evenly spaced)
+        heavy    (0,4,8,12,16,20) → 4 (every 4h)
+
+    Unknown presets fall back to 'standard' (matching ``ingestion_hour_expr``).
+    """
+    expr = ingestion_hour_expr(preset)
+    hours = sorted(int(h) for h in expr.split(","))
+    if len(hours) == 1:
+        return 24  # single slot → full-day wrap
+    max_gap = max(hours[i] - hours[i - 1] for i in range(1, len(hours)))
+    # Include midnight wrap: 24 - last + first
+    wrap_gap = 24 - hours[-1] + hours[0]
+    return max(max_gap, wrap_gap)
+
+
+def expected_staleness_window_hours() -> int:
+    """Return the staleness check window in hours.
+
+    Staleness runs daily (at 02:00), so its expected window is 24 hours plus
+    a tolerance buffer. The tolerance allows for schedule drift and runtime
+    variance. Returns 26 (24h + 2h tolerance) to match the historical
+    hardcoded window used in the health check.
+    """
+    return 26
+
+
+def expected_ats_scan_window_hours() -> int:
+    """Return the ATS scan window in hours.
+
+    ATS scan runs daily (at 07:00), so its expected window is 24 hours.
+    The supply-side deadman alarm multiplies this by source_deadman_tolerance
+    (default 2.0) to allow for missed cycles. Returns 24 (the base daily window).
+    """
+    return 24
+
+
 # ---------------------------------------------------------------------------
 # Boot-time collision guard.
 # ---------------------------------------------------------------------------
