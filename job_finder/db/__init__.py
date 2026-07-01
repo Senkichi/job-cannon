@@ -43,6 +43,7 @@ from ._dashboard_queries import get_dashboard_stats as get_dashboard_stats
 from ._dashboard_queries import get_distinct_locations as get_distinct_locations
 from ._dashboard_queries import get_jobs_by_status as get_jobs_by_status
 from ._dashboard_queries import get_liveness_stats as get_liveness_stats
+from ._dashboard_queries import get_off_platform_miss_log as get_off_platform_miss_log
 from ._dashboard_queries import get_pipeline_summary as get_pipeline_summary
 from ._dashboard_queries import get_recent_activity as get_recent_activity
 from ._dashboard_queries import get_recent_pipeline_events as get_recent_pipeline_events
