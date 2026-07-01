@@ -705,6 +705,22 @@ def _upsert_one_ats_api_job(
                         e,
                     )
 
+        # Store mutable refresh timestamp on EVERY sighting (not first-seen-wins)
+        # so it can diverge from posted_date for repost detection (#575).
+        # Uses COALESCE so a later non-NULL value wins and a missing payload value
+        # never clobbers a known one.
+        refreshed_at = job_dict.get("ats_refreshed_at")
+        if refreshed_at is not None:
+            try:
+                conn.execute(
+                    "UPDATE jobs SET ats_refreshed_at = COALESCE(?, ats_refreshed_at) "
+                    "WHERE dedup_key = ?",
+                    (refreshed_at, result.dedup_key),
+                )
+                conn.commit()
+            except Exception as e:
+                logger.warning("Failed to store ats_refreshed_at for %s: %s", result.dedup_key, e)
+
     except Exception as job_err:
         error_msg = f"{company_name} job error: {job_err}"
         summary["errors"].append(error_msg)
