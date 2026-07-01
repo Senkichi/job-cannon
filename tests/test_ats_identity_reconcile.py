@@ -122,7 +122,7 @@ class TestReconcileCompanyAts:
         conn.close()
         assert row["ats_probe_status"] == "hit"
         assert row["ats_evidence_trigger"] == "test"
-        assert row["ats_evidence_extractor_version"] == ATS_EXTRACTOR_VERSION
+        assert row["ats_evidence_extractor_version"] == ATS_EXTRACTOR_VERSION  # m050-v1 after PR-4
 
     def test_skips_existing_hit(self, seeded_pending_company):
         from job_finder.web.ats_identity_reconcile import reconcile_company_ats
