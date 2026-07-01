@@ -26,6 +26,7 @@ import re
 from bs4 import BeautifulSoup
 
 from job_finder.web.ats_platforms._platforms_icims import PlaywrightPlatformScanner
+from job_finder.web.ats_platforms._registry import _auth_block_statuses
 from job_finder.web.careers_crawler._title_filters import clean_title
 
 logger = logging.getLogger(__name__)
@@ -258,7 +259,16 @@ def fetch_postings(
         try:
             resp = requests.get(sitemap_url, timeout=10)
             if resp.status_code != 200:
-                logger.debug("scan_phenom('%s'): sitemap returned HTTP %d", slug, resp.status_code)
+                if resp.status_code in _auth_block_statuses():
+                    logger.warning(
+                        "scan_phenom('%s') possible auth/anti-bot wall: HTTP %d",
+                        slug,
+                        resp.status_code,
+                    )
+                else:
+                    logger.debug(
+                        "scan_phenom('%s'): sitemap returned HTTP %d", slug, resp.status_code
+                    )
                 return []
         except Exception as exc:
             logger.debug("scan_phenom('%s'): sitemap fetch failed: %s", slug, exc)

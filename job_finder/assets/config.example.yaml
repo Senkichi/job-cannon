@@ -214,6 +214,11 @@ health:
   # Any non-zero value indicates a silent-drop bug (a code path that discards a
   # row without incrementing a counter). Set < 0 to disable. Default 0.
   funnel_unexplained_max: 0
+  # HTTP statuses treated as auth/anti-bot walls — a scanner hitting one logs a
+  # WARNING (visible at INFO) instead of a silent DEBUG, so a blocked board isn't
+  # mistaken for an empty one. 404/410 are excluded (handled as board-gone).
+  # Empty list disables the promotion.
+  auth_block_statuses: [401, 403, 429]
 
 # --- Metrics ---
 metrics:
