@@ -63,6 +63,28 @@ def test_supervisor_install_subcommand_parses_uninstall():
     assert parser.parse_args(["supervisor-install", "--uninstall"]).uninstall is True
 
 
+def test_healthcheck_interval_defaults_and_accepts_positive():
+    parser = main_mod._build_parser()
+    assert parser.parse_args(["supervisor-install"]).healthcheck_interval_min == 15
+    assert (
+        parser.parse_args(
+            ["supervisor-install", "--healthcheck-interval-min", "5"]
+        ).healthcheck_interval_min
+        == 5
+    )
+
+
+@pytest.mark.parametrize("bad", ["0", "-5", "notanint"])
+def test_healthcheck_interval_rejects_nonpositive(bad):
+    """A zero/negative/non-int cadence must fail loudly at parse time, not silently
+    render a non-firing deadman manifest (PT0M / StartInterval 0 / OnUnitActiveSec=0min)."""
+    with pytest.raises(SystemExit) as exc:
+        main_mod._build_parser().parse_args(
+            ["supervisor-install", "--healthcheck-interval-min", bad]
+        )
+    assert exc.value.code == 2  # argparse usage error
+
+
 def test_stop_subcommand_registered():
     args = main_mod._build_parser().parse_args(["stop"])
     assert args.command == "stop"
