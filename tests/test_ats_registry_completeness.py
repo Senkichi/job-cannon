@@ -165,16 +165,28 @@ def test_parity_playwright_platforms():
 
 
 def test_parity_verify_fastpath_dispatch(monkeypatch):
-    """ats_registry.verify_fastpath_live must match the legacy _probe._verify_fastpath_live
-    for every fast-path platform (both gate on url_fastpath + same probe)."""
+    """The registry SSOT and the PRODUCTION fast-path caller (_probe._verify_fastpath_live,
+    invoked at the B2 promotion write) must dispatch identically for every url_fastpath
+    platform, and both must gate non-fast-path platforms to False.
+
+    This test's docstring long CLAIMED parity with ``_probe._verify_fastpath_live`` but only
+    ever called ``ats_registry.verify_fastpath_live`` — so it was blind to the exact drift it
+    named: ``successfactors``/``adp`` were parity-forced into ``_URL_FASTPATH_PLATFORMS`` but
+    never got a branch in the old hand-maintained if/elif ladder, silently returning False and
+    killing their careers-URL fast-path promotion. Now that _verify_fastpath_live delegates to
+    the registry the two are equal by construction; exercising BOTH here keeps it that way —
+    any re-introduced ladder that drops a fast-path platform fails this test immediately."""
     for name in ats_registry.URL_FASTPATH_PLATFORMS:
         attr = PLATFORMS[name].probe_attr
         monkeypatch.setattr(ats_prober, attr, lambda slug: True)
-        assert ats_registry.verify_fastpath_live(name, "s") is True
+        assert ats_registry.verify_fastpath_live(name, "s") is True, name
+        assert _probe._verify_fastpath_live(name, "s") is True, name
         monkeypatch.setattr(ats_prober, attr, lambda slug: False)
-        assert ats_registry.verify_fastpath_live(name, "s") is False
+        assert ats_registry.verify_fastpath_live(name, "s") is False, name
+        assert _probe._verify_fastpath_live(name, "s") is False, name
     # platforms NOT in the fast-path set must gate to False even with a live probe
     for name in ("oracle_cloud", "ultipro", "icims", "jobvite"):
         attr = PLATFORMS[name].probe_attr
         monkeypatch.setattr(ats_prober, attr, lambda slug: True)
-        assert ats_registry.verify_fastpath_live(name, "s") is False
+        assert ats_registry.verify_fastpath_live(name, "s") is False, name
+        assert _probe._verify_fastpath_live(name, "s") is False, name

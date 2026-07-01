@@ -18,20 +18,11 @@ from job_finder.web.ats_detection import (
 )
 from job_finder.web.ats_prober import (
     _probe_ashby,
-    _probe_bamboohr,
-    _probe_breezy,
     _probe_greenhouse,
     _probe_jazzhr,
     _probe_lever,
-    _probe_paylocity,
-    _probe_personio,
     _probe_pinpoint,
-    _probe_recruitee,
-    _probe_rippling,
-    _probe_smartrecruiters,
     _probe_teamtailor,
-    _probe_workable,
-    _probe_workday,
 )
 from job_finder.web.brand_blocklist import is_blocked_brand
 from job_finder.web.db_helpers import standalone_connection
@@ -126,45 +117,25 @@ _URL_FASTPATH_PLATFORMS: frozenset[str] = frozenset(
 
 
 def _verify_fastpath_live(platform: str, slug: str) -> bool:
-    """Resolve+call the platform probe by name at call time (not lookup time).
+    """Liveness gate for the B2 URL-evidence fast-path (the sole caller is the
+    promotion write below).
 
-    Mirrors ats_identity_reconcile._verify_live's dispatch shape. Using by-name
-    if/elif lets test patches of module-level _probe_X functions take effect
-    -- a dict literal captures references at import time and bypasses patches.
+    Delegates to the registry SSOT ``ats_registry.verify_fastpath_live`` so the
+    fast-path set AND the probe dispatch both derive from ``PlatformSpec`` — there
+    is no hand-maintained if/elif ladder to fall out of sync. The old ladder WAS a
+    third un-governed mirror (alongside ``_URL_FASTPATH_PLATFORMS`` and
+    ``_RECONCILABLE_PLATFORMS``): ``successfactors`` and ``adp`` were added to
+    ``_URL_FASTPATH_PLATFORMS`` (parity-forced) but never got a ladder branch, so
+    this returned False for them and their careers-URL fast-path silently never
+    promoted. The registry resolves the probe by name from ``ats_prober`` at call
+    time, preserving the patch-ability the ladder existed for (tests patch
+    ``ats_prober._probe_X`` / ``ats_prober.requests.get``). Lazy import avoids an
+    import-time cycle. Pinned by test_ats_registry_completeness.py so the drift
+    cannot recur.
     """
-    if platform == "lever":
-        return bool(_probe_lever(slug))
-    if platform == "greenhouse":
-        return bool(_probe_greenhouse(slug))
-    if platform == "ashby":
-        return bool(_probe_ashby(slug))
-    if platform == "workday":
-        return bool(_probe_workday(slug))
-    if platform == "smartrecruiters":
-        return bool(_probe_smartrecruiters(slug))
-    if platform == "pinpoint":
-        return bool(_probe_pinpoint(slug))
-    if platform == "jazzhr":
-        return bool(_probe_jazzhr(slug))
-    if platform == "teamtailor":
-        return bool(_probe_teamtailor(slug))
-    if platform == "bamboohr":
-        return bool(_probe_bamboohr(slug))
-    if platform == "personio":
-        return bool(_probe_personio(slug))
-    if platform == "recruitee":
-        return bool(_probe_recruitee(slug))
-    if platform == "breezy":
-        return bool(_probe_breezy(slug))
-    # Round 6 -- audit B2-roadmap additions (jobvite intentionally excluded
-    # from _URL_FASTPATH_PLATFORMS; see comment near the set definition).
-    if platform == "workable":
-        return bool(_probe_workable(slug))
-    if platform == "paylocity":
-        return bool(_probe_paylocity(slug))
-    if platform == "rippling":
-        return bool(_probe_rippling(slug))
-    return False
+    from job_finder.web.ats_registry import verify_fastpath_live
+
+    return verify_fastpath_live(platform, slug)
 
 
 def probe_ats_slugs(db_path: str, config: dict) -> dict:
