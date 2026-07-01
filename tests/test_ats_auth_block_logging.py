@@ -12,8 +12,8 @@ from unittest.mock import Mock, patch
 import pytest
 from flask import Flask
 
-from job_finder.web.ats_platforms._registry import _auth_block_statuses, _http_get_json
 from job_finder.web.ats_platforms._platforms_amazon import _fetch_postings as fetch_amazon
+from job_finder.web.ats_platforms._registry import _auth_block_statuses, _http_get_json
 
 
 @pytest.fixture
@@ -53,7 +53,10 @@ def test_http_get_json_auth_block_warns(app_with_config, caplog):
                 mock_get.return_value = mock_resp
                 result = _http_get_json("http://example.com", "test_label", "test_slug")
                 assert result is None
-                assert any("possible auth/anti-bot wall: HTTP 403" in record.message for record in caplog.records)
+                assert any(
+                    "possible auth/anti-bot wall: HTTP 403" in record.message
+                    for record in caplog.records
+                )
 
 
 def test_http_get_json_502_stays_debug(app_with_config, caplog):
@@ -67,7 +70,11 @@ def test_http_get_json_502_stays_debug(app_with_config, caplog):
                 result = _http_get_json("http://example.com", "test_label", "test_slug")
                 assert result is None
                 # No WARNING log for 502
-                assert not any("502" in record.message for record in caplog.records if record.levelno == logging.WARNING)
+                assert not any(
+                    "502" in record.message
+                    for record in caplog.records
+                    if record.levelno == logging.WARNING
+                )
 
 
 def test_scanner_403_emits_warning(app_with_config, caplog):
@@ -81,7 +88,11 @@ def test_scanner_403_emits_warning(app_with_config, caplog):
                 mock_get.return_value = mock_resp
                 result = fetch_amazon("test-slug")
                 assert result == []
-                assert any("possible auth/anti-bot wall: HTTP 403" in record.message and "test-slug" in record.message for record in caplog.records)
+                assert any(
+                    "possible auth/anti-bot wall: HTTP 403" in record.message
+                    and "test-slug" in record.message
+                    for record in caplog.records
+                )
 
 
 def test_scanner_500_stays_debug(app_with_config, caplog):
@@ -95,7 +106,11 @@ def test_scanner_500_stays_debug(app_with_config, caplog):
                 result = fetch_amazon("test-slug")
                 assert result == []
                 # No WARNING log for 500
-                assert not any("500" in record.message for record in caplog.records if record.levelno == logging.WARNING)
+                assert not any(
+                    "500" in record.message
+                    for record in caplog.records
+                    if record.levelno == logging.WARNING
+                )
 
 
 def test_auth_block_statuses_config_override(app_with_config, caplog):
@@ -110,10 +125,17 @@ def test_auth_block_statuses_config_override(app_with_config, caplog):
                 mock_get.return_value = mock_resp
                 _http_get_json("http://example.com", "test_label", "test_slug")
                 # No WARNING for 403
-                assert not any("403" in record.message for record in caplog.records if record.levelno == logging.WARNING)
+                assert not any(
+                    "403" in record.message
+                    for record in caplog.records
+                    if record.levelno == logging.WARNING
+                )
 
                 # Test 429 (in custom set)
                 mock_resp.status_code = 429
                 _http_get_json("http://example.com", "test_label", "test_slug")
                 # WARNING for 429
-                assert any("possible auth/anti-bot wall: HTTP 429" in record.message for record in caplog.records)
+                assert any(
+                    "possible auth/anti-bot wall: HTTP 429" in record.message
+                    for record in caplog.records
+                )
