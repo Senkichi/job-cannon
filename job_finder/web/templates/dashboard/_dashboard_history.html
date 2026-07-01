@@ -46,14 +46,14 @@
                 <td class="px-4 py-3 text-slate-300 text-right">{{ metrics.applied }}</td>
                 <td class="px-4 py-3 text-slate-300 text-right">{{ metrics.converted }}</td>
                 <td class="px-4 py-3 text-slate-300 text-right">
-                  {% if metrics.application_rate is not None %}
+                  {% if metrics.application_rate is not none %}
                     {{ "%.1f%%" | format(metrics.application_rate * 100) }}
                   {% else %}
                     <span class="text-slate-500">—</span>
                   {% endif %}
                 </td>
                 <td class="px-4 py-3 text-slate-300 text-right">
-                  {% if metrics.callback_rate is not None %}
+                  {% if metrics.callback_rate is not none %}
                     {{ "%.1f%%" | format(metrics.callback_rate * 100) }}
                   {% else %}
                     <span class="text-slate-500">—</span>
