@@ -177,6 +177,19 @@ def target_membership_sql(fit_floor: float) -> str:
     )
 
 
+def surfaced_classification_sql() -> str:
+    """Return a SQL boolean expression for surfaced classification.
+
+    A job is surfaced when its classification is a positive-evidence bucket
+    (apply or consider) — the tiers the board actually displays as worth-counting.
+
+    Returns:
+        SQL WHERE clause fragment as a string.
+    """
+    surfaced = "','".join(["apply", "consider"])
+    return f"classification IN ('{surfaced}')"
+
+
 def is_target_member(sub_scores: dict, classification: str | None, fit_floor: float) -> bool:
     """Python companion to target_membership_sql — same predicate logic.
 

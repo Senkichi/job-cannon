@@ -5,9 +5,74 @@ from __future__ import annotations
 import sqlite3
 from datetime import UTC, date, datetime
 
-from job_finder.db._queries import _SUB_SCORE_SUM_SQL, target_membership_sql
+from job_finder.db._queries import _SUB_SCORE_SUM_SQL, surfaced_classification_sql, target_membership_sql
+
+import math
 
 _DEFAULT_COLD_START_EXCLUDE_DAYS = 30
+
+
+def _normalized_hhi(counts: list[int]) -> float | None:
+    """Compute normalized Herfindahl-Hirschman Index from group counts.
+
+    HHI* = (Σ pᵢ² − 1/n) / (1 − 1/n) where pᵢ = countᵢ / total.
+    Ranges 0 (perfectly even) → 1 (one group holds everything).
+    Returns None if total == 0. Returns 1.0 if n == 1.
+
+    Args:
+        counts: List of group counts (non-negative integers).
+
+    Returns:
+        Normalized HHI (0-1) or None if total is zero.
+    """
+    total = sum(counts)
+    if total == 0:
+        return None
+    n = len(counts)
+    if n == 1:
+        return 1.0
+
+    # Compute sum of squared proportions
+    sum_p_squared = sum((c / total) ** 2 for c in counts)
+
+    # Normalize to [0, 1]
+    numerator = sum_p_squared - (1 / n)
+    denominator = 1 - (1 / n)
+    return numerator / denominator
+
+
+def _shannon_entropy(counts: list[int]) -> tuple[float, float] | None:
+    """Compute Shannon entropy and normalized entropy from group counts.
+
+    H = −Σ pᵢ log₂ pᵢ
+    Normalized entropy = H / log₂(n)
+    Returns None if total == 0 or n == 1.
+
+    Args:
+        counts: List of group counts (non-negative integers).
+
+    Returns:
+        Tuple of (entropy, normalized_entropy) or None if total is zero or n == 1.
+    """
+    total = sum(counts)
+    if total == 0:
+        return None
+    n = len(counts)
+    if n == 1:
+        return None
+
+    # Compute Shannon entropy
+    entropy = 0.0
+    for c in counts:
+        if c > 0:
+            p = c / total
+            entropy -= p * math.log2(p)
+
+    # Normalize by log₂(n)
+    max_entropy = math.log2(n)
+    normalized = entropy / max_entropy if max_entropy > 0 else 0.0
+
+    return (entropy, normalized)
 
 
 def get_dashboard_stats(conn: sqlite3.Connection) -> dict:
@@ -371,3 +436,72 @@ def get_target_set_size(conn: sqlite3.Connection, fit_floor: float) -> int:
     where_clause = target_membership_sql(fit_floor)
     row = conn.execute(f"SELECT COUNT(*) FROM jobs WHERE {where_clause}").fetchone()
     return row[0] if row else 0
+
+
+def get_surfaced_concentration(conn: sqlite3.Connection) -> dict:
+    """Return concentration metrics for surfaced jobs (apply/consider classifications).
+
+    Computes normalized HHI and Shannon entropy for two groupings:
+    - by_employer: jobs.company_id (NULL → "_unlinked" sentinel)
+    - by_platform: companies.ats_platform via LEFT JOIN (NULL/empty → "_unknown" sentinel)
+
+    The surfaced cohort is defined by surfaced_classification_sql() (classification IN ('apply','consider')).
+
+    Returns:
+        dict with keys:
+            by_employer: {hhi, entropy, entropy_norm, n_groups, total} or None fields
+            by_platform: {hhi, entropy, entropy_norm, n_groups, total} or None fields
+    """
+    surfaced_clause = surfaced_classification_sql()
+
+    # Employer grouping: NULL company_id → "_unlinked" sentinel
+    employer_rows = conn.execute(
+        f"""SELECT COALESCE(company_id, '_unlinked') as group_key, COUNT(*) as cnt
+           FROM jobs
+           WHERE {surfaced_clause}
+           GROUP BY group_key"""
+    ).fetchall()
+
+    employer_counts = [row["cnt"] for row in employer_rows]
+    employer_total = sum(employer_counts)
+
+    employer_metrics = {
+        "hhi": _normalized_hhi(employer_counts),
+        "entropy": None,
+        "entropy_norm": None,
+        "n_groups": len(employer_counts),
+        "total": employer_total,
+    }
+    if employer_total > 0:
+        entropy_result = _shannon_entropy(employer_counts)
+        if entropy_result:
+            employer_metrics["entropy"], employer_metrics["entropy_norm"] = entropy_result
+
+    # Platform grouping: LEFT JOIN companies, NULL/empty platform → "_unknown" sentinel
+    platform_rows = conn.execute(
+        f"""SELECT COALESCE(NULLIF(c.ats_platform, ''), '_unknown') as group_key, COUNT(*) as cnt
+           FROM jobs j
+           LEFT JOIN companies c ON j.company_id = c.id
+           WHERE {surfaced_clause}
+           GROUP BY group_key"""
+    ).fetchall()
+
+    platform_counts = [row["cnt"] for row in platform_rows]
+    platform_total = sum(platform_counts)
+
+    platform_metrics = {
+        "hhi": _normalized_hhi(platform_counts),
+        "entropy": None,
+        "entropy_norm": None,
+        "n_groups": len(platform_counts),
+        "total": platform_total,
+    }
+    if platform_total > 0:
+        entropy_result = _shannon_entropy(platform_counts)
+        if entropy_result:
+            platform_metrics["entropy"], platform_metrics["entropy_norm"] = entropy_result
+
+    return {
+        "by_employer": employer_metrics,
+        "by_platform": platform_metrics,
+    }

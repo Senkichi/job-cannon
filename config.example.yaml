@@ -219,6 +219,17 @@ health:
   # mistaken for an empty one. 404/410 are excluded (handled as board-gone).
   # Empty list disables the promotion.
   auth_block_statuses: [401, 403, 429]
+  # Concentration alarm: the heartbeat computes normalized HHI (Herfindahl-Hirschman
+  # Index) for surfaced jobs (apply/consider classifications) grouped by employer
+  # and by ATS platform. HHI ranges 0 (perfectly even) → 1 (one group holds everything).
+  # Rising HHI indicates differentiation eroding onto head incumbents. Fires when
+  # either grouping's normalized HHI exceeds this ceiling AND the total surfaced jobs
+  # is at least surfaced_concentration_min_jobs (to avoid false alarms on cold-start
+  # boards). Set > 1 to disable. Default 0.60.
+  surfaced_concentration_ceiling: 0.60
+  # Minimum number of surfaced jobs required before the concentration alarm fires.
+  # Prevents false alarms on cold-start boards with few jobs. Default 25.
+  surfaced_concentration_min_jobs: 25
 
 # --- Metrics ---
 metrics:
