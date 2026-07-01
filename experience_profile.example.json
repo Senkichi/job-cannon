@@ -24,9 +24,14 @@
         "Python",
         "PyTorch",
         "SQL",
-        "Spark",
+        "Databricks",
         "A/B Testing",
         "MLOps"
+      ],
+      "title_variants": [
+        "Lead Data Scientist",
+        "Analytics Lead",
+        "Machine Learning Lead"
       ]
     },
     {
@@ -55,7 +60,7 @@
     "Machine Learning",
     "PyTorch",
     "scikit-learn",
-    "Spark",
+    "Databricks",
     "A/B Testing",
     "Statistical Analysis",
     "Data Visualization",

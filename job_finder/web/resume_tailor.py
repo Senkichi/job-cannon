@@ -23,6 +23,20 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
+
+# ---------------------------------------------------------------------------
+# Fabrication error
+# ---------------------------------------------------------------------------
+
+
+class FabricationError(Exception):
+    """Raised when the tailored resume contains fabricated facts or prohibited items."""
+
+    def __init__(self, violations: tuple) -> None:
+        self.violations = violations
+        super().__init__(f"Resume fabrication detected: {len(violations)} violation(s)")
+
+
 # ---------------------------------------------------------------------------
 # Style guide loader
 # ---------------------------------------------------------------------------
@@ -297,5 +311,40 @@ def tailor_resume(job: dict, profile: dict, config: dict, conn) -> dict:
         purpose="resume_tailor",
         max_tokens=2048,
     )
+
+    # Runtime never-fabricate validation (issue #600): enforce that the tailored
+    # resume contains ONLY facts grounded in the profile, respects prohibited-item
+    # hard-stops, and honors the owner's title-variant allowlist for the most-recent
+    # position. Refuse to return a resume with any violation.
+    from job_finder.web.resume_grounding import (
+        adjudicate_resume_prose,
+        validate_resume_grounding,
+    )
+
+    report = validate_resume_grounding(result.data, profile, job, style_guide)
+    if report.violations:
+        logger.warning(
+            "resume_tailor: %d violation(s) rejected: %s",
+            len(report.violations),
+            [(v.kind, v.value) for v in report.violations],
+        )
+        raise FabricationError(report.violations)
+
+    # Prose adjudicator (fail-closed LLM check for bullets/summary)
+    prose_violations = adjudicate_resume_prose(result.data, profile, config, conn)
+    if prose_violations:
+        logger.warning(
+            "resume_tailor: %d prose fabrication(s) rejected: %s",
+            len(prose_violations),
+            [(v.kind, v.value) for v in prose_violations],
+        )
+        raise FabricationError(prose_violations)
+
+    # Attach keyword coverage metric (reported, never a refusal reason)
+    result.data["keyword_coverage"] = {
+        "ratio": report.coverage.ratio,
+        "present": list(report.coverage.present),
+        "missing": list(report.coverage.missing),
+    }
 
     return result.data  # already a new dict from the provider

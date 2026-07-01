@@ -366,7 +366,11 @@ def test_prepare_application_runs_real_tailor_seam(app_with_migrations):
     from job_finder.web.model_provider import ModelResult
 
     tailored_resume = {
-        "summary": "REAL-SEAM-SUMMARY: Senior Data Scientist, 5+ years ML.",
+        # No "N years" phrase here: resume_tailor's min_years_anchor guard (added in
+        # #600 resume_grounding) rejects understated tenure claims (< the owner's
+        # floor). The seam under test is dict->JSON serialization, not tenure, so keep
+        # the summary tenure-free — this stays green regardless of the anchor value.
+        "summary": "REAL-SEAM-SUMMARY: Senior Data Scientist specializing in ML.",
         "skills": ["Python", "Machine Learning", "SQL"],
         "sections": [
             {
@@ -380,7 +384,23 @@ def test_prepare_application_runs_real_tailor_seam(app_with_migrations):
     }
 
     def _resume_call_model(**kwargs):
-        # resume_tailor's internal call_model -> return the structured resume DICT.
+        # resume_tailor now makes TWO call_model dispatches:
+        #   1. the tailoring call            -> return the structured resume DICT
+        #   2. the #600 prose-adjudication call (purpose="resume_prose_adjudication")
+        #      -> return a clean {"fabrications": []} verdict so the REAL adjudicator
+        #         parse-path (job_finder.web.resume_grounding.adjudicate_resume_prose)
+        #         runs end-to-end and passes. Only the model boundary is mocked; the
+        #         seam under test stays real.
+        if kwargs.get("purpose") == "resume_prose_adjudication":
+            return ModelResult(
+                data={"fabrications": []},
+                cost_usd=0.0,
+                input_tokens=0,
+                output_tokens=0,
+                model="qwen2.5:14b",
+                provider="ollama",
+                schema_valid=True,
+            )
         return ModelResult(
             data=tailored_resume,
             cost_usd=0.0,
