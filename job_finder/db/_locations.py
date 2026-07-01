@@ -32,9 +32,10 @@ merge_locations_raw(existing, incoming) -> list[str]
     so the merge semantics are defined in exactly one place.
 
 merge_locations_structured(existing, incoming) -> list[JobLocation]
-    Pure helper: Union by ``(country_code, region_code, city, workplace_type)``.
-    Shared by ``upsert_job`` (UPDATE branch) so the merge semantics are defined
-    in exactly one place. Mirrors the design of ``merge_locations_raw``.
+    Pure helper: Union by ``(country_code, region_code, city)`` with workplace_type
+    specificity upgrade. Shared by ``upsert_job`` (UPDATE branch) so the merge
+    semantics are defined in exactly one place. Mirrors the design of
+    ``merge_locations_raw``.
 
 apply_location_observation(conn, dedup_key, raw_location, *, source) -> bool
     The single funnel. Merges one observed location string into a job's
@@ -101,16 +102,21 @@ def merge_locations_raw(existing: list[str], incoming: list[str]) -> list[str]:
 def merge_locations_structured(
     existing: list[JobLocation], incoming: list[JobLocation]
 ) -> list[JobLocation]:
-    """Union by ``(country_code, region_code, city, workplace_type)`` (pure).
+    """Union by ``(country_code, region_code, city)`` with workplace_type specificity upgrade (pure).
 
     Single source of truth for the ``locations_structured`` merge semantics
     shared by ``upsert_job`` (UPDATE branch). Mirrors the design of
     ``merge_locations_raw`` — pure, immutable, single source of truth.
 
-    Deduplication uses the existing ``dedupe_locations`` helper from
-    ``location_canonical`` so the semantics are defined in exactly one place.
-    The dedup key is ``(country_code, region_code, city, workplace_type)`` —
-    two locations that differ only in ``raw`` collapse to the first occurrence.
+    Deduplication groups by ``(country_code, region_code, city)`` only —
+    ``workplace_type`` is a refinable payload field, not part of the identity.
+    Within each geographic group, the most specific ``workplace_type`` wins:
+    ``UNSPECIFIED`` is upgraded to any other value (``REMOTE``/``HYBRID``/``ONSITE``).
+    Conflicts between non-UNSPECIFIED values keep the first-seen (no downgrade).
+
+    This ensures that a later sighting with a resolved workplace_type (e.g.
+    ``#LI-Hybrid`` parsed from the full JD) upgrades an earlier ``UNSPECIFIED``
+    entry for the same city, fixing the denormalized column freeze bug (issue #639).
 
     Preserves first-seen order: existing entries first (in their stored order),
     then genuinely-new incoming entries appended in arrival order.
@@ -122,11 +128,33 @@ def merge_locations_structured(
     Returns:
         A new list — neither input is mutated (immutability).
     """
-    # Concatenate existing + incoming, then dedupe via the canonical helper.
-    # dedupe_locations preserves first-seen order, so existing entries stay
-    # at the front and new entries are appended in arrival order.
-    combined = existing + incoming
-    return dedupe_locations(combined)
+    # Group by geographic identity (country_code, region_code, city) only.
+    # workplace_type is refinable, not part of the dedup key.
+    geo_groups: dict[tuple[str | None, str | None, str | None], list[JobLocation]] = {}
+    for loc in existing + incoming:
+        geo_key = (loc.country_code, loc.region_code, loc.city)
+        if geo_key not in geo_groups:
+            geo_groups[geo_key] = []
+        geo_groups[geo_key].append(loc)
+
+    # For each geographic group, pick the best workplace_type entry.
+    # UNSPECIFIED is upgraded to any other value; conflicts keep first-seen.
+    merged: list[JobLocation] = []
+    for _geo_key, group in geo_groups.items():
+        # Find the most specific workplace_type in this group.
+        # Priority: REMOTE/HYBRID/ONSITE > UNSPECIFIED.
+        best = group[0]  # Default to first-seen
+        for loc in group[1:]:
+            if best.workplace_type == "UNSPECIFIED" and loc.workplace_type != "UNSPECIFIED":
+                # Upgrade: UNSPECIFIED -> more specific
+                best = loc
+            # else: keep first-seen (no downgrade from specific to UNSPECIFIED,
+            # and no change between REMOTE/HYBRID/ONSITE conflicts)
+        merged.append(best)
+
+    # Final dedupe by full key (including workplace_type) to handle the case
+    # where the same geographic+workplace_type entry appears in both lists.
+    return dedupe_locations(merged)
 
 
 def apply_location_observation(

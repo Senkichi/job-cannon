@@ -467,8 +467,9 @@ def upsert_job(
 
     locations_json = _locations_to_json(_locs_structured) if _locs_structured else None
     # Note: workplace_type_col and primary_country_code are recomputed from the merged set
-    # in the UPDATE branch (after merge_locations_structured). For the INSERT branch,
-    # they derive from the incoming-only set (no stored set to merge against).
+    # in the UPDATE branch (after merge_locations_structured, which upgrades UNSPECIFIED
+    # to more specific values). For the INSERT branch, they derive from the incoming-only
+    # set (no stored set to merge against).
     workplace_type_col = _locs_structured[0].workplace_type if _locs_structured else "UNSPECIFIED"
     primary_country_code = _locs_structured[0].country_code if _locs_structured else None
 
@@ -563,14 +564,21 @@ def upsert_job(
 
         merged_location = ", ".join(dict.fromkeys(locs_list))
 
-        # Smart structured-location merge: union by (country_code, region_code, city, workplace_type).
-        # Delegated to merge_locations_structured — the single source of truth for this merge.
+        # Smart structured-location merge: union by (country_code, region_code, city) with
+        # workplace_type specificity upgrade. Delegated to merge_locations_structured —
+        # the single source of truth for this merge.
         existing_locs_structured = existing["locations_structured"]
         try:
             prior_structured = (
                 _locations_from_json(existing_locs_structured) if existing_locs_structured else []
             )
         except (ValueError, json.JSONDecodeError, TypeError):
+            _logger.warning(
+                "upsert_job: malformed locations_structured JSON, falling back to empty list [dedup_key=%s, company=%s]: %s",
+                parsed.dedup_key,
+                parsed.company,
+                existing_locs_structured[:200] if existing_locs_structured else None,
+            )
             prior_structured = []
         merged_structured = merge_locations_structured(prior_structured, _locs_structured)
         if merged_structured != prior_structured:

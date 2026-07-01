@@ -131,7 +131,8 @@ def test_merge_locations_structured_dedups_identical_key() -> None:
     ]
     merged = merge_locations_structured(existing, incoming)
     assert len(merged) == 1
-    assert merged[0].raw == "San Francisco, CA"  # First-seen raw preserved
+    # First-seen raw preserved (both have same workplace_type, so first-seen wins)
+    assert merged[0].raw == "San Francisco, CA"
 
 
 def test_merge_locations_structured_does_not_mutate_inputs() -> None:
@@ -182,6 +183,69 @@ def test_merge_locations_structured_resighting_single_posting_keeps_all() -> Non
     merged = merge_locations_structured([loc], [loc])
     assert len(merged) == 1
     assert merged[0].city == "San Francisco"
+
+
+def test_merge_locations_structured_upgrades_unspecified_to_specific() -> None:
+    """Merging UNSPECIFIED with a more specific workplace_type for the same city upgrades to the specific value (issue #639 Finding 1)."""
+    existing = [
+        JobLocation(
+            city="San Francisco",
+            region="California",
+            region_code="CA",
+            country="United States",
+            country_code="US",
+            workplace_type="UNSPECIFIED",
+            raw="San Francisco, CA",
+            unresolved=False,
+        )
+    ]
+    incoming = [
+        JobLocation(
+            city="San Francisco",
+            region="California",
+            region_code="CA",
+            country="United States",
+            country_code="US",
+            workplace_type="HYBRID",
+            raw="San Francisco, CA",
+            unresolved=False,
+        )
+    ]
+    merged = merge_locations_structured(existing, incoming)
+    assert len(merged) == 1
+    assert merged[0].workplace_type == "HYBRID"
+    assert merged[0].city == "San Francisco"
+
+
+def test_merge_locations_structured_no_downgrade_specific_to_unspecified() -> None:
+    """Merging a specific workplace_type with UNSPECIFIED for the same city keeps the specific value (no downgrade)."""
+    existing = [
+        JobLocation(
+            city="San Francisco",
+            region="California",
+            region_code="CA",
+            country="United States",
+            country_code="US",
+            workplace_type="HYBRID",
+            raw="San Francisco, CA",
+            unresolved=False,
+        )
+    ]
+    incoming = [
+        JobLocation(
+            city="San Francisco",
+            region="California",
+            region_code="CA",
+            country="United States",
+            country_code="US",
+            workplace_type="UNSPECIFIED",
+            raw="San Francisco, CA",
+            unresolved=False,
+        )
+    ]
+    merged = merge_locations_structured(existing, incoming)
+    assert len(merged) == 1
+    assert merged[0].workplace_type == "HYBRID"  # Kept first-seen specific value
 
 
 # ---------------------------------------------------------------------------
