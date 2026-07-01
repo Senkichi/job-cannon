@@ -7,6 +7,8 @@ from datetime import UTC, date, datetime
 
 from job_finder.db._queries import _SUB_SCORE_SUM_SQL
 
+_DEFAULT_COLD_START_EXCLUDE_DAYS = 30
+
 
 def get_dashboard_stats(conn: sqlite3.Connection) -> dict:
     """Return stat card data for the Dashboard page.
@@ -253,4 +255,97 @@ def get_recent_pipeline_events(conn: sqlite3.Connection, limit: int = 10) -> lis
         # Gracefully handle missing table (pre-migration); re-raise other errors.
         if "no such table" in str(exc).lower():
             return []
+        raise
+
+
+def get_crawl_latency_sli(conn: sqlite3.Connection, config: dict) -> dict:
+    """Return crawl latency SLI metrics (p50/p95/p99 days between posted_date and first_seen).
+
+    Computes steady-state crawl latency for ATS-direct sources (exact posted_date_precision)
+    with three guards:
+    1. posted_date_precision = 'exact' (machine first-posted sources only)
+    2. posted_date != first_seen (excludes m095 copy artifacts)
+    3. latency <= cold_start_exclude_days (excludes cold-start backlog)
+
+    Args:
+        conn: Open sqlite3 connection.
+        config: App config dict (reads metrics.crawl_latency.cold_start_exclude_days).
+
+    Returns:
+        dict with keys:
+            p50_days (float | None): 50th percentile latency in days
+            p95_days (float | None): 95th percentile latency in days
+            p99_days (float | None): 99th percentile latency in days
+            sample_n (int): number of qualifying jobs in the percentile set
+            total_dated (int): total jobs with posted_date (coverage denominator)
+            exact_coverage_pct (float): percentage of dated jobs that are exact-precision
+            cold_start_exclude_days (int): the cold-start window used
+        Returns zeroed dict (no crash) on pre-m095 DBs (missing posted_date_precision column).
+    """
+    cold_start_days = (
+        config.get("metrics", {})
+        .get("crawl_latency", {})
+        .get("cold_start_exclude_days", _DEFAULT_COLD_START_EXCLUDE_DAYS)
+    )
+
+    try:
+        # Total dated jobs (coverage denominator)
+        total_dated = conn.execute(
+            "SELECT COUNT(*) FROM jobs WHERE posted_date IS NOT NULL"
+        ).fetchone()[0]
+
+        # Guarded, steady-state, ATS-direct latency values
+        rows = conn.execute(
+            """SELECT (julianday(first_seen) - julianday(posted_date)) AS lat
+               FROM jobs
+               WHERE posted_date_precision = 'exact'
+                 AND posted_date IS NOT NULL
+                 AND posted_date <> first_seen
+                 AND (julianday(first_seen) - julianday(posted_date)) >= 0
+                 AND (julianday(first_seen) - julianday(posted_date)) <= ?
+               ORDER BY lat""",
+            (cold_start_days,),
+        ).fetchall()
+
+        latencies = [row["lat"] for row in rows]
+        qualifying = len(latencies)
+
+        # Compute percentiles via nearest-rank on sorted list
+        p50_days = p95_days = p99_days = None
+        if qualifying > 0:
+            latencies.sort()
+            # Nearest-rank: index = ceil(percentile * n) - 1
+            import math
+
+            p50_idx = math.ceil(0.50 * qualifying) - 1
+            p95_idx = math.ceil(0.95 * qualifying) - 1
+            p99_idx = math.ceil(0.99 * qualifying) - 1
+            p50_days = latencies[p50_idx]
+            p95_days = latencies[p95_idx]
+            p99_days = latencies[p99_idx]
+
+        exact_coverage_pct = round(100 * qualifying / total_dated, 1) if total_dated else 0.0
+
+        return {
+            "p50_days": p50_days,
+            "p95_days": p95_days,
+            "p99_days": p99_days,
+            "sample_n": qualifying,
+            "total_dated": total_dated,
+            "exact_coverage_pct": exact_coverage_pct,
+            "cold_start_exclude_days": cold_start_days,
+        }
+
+    except sqlite3.OperationalError as exc:
+        # Gracefully handle missing column (pre-m095 DB); re-raise other errors.
+        if "no such column" in str(exc).lower():
+            return {
+                "p50_days": None,
+                "p95_days": None,
+                "p99_days": None,
+                "sample_n": 0,
+                "total_dated": 0,
+                "exact_coverage_pct": 0.0,
+                "cold_start_exclude_days": cold_start_days,
+            }
         raise

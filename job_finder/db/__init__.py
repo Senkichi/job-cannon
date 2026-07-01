@@ -38,6 +38,7 @@ from __future__ import annotations
 from ._classification import _SUB_SCORE_KEYS as _SUB_SCORE_KEYS
 from ._classification import JobAssessment as JobAssessment
 from ._classification import derive_classification as derive_classification
+from ._dashboard_queries import get_crawl_latency_sli as get_crawl_latency_sli
 from ._dashboard_queries import get_dashboard_stats as get_dashboard_stats
 from ._dashboard_queries import get_distinct_locations as get_distinct_locations
 from ._dashboard_queries import get_jobs_by_status as get_jobs_by_status

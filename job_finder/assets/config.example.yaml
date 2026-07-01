@@ -204,6 +204,15 @@ health:
   # from a stale scoring era. Set > 1 to disable. Default 0.01 (1%).
   score_rot_fraction: 0.01
 
+# --- Metrics ---
+metrics:
+  crawl_latency:
+    # Postings discovered more than this many days after their posted_date are
+    # treated as cold-start backlog (first scan of a company dumps its open stack)
+    # and excluded from the steady-state p50/p95/p99. Aggregators (LinkedIn/
+    # Glassdoor/Indeed) have no trustworthy date and are excluded regardless.
+    cold_start_exclude_days: 30
+
 # --- AI scoring configuration ---
 scoring:
   # How much each factor contributes to the overall score (must sum to 1.0)
