@@ -4,6 +4,8 @@ Package layout:
 
 - ``_classification.py`` — JobAssessment + derive_classification +
   ``_SUB_SCORE_KEYS`` (pure scoring-rule logic, zero DB deps).
+- ``_conversion_metrics.py`` — read-only conversion-signal analytics
+  (``compute_conversion_by_band``).
 - ``_persistence.py`` — write paths (``persist_*``,
   ``update_pipeline_status``, ``log_run``).
 - ``_jobs.py`` — job CRUD (``upsert_job``, ``get_job``, ``merge_description``,
@@ -38,6 +40,7 @@ from __future__ import annotations
 from ._classification import _SUB_SCORE_KEYS as _SUB_SCORE_KEYS
 from ._classification import JobAssessment as JobAssessment
 from ._classification import derive_classification as derive_classification
+from ._conversion_metrics import compute_conversion_by_band as compute_conversion_by_band
 from ._dashboard_queries import get_crawl_latency_sli as get_crawl_latency_sli
 from ._dashboard_queries import get_dashboard_stats as get_dashboard_stats
 from ._dashboard_queries import get_distinct_locations as get_distinct_locations

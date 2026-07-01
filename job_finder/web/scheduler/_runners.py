@@ -145,6 +145,7 @@ def _derive_degraded_keys(issues: list[str], degraded_sources: list[str]) -> set
       - ``score_rot``  <- "Score rot: ..."
       - ``funnel_unexplained`` <- "Funnel unexplained: ..." (issue #587)
       - ``concentration`` <- "Concentration: ..." (issue #592)
+      - ``conversion_signal`` <- "Conversion signal degraded: ..." (issue #597)
       - ``source:<name>`` <- signal-3 "<action>: <n> failures in 24h" rows and
         every ``source_health.status='degraded'`` source (C2-4).
     """
@@ -160,6 +161,8 @@ def _derive_degraded_keys(issues: list[str], degraded_sources: list[str]) -> set
             keys.add("funnel_unexplained")
         elif issue.startswith("Concentration"):
             keys.add("concentration")
+        elif issue.startswith("Conversion signal degraded"):
+            keys.add("conversion_signal")
         elif issue.startswith("Stale detection missed"):
             keys.add("staleness")
         elif issue.startswith("OAuth token invalid"):
@@ -494,6 +497,63 @@ def _check_concentration(conn, config: dict) -> str | None:
     return None
 
 
+def _check_conversion_signal(conn, config: dict) -> str | None:
+    """Conversion-signal alarm -- does the fit-grade predict outcomes?
+
+    Pools the raw applied/converted counts (from compute_conversion_by_band)
+    across the high-fit bands (apply/consider) and the low-fit bands (skip/reject)
+    into ONE volume-weighted callback rate per side, and flags when the high-fit
+    rate is NOT higher than the low-fit rate -- i.e. the grade is failing to
+    predict real outcomes. Gated on config["health"]["conversion_min_applied"]
+    (default 10; <= 0 disables) applied SYMMETRICALLY -- both sides need at least
+    that many applications, so a lone low-fit application can't fire a false
+    alarm. Read-only; returns an issue string or None.
+    """
+    from job_finder.db import compute_conversion_by_band
+
+    min_applied = int((config.get("health", {}) or {}).get("conversion_min_applied", 10))
+    if min_applied <= 0:
+        return None
+
+    try:
+        by_band = compute_conversion_by_band(conn)
+    except Exception:
+        # Defensive: any error in the read-only computation should not break the heartbeat
+        return None
+
+    high_fit_bands = ["apply", "consider"]
+    low_fit_bands = ["skip", "reject"]
+
+    # Pool the raw counts across each band group and compute ONE volume-weighted
+    # (pooled) callback rate per side -- NOT a simple mean of per-band rates. A
+    # simple mean lets a tiny band (e.g. consider n=0->0%) swing the verdict with
+    # the same weight as a large one; pooling weights each application equally.
+    high_fit_applied = sum(by_band[band]["applied"] for band in high_fit_bands)
+    high_fit_converted = sum(by_band[band]["converted"] for band in high_fit_bands)
+    low_fit_applied = sum(by_band[band]["applied"] for band in low_fit_bands)
+    low_fit_converted = sum(by_band[band]["converted"] for band in low_fit_bands)
+
+    # Symmetric sample-size floor: BOTH sides need at least min_applied
+    # applications. Flooring only the high-fit side lets a single low-fit
+    # application (n=1 -> 100% callback) fire a false "grade doesn't predict"
+    # alarm. min_applied <= 0 already short-circuited above, so both denominators
+    # are >= 1 here and the pooled rates below never divide by zero.
+    if high_fit_applied < min_applied or low_fit_applied < min_applied:
+        return None  # Not enough data on one or both sides to be meaningful
+
+    high_fit_rate = high_fit_converted / high_fit_applied
+    low_fit_rate = low_fit_converted / low_fit_applied
+
+    # Fire alarm if high-fit callback rate is not higher than low-fit
+    if high_fit_rate <= low_fit_rate:
+        return (
+            f"Conversion signal degraded: high-fit callback rate ({high_fit_rate:.1%}) "
+            f"not higher than low-fit ({low_fit_rate:.1%})"
+        )
+
+    return None
+
+
 def run_health_check(app) -> None:
     """Daily health heartbeat -- verify key subsystems ran recently.
 
@@ -596,6 +656,12 @@ def run_health_check(app) -> None:
                 concentration = _check_concentration(conn, config)
                 if concentration:
                     issues.append(concentration)
+
+                # 9. Conversion-signal: does the fit-grade predict real outcomes?
+                #    Read-only, checks per-band application- and callback-rate.
+                conversion = _check_conversion_signal(conn, config)
+                if conversion:
+                    issues.append(conversion)
 
         except Exception as e:
             issues.append(f"Health check DB error: {e}")

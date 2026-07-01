@@ -6,6 +6,7 @@ from flask import Blueprint, current_app, render_template
 
 from job_finder.config import DEFAULT_DAILY_BUDGET_USD
 from job_finder.db import (
+    compute_conversion_by_band,
     get_dashboard_stats,
     get_liveness_stats,
     get_pending_detections,
@@ -226,6 +227,7 @@ def index():
     pending_detections = get_pending_detections(conn)
     pipeline_events = get_recent_pipeline_events(conn, limit=10)
     inbox_banner = _get_inbox_banner(config, conn)
+    conversion_by_band = compute_conversion_by_band(conn)
 
     return render_template(
         "dashboard/index.html",
@@ -239,6 +241,7 @@ def index():
         pending_detections=pending_detections,
         pipeline_events=pipeline_events,
         inbox_banner=inbox_banner,
+        conversion_by_band=conversion_by_band,
     )
 
 
@@ -328,6 +331,7 @@ def history_fragment():
         user_activity=get_recent_activity(conn, limit=15),
         pipeline_summary=get_pipeline_summary(conn),
         pipeline_events=get_recent_pipeline_events(conn, limit=10),
+        conversion_by_band=compute_conversion_by_band(conn),
     )
 
 

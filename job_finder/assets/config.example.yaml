@@ -230,6 +230,9 @@ health:
   # Minimum number of surfaced jobs required before the concentration alarm fires.
   # Prevents false alarms on cold-start boards with few jobs. Default 25.
   surfaced_concentration_min_jobs: 25
+  # Minimum applied-job sample size before the conversion signal fires.
+  # Guards against noise from tiny samples. Set <= 0 to disable the alarm.
+  conversion_min_applied: 10
 
 # --- Metrics ---
 metrics:

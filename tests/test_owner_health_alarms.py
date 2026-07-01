@@ -527,6 +527,77 @@ def test_funnel_unexplained_participates_in_escalation(migrated_db, events_file)
 
 
 # ---------------------------------------------------------------------------
+# _check_conversion_signal escalation (issue #597)
+# ---------------------------------------------------------------------------
+
+
+def _seed_conversion_job(
+    conn: sqlite3.Connection,
+    key: str,
+    band: str,
+    *,
+    converted: bool,
+) -> None:
+    """Insert a SCORED job in `band` (migrated schema) that reached 'applied' (and
+    'phone_screen' when `converted`), satisfying the jobs NOT NULL columns and the
+    I-04 invariant (sub_scores_json required whenever scoring_model is set)."""
+    now = datetime.now(UTC).replace(tzinfo=None).isoformat()
+    conn.execute(
+        "INSERT INTO jobs (dedup_key, title, company, location, first_seen, last_seen, "
+        "classification, scoring_model, sub_scores_json, pipeline_status) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, 'qwen2.5:14b', ?, 'applied')",
+        (key, f"Job {key}", "Company", "Remote", now, now, band, json.dumps(_APPLY)),
+    )
+    conn.execute(
+        "INSERT INTO pipeline_events (job_id, from_status, to_status, timestamp, source) "
+        "VALUES (?, 'discovered', 'applied', ?, 'test')",
+        (key, now),
+    )
+    if converted:
+        conn.execute(
+            "INSERT INTO pipeline_events (job_id, from_status, to_status, timestamp, source) "
+            "VALUES (?, 'applied', 'phone_screen', ?, 'test')",
+            (key, now),
+        )
+    conn.commit()
+
+
+def test_conversion_signal_participates_in_escalation(migrated_db, events_file):
+    """The conversion signal escalates under its own key after the threshold."""
+    db_path, conn = migrated_db
+    app = _make_app(db_path)
+    app.config["JF_CONFIG"] = {"health": {"conversion_min_applied": 2}}
+
+    recent = (datetime.now(UTC) - timedelta(hours=1)).replace(tzinfo=None).isoformat()
+    conn.executemany(
+        "INSERT INTO user_activity (action, entity_id, metadata, occurred_at) VALUES (?, ?, ?, ?)",
+        [
+            ("scheduled_sync", None, "{}", recent),
+            ("scheduled_staleness", None, "{}", recent),
+        ],
+    )
+    conn.commit()
+
+    # High-fit (apply) underperforms low-fit (skip): 2 applied / 0 callback vs
+    # 2 applied / 2 callback → pooled 0% <= 100% → the grade fails to predict.
+    _seed_conversion_job(conn, "hi1", "apply", converted=False)
+    _seed_conversion_job(conn, "hi2", "apply", converted=False)
+    _seed_conversion_job(conn, "lo1", "skip", converted=True)
+    _seed_conversion_job(conn, "lo2", "skip", converted=True)
+
+    with (
+        patch("job_finder.gmail_auth.get_credentials", return_value=object()),
+        patch("job_finder.web.scheduler._runners._fire_escalation") as fire,
+    ):
+        for _ in range(3):  # default escalation threshold
+            run_health_check(app)
+
+    assert fire.call_count == 1
+    escalated_keys = {e["signal_key"] for e in fire.call_args.args[0]}
+    assert "conversion_signal" in escalated_keys
+
+
+# ---------------------------------------------------------------------------
 # _check_concentration (issue #592)
 # ---------------------------------------------------------------------------
 
