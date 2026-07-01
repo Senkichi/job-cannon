@@ -18,7 +18,13 @@ from job_finder.parsers import extract_primary, extract_with_fallback
 
 # Re-export shared email-sender symbols from email_senders.py
 # These are kept through Stage 4, removed only in Stage 5
-from job_finder.sources.email_senders import (
+from job_finder.sources.email_senders import (  # noqa: F401
+    _ARCHIVE_META_INDICATORS,
+    _OVERRIDABLE_SENDERS,
+    SENDER_LABEL,
+    SENDER_PARSERS,
+    SENDERS,
+    SenderSpec,
     _archive_parse_failure,
     _should_archive_failure,
     resolve_sender_label,
