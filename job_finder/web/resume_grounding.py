@@ -6,6 +6,7 @@ title-variant allowlist for the most-recent position.
 
 Public API:
     validate_resume_grounding(tailored, profile, job) -> GroundingReport
+    adjudicate_resume_prose(tailored, profile, config, conn) -> tuple[FabricationViolation, ...]
 
 Dataclasses:
     FabricationViolation(kind, value, section)
@@ -15,6 +16,7 @@ Dataclasses:
 
 import logging
 import re
+import sqlite3
 from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
@@ -38,6 +40,8 @@ class FabricationViolation:
         - "skill": fabricated skill
         - "prohibited_item": hard-stop prohibited token/phrase
         - "title_unlisted": most-recent title not in allowlist
+        - "prose_fabrication": LLM-detected fabrication in prose (bullets/summary)
+        - "adjudicator_unavailable": prose adjudicator failed (fail-closed)
     value: The offending token/phrase as it appeared in the tailored resume.
     section: Human locator, e.g. "sections[2]", "education", or "summary".
     """
@@ -298,9 +302,13 @@ def _check_structural_subset(
 
 
 def _check_prohibited_items(
-    tailored: dict, profile: dict, job: dict
+    tailored: dict, profile: dict, job: dict, style_guide: dict | None = None
 ) -> list[FabricationViolation]:
-    """Layer B: Deterministic scan for mechanically-checkable hard-stops."""
+    """Layer B: Deterministic scan for mechanically-checkable hard-stops.
+
+    Configuration is read from style_guide['prohibited_items'] if provided,
+    otherwise uses hardcoded defaults (for backward compatibility).
+    """
     violations = []
 
     # Build concatenated text for scanning
@@ -312,82 +320,105 @@ def _check_prohibited_items(
     bullets_text = " ".join(bullets)
     full_text = f"{summary} {skills_text} {bullets_text}".lower()
 
-    # 1. No dbt (case-insensitive word boundary)
-    if re.search(r"\bdbt\b", full_text):
-        violations.append(
-            FabricationViolation(
-                kind="prohibited_item", value="dbt", section="summary/skills/bullets"
-            )
-        )
+    # Read configuration from style_guide or use defaults
+    if style_guide and isinstance(style_guide, dict):
+        prohibited_config = style_guide.get("prohibited_items", {})
+    else:
+        # Hardcoded defaults for backward compatibility
+        prohibited_config = {
+            "banned_tokens": ["dbt", "spark", "apache spark"],
+            "roi_forbidden_pct": 454,
+            "roi_allowed_pct": 350,
+            "min_years_anchor": 8,
+            "ban_company_name_in_summary": True,
+            "ban_sample_sizes": True,
+            "ban_em_dash_family": True,
+            "ban_third_person": True,
+        }
 
-    # 2. No Apache Spark (case-insensitive)
-    if re.search(r"\bspark\b", full_text) or "apache spark" in full_text:
-        violations.append(
-            FabricationViolation(
-                kind="prohibited_item", value="Spark", section="summary/skills/bullets"
-            )
-        )
+    # 1. Banned tokens (case-insensitive word boundary)
+    banned_tokens = prohibited_config.get("banned_tokens", [])
+    if isinstance(banned_tokens, list):
+        for token in banned_tokens:
+            if isinstance(token, str) and token:
+                # Check for word boundary match
+                if re.search(rf"\b{re.escape(token.lower())}\b", full_text):
+                    violations.append(
+                        FabricationViolation(
+                            kind="prohibited_item", value=token, section="summary/skills/bullets"
+                        )
+                    )
 
-    # 3. No company name in Professional Summary
-    target_company = job.get("company", "")
-    if target_company:
-        norm_target = _normalize_company_for_grounding(target_company)
-        norm_summary = _normalize_company_for_grounding(summary)
-        if norm_target in norm_summary:
+    # 2. Company name in Professional Summary
+    if prohibited_config.get("ban_company_name_in_summary", True):
+        target_company = job.get("company", "")
+        if target_company:
+            norm_target = _normalize_company_for_grounding(target_company)
+            norm_summary = _normalize_company_for_grounding(summary)
+            if norm_target in norm_summary:
+                violations.append(
+                    FabricationViolation(
+                        kind="prohibited_item", value=target_company, section="summary"
+                    )
+                )
+
+    # 3. Sample sizes (N=X)
+    if prohibited_config.get("ban_sample_sizes", True):
+        if re.search(r"\bN\s*=\s*\d", full_text, re.IGNORECASE):
+            violations.append(
+                FabricationViolation(kind="prohibited_item", value="N=", section="bullets")
+            )
+
+    # 4. Em dashes or en dashes in full text (U+2012..U+2015)
+    if prohibited_config.get("ban_em_dash_family", True):
+        if re.search(r"[‒–—―]", full_text):
             violations.append(
                 FabricationViolation(
-                    kind="prohibited_item", value=target_company, section="summary"
+                    kind="prohibited_item", value="dash", section="summary/skills/bullets"
                 )
             )
 
-    # 4. No sample sizes (N=X)
-    if re.search(r"\bN\s*=\s*\d", full_text, re.IGNORECASE):
-        violations.append(
-            FabricationViolation(kind="prohibited_item", value="N=", section="bullets")
-        )
-
-    # 5. No em dashes or en dashes in full text (U+2012..U+2015)
-    if re.search(r"[‒–—―]", full_text):
-        violations.append(
-            FabricationViolation(
-                kind="prohibited_item", value="dash", section="summary/skills/bullets"
-            )
-        )
-
-    # 6. ROI figure is 350% not 454% (anchor to percent sign)
-    if re.search(r"454\s*%", full_text):
-        violations.append(
-            FabricationViolation(kind="prohibited_item", value="454%", section="bullets")
-        )
-
-    # 7. No years-of-experience figure smaller than 8+ anchor (check ALL matches)
-    for year_match in re.finditer(r"\b(\d+)\+?\s*(?:years|yrs)\b", full_text, re.IGNORECASE):
-        years = int(year_match.group(1))
-        if years < 8:
+    # 5. ROI figure (forbidden vs allowed percentage)
+    roi_forbidden = prohibited_config.get("roi_forbidden_pct")
+    if roi_forbidden is not None:
+        if re.search(rf"{roi_forbidden}\s*%", full_text):
             violations.append(
                 FabricationViolation(
-                    kind="prohibited_item", value=f"{years} years", section="summary/bullets"
+                    kind="prohibited_item", value=f"{roi_forbidden}%", section="bullets"
                 )
             )
 
-    # 8. No third-person self-reference (owner's first name or "he"/"his"/"she"/"her"/"they"/"their")
-    owner_first_name = _derive_owner_first_name(profile)
-    if owner_first_name:
-        # Word-boundary match on first name as standalone token
-        if re.search(rf"\b{re.escape(owner_first_name.lower())}\b", full_text):
+    # 6. Years-of-experience figure smaller than min_years_anchor
+    min_years = prohibited_config.get("min_years_anchor")
+    if min_years is not None:
+        for year_match in re.finditer(r"\b(\d+)\+?\s*(?:years|yrs)\b", full_text, re.IGNORECASE):
+            years = int(year_match.group(1))
+            if years < min_years:
+                violations.append(
+                    FabricationViolation(
+                        kind="prohibited_item", value=f"{years} years", section="summary/bullets"
+                    )
+                )
+
+    # 7. Third-person self-reference
+    if prohibited_config.get("ban_third_person", True):
+        owner_first_name = _derive_owner_first_name(profile)
+        if owner_first_name:
+            # Word-boundary match on first name as standalone token
+            if re.search(rf"\b{re.escape(owner_first_name.lower())}\b", full_text):
+                violations.append(
+                    FabricationViolation(
+                        kind="prohibited_item", value=owner_first_name, section="summary/bullets"
+                    )
+                )
+
+        # Check for third-person pronouns (without literal space requirement)
+        if re.search(r"\b(?:he|his|him|she|her|hers|they|their)\b", full_text):
             violations.append(
                 FabricationViolation(
-                    kind="prohibited_item", value=owner_first_name, section="summary/bullets"
+                    kind="prohibited_item", value="third-person", section="summary/bullets"
                 )
             )
-
-    # Check for third-person pronouns (without literal space requirement)
-    if re.search(r"\b(?:he|his|him|she|her|hers|they|their)\b", full_text):
-        violations.append(
-            FabricationViolation(
-                kind="prohibited_item", value="third-person", section="summary/bullets"
-            )
-        )
 
     return violations
 
@@ -418,7 +449,7 @@ def _identify_most_recent_position(profile: dict) -> dict | None:
     Rules:
         - end_date is null/"present"/"current" → most-recent
         - Else latest start_date
-        - Among concurrent current roles, break ties by latest start_date (not document order)
+        - Among concurrent current roles, break ties by latest start_date (month-aware, not document order)
     """
     positions = profile.get("positions", [])
     if not positions:
@@ -433,10 +464,38 @@ def _identify_most_recent_position(profile: dict) -> dict | None:
 
         # Score: current positions first, then by start_date
         if not end_date or end_date.lower() in ("present", "current"):
-            # Extract year from start_date for tiebreaking among concurrent roles
+            # Extract year and month from start_date for month-aware tiebreaking
+            # Parse month if present (e.g., "Nov 2023" vs "Jan 2023")
             start_year_match = re.search(r"\b(19|20)\d{2}\b", start_date)
             start_year = int(start_year_match.group()) if start_year_match else 0
-            score = 1000000 + start_year  # Base 1M + start_year for tiebreak
+
+            # Try to extract month (3-letter abbreviation or numeric)
+            month_score = 0
+            month_match = re.search(
+                r"\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\b",
+                start_date,
+                re.IGNORECASE,
+            )
+            if month_match:
+                month_str = month_match.group().capitalize()
+                month_map = {
+                    "Jan": 1,
+                    "Feb": 2,
+                    "Mar": 3,
+                    "Apr": 4,
+                    "May": 5,
+                    "Jun": 6,
+                    "Jul": 7,
+                    "Aug": 8,
+                    "Sep": 9,
+                    "Oct": 10,
+                    "Nov": 11,
+                    "Dec": 12,
+                }
+                month_score = month_map.get(month_str, 0)
+
+            # Base 1M + year*12 + month for month-aware tiebreak
+            score = 1000000 + (start_year * 12) + month_score
         else:
             # Extract year from start_date for ordering
             start_year_match = re.search(r"\b(19|20)\d{2}\b", start_date)
@@ -478,9 +537,48 @@ def _check_title_allowlist(tailored: dict, profile: dict) -> list[FabricationVio
             most_recent_section_idx = idx
             break
 
-    # If no match found, default to sections[0] (backward compatibility)
+    # If most-recent company is NOT present in tailored sections, do NOT fall back to index 0.
+    # Instead, validate each section's title against its own company's allowlist (the older-position path).
     if most_recent_section_idx is None:
-        most_recent_section_idx = 0
+        # No most-recent company match → validate all sections as older positions
+        for idx, section in enumerate(sections):
+            section_title = section.get("title", "")
+            if not section_title:
+                continue
+
+            norm_section_title = _normalize_text(section_title)
+            section_company = section.get("company", "")
+            norm_section_company = _normalize_company_for_grounding(section_company)
+
+            # Find matching position in profile
+            matching_position = None
+            for position in profile.get("positions", []):
+                if (
+                    _normalize_company_for_grounding(position.get("company", ""))
+                    == norm_section_company
+                ):
+                    matching_position = position
+                    break
+
+            if matching_position:
+                pos_canonical = _normalize_text(matching_position.get("title", ""))
+                pos_variants = matching_position.get("title_variants", [])
+                if isinstance(pos_variants, list):
+                    pos_norm_variants = {
+                        _normalize_text(v) for v in pos_variants if isinstance(v, str)
+                    }
+                else:
+                    pos_norm_variants = set()
+
+                pos_admissible = {pos_canonical} | pos_norm_variants
+                if norm_section_title not in pos_admissible:
+                    violations.append(
+                        FabricationViolation(
+                            kind="title", value=section_title, section=f"sections[{idx}]"
+                        )
+                    )
+
+        return violations
 
     # Validate most-recent section against its allowlist
     most_recent_section = sections[most_recent_section_idx]
@@ -599,11 +697,210 @@ def _compute_keyword_coverage(tailored: dict) -> KeywordCoverage:
 
 
 # ---------------------------------------------------------------------------
+# Prose adjudicator (fail-closed LLM check for bullets/summary)
+# ---------------------------------------------------------------------------
+
+
+_PROSE_ADJUDICATION_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "fabrications": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "claim": {"type": "string", "description": "The fabricated claim text"},
+                    "type": {
+                        "type": "string",
+                        "description": "Type of fabrication: employer, job_title, certification, metric, tool_skill, tenure, or other",
+                    },
+                    "section": {
+                        "type": "string",
+                        "description": "Locator: 'summary' or 'sections[N]'",
+                    },
+                },
+                "required": ["claim", "type", "section"],
+            },
+        }
+    },
+    "required": ["fabrications"],
+    "additionalProperties": True,
+}
+
+_PROSE_ADJUDICATION_SYSTEM = (
+    "You are a strict fact-checker validating that a resume's prose (summary and bullet points) "
+    "contains ONLY facts grounded in the candidate's TRUE profile. "
+    "Identify EVERY concrete claim in the prose that asserts a fact NOT supported by the ground truth. "
+    "Specifically flag fabricated: EMPLOYERS, JOB TITLES, CERTIFICATIONS/credentials, quantified METRICS, "
+    "named TOOLS/SKILLS, or TENURES (dates/durations). "
+    "Claims that are rephrasings or re-emphasis of ground-truth achievements are ALLOWED. "
+    "Respond with JSON only."
+)
+
+
+def adjudicate_resume_prose(
+    tailored: dict, profile: dict, config: dict, conn: sqlite3.Connection
+) -> tuple[FabricationViolation, ...]:
+    """Fail-closed LLM adjudicator for resume prose (summary + bullets).
+
+    This is an I/O function (dispatches call_model) and must be called AFTER
+    the pure validate_resume_grounding check. It grounds the free-text prose
+    (summary and bullets) against the structured profile facts, catching
+    fabrications that the deterministic validator cannot detect.
+
+    Ground truth corpus = the STRUCTURED profile only:
+        - Every position's company/title/start_date/end_date/achievements[]
+        - Top-level skills[] ∪ each position's skills[]
+        - education[] (degree/institution)
+
+    Prose under test = tailored['summary'] + every section's bullets.
+
+    FAIL CLOSED: if call_model raises, returns empty, or returns unparseable output,
+    treat it as a BLOCKING violation (kind="adjudicator_unavailable") — the resume
+    must NOT be emitted. This is the opposite of jd_adjudicator, which advances the
+    cascade on failure. Here, "can't verify" = "refuse".
+
+    Args:
+        tailored: Dict from resume_tailor.transform (matches TAILORED_RESUME_SCHEMA).
+        profile: Experience profile dict (from load_scoring_profile).
+        config: App config dict (passed straight to call_model).
+        conn: Open sqlite3 connection (call_model needs it for cost recording).
+
+    Returns:
+        Tuple of FabricationViolation objects. Empty if prose is clean.
+        Returns a single adjudicator_unavailable violation on any LLM failure.
+    """
+    from job_finder.web.model_provider import call_model
+
+    # Build ground truth corpus from profile
+    ground_truth_parts = ["## GROUND TRUTH FACTS (ONLY these are allowed)", ""]
+
+    # Positions with achievements (the truthful bullet source)
+    for position in profile.get("positions", []):
+        company = position.get("company", "")
+        title = position.get("title", "")
+        start_date = position.get("start_date", "")
+        end_date = position.get("end_date") or "present"
+        achievements = position.get("achievements", [])
+        position_skills = position.get("skills", [])
+
+        ground_truth_parts.append(f"**{title}** @ {company} ({start_date} - {end_date})")
+        if achievements:
+            ground_truth_parts.append("Achievements:")
+            for ach in achievements:
+                ground_truth_parts.append(f"  - {ach}")
+        if position_skills:
+            ground_truth_parts.append(f"Skills: {', '.join(position_skills)}")
+        ground_truth_parts.append("")
+
+    # Profile-level skills
+    profile_skills = profile.get("skills", [])
+    if profile_skills:
+        ground_truth_parts.append("### Profile-Level Skills")
+        ground_truth_parts.append(f"{', '.join(profile_skills)}")
+        ground_truth_parts.append("")
+
+    # Education
+    for edu in profile.get("education", []):
+        degree = edu.get("degree", "")
+        institution = edu.get("institution", "")
+        if degree or institution:
+            ground_truth_parts.append(f"**{degree}** — {institution}")
+
+    ground_truth = "\n".join(ground_truth_parts)
+
+    # Build prose under test from tailored
+    prose_parts = ["## RESUME PROSE TO CHECK", ""]
+    summary = tailored.get("summary", "")
+    if summary:
+        prose_parts.append("### Summary")
+        prose_parts.append(summary)
+        prose_parts.append("")
+
+    for idx, section in enumerate(tailored.get("sections", [])):
+        bullets = section.get("bullets", [])
+        if bullets:
+            prose_parts.append(f"### Section {idx} Bullets")
+            for bullet in bullets:
+                prose_parts.append(f"  - {bullet}")
+            prose_parts.append("")
+
+    prose_to_check = "\n".join(prose_parts)
+
+    # Dispatch LLM adjudication
+    user_msg = f"{ground_truth}\n\n{prose_to_check}"
+    try:
+        result = call_model(
+            tier="quick",
+            system=_PROSE_ADJUDICATION_SYSTEM,
+            messages=[{"role": "user", "content": user_msg}],
+            conn=conn,
+            config=config,
+            output_schema=_PROSE_ADJUDICATION_SCHEMA,
+            purpose="resume_prose_adjudication",
+            max_tokens=512,
+        )
+        data = result.data
+    except Exception as exc:
+        logger.warning("adjudicate_resume_prose: call_model failed: %s", exc)
+        return (
+            FabricationViolation(
+                kind="adjudicator_unavailable",
+                value="LLM adjudication failed",
+                section="summary/bullets",
+            ),
+        )
+
+    # Parse and validate response
+    if not isinstance(data, dict) or "fabrications" not in data:
+        logger.warning("adjudicate_resume_prose: unparseable response: %s", data)
+        return (
+            FabricationViolation(
+                kind="adjudicator_unavailable",
+                value="Unparseable LLM response",
+                section="summary/bullets",
+            ),
+        )
+
+    fabrications = data.get("fabrications", [])
+    if not isinstance(fabrications, list):
+        logger.warning("adjudicate_resume_prose: fabrications not a list: %s", data)
+        return (
+            FabricationViolation(
+                kind="adjudicator_unavailable",
+                value="Malformed fabrications list",
+                section="summary/bullets",
+            ),
+        )
+
+    # Convert to FabricationViolation objects
+    violations = []
+    for fab in fabrications:
+        if not isinstance(fab, dict):
+            continue
+        claim = fab.get("claim", "")
+        fab_type = fab.get("type", "other")
+        section = fab.get("section", "summary")
+        if claim:
+            violations.append(
+                FabricationViolation(
+                    kind="prose_fabrication",
+                    value=claim,
+                    section=f"{section} ({fab_type})",
+                )
+            )
+
+    return tuple(violations)
+
+
+# ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
 
-def validate_resume_grounding(tailored: dict, profile: dict, job: dict) -> GroundingReport:
+def validate_resume_grounding(
+    tailored: dict, profile: dict, job: dict, style_guide: dict | None = None
+) -> GroundingReport:
     """Return every hard fact in `tailored` NOT grounded in `profile`, every
     prohibited-item hard-stop violated, every out-of-allowlist most-recent title,
     PLUS a deterministic JD-keyword-coverage metric.
@@ -623,7 +920,8 @@ def validate_resume_grounding(tailored: dict, profile: dict, job: dict) -> Groun
           - each education degree/institution ∈ profile education (normalized)
 
     (B) PROHIBITED-ITEM hard-stops (pure string/regex over the tailored output):
-        - dbt, Apache Spark, company name in summary, N= sample sizes, em-dashes,
+        - Configurable via style_guide['prohibited_items']; defaults to:
+          dbt, Apache Spark, company name in summary, N= sample sizes, em-dashes,
           454% ROI, sub-8 year-count, third-person self-reference.
 
     (C) TITLE-ALIGNMENT ALLOWLIST: the MOST-RECENT position's tailored title must be
@@ -645,6 +943,7 @@ def validate_resume_grounding(tailored: dict, profile: dict, job: dict) -> Groun
         tailored: Dict from resume_tailor.transform (matches TAILORED_RESUME_SCHEMA).
         profile: Experience profile dict (from load_scoring_profile).
         job: Job row dict (used for company name in summary check).
+        style_guide: Optional style guide dict (for prohibited_items config).
 
     Returns:
         GroundingReport with violations tuple and KeywordCoverage metric.
@@ -656,7 +955,7 @@ def validate_resume_grounding(tailored: dict, profile: dict, job: dict) -> Groun
     violations = _check_structural_subset(tailored, profile_facts)
 
     # Layer B: Prohibited items scan
-    violations.extend(_check_prohibited_items(tailored, profile, job))
+    violations.extend(_check_prohibited_items(tailored, profile, job, style_guide))
 
     # Layer C: Title-alignment allowlist
     violations.extend(_check_title_allowlist(tailored, profile))

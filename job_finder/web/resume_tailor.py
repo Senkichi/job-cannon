@@ -316,9 +316,12 @@ def tailor_resume(job: dict, profile: dict, config: dict, conn) -> dict:
     # resume contains ONLY facts grounded in the profile, respects prohibited-item
     # hard-stops, and honors the owner's title-variant allowlist for the most-recent
     # position. Refuse to return a resume with any violation.
-    from job_finder.web.resume_grounding import validate_resume_grounding
+    from job_finder.web.resume_grounding import (
+        adjudicate_resume_prose,
+        validate_resume_grounding,
+    )
 
-    report = validate_resume_grounding(result.data, profile, job)
+    report = validate_resume_grounding(result.data, profile, job, style_guide)
     if report.violations:
         logger.warning(
             "resume_tailor: %d violation(s) rejected: %s",
@@ -326,6 +329,16 @@ def tailor_resume(job: dict, profile: dict, config: dict, conn) -> dict:
             [(v.kind, v.value) for v in report.violations],
         )
         raise FabricationError(report.violations)
+
+    # Prose adjudicator (fail-closed LLM check for bullets/summary)
+    prose_violations = adjudicate_resume_prose(result.data, profile, config, conn)
+    if prose_violations:
+        logger.warning(
+            "resume_tailor: %d prose fabrication(s) rejected: %s",
+            len(prose_violations),
+            [(v.kind, v.value) for v in prose_violations],
+        )
+        raise FabricationError(prose_violations)
 
     # Attach keyword coverage metric (reported, never a refusal reason)
     result.data["keyword_coverage"] = {

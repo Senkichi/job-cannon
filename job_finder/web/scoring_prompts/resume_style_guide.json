@@ -15,5 +15,15 @@
     "margins": "Standard 1-inch margins",
     "spacing": "Consistent line spacing (1.15-1.5)",
     "headings": "Clear hierarchy with bold section headers"
+  },
+  "prohibited_items": {
+    "banned_tokens": ["dbt", "spark", "apache spark"],
+    "roi_forbidden_pct": 454,
+    "roi_allowed_pct": 350,
+    "min_years_anchor": 8,
+    "ban_company_name_in_summary": true,
+    "ban_sample_sizes": true,
+    "ban_em_dash_family": true,
+    "ban_third_person": true
   }
 }

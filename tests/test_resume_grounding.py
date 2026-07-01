@@ -6,6 +6,7 @@ import pytest
 
 from job_finder.web.profile_schema import load_profile
 from job_finder.web.resume_grounding import validate_resume_grounding
+from job_finder.web.resume_tailor import load_style_guide
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -31,12 +32,18 @@ def base_job():
     }
 
 
+@pytest.fixture
+def style_guide():
+    """Load the style guide for testing."""
+    return load_style_guide()
+
+
 # ---------------------------------------------------------------------------
 # Test: Layer A - structural subset (fabricated facts)
 # ---------------------------------------------------------------------------
 
 
-def test_validator_catches_fabricated_employer(example_profile, base_job):
+def test_validator_catches_fabricated_employer(example_profile, base_job, style_guide):
     """Layer A: Fabricated employer is caught."""
     tailored = {
         "summary": "Experienced data scientist",
@@ -58,7 +65,7 @@ def test_validator_catches_fabricated_employer(example_profile, base_job):
         "jd_keywords": ["Python", "SQL"],
     }
 
-    report = validate_resume_grounding(tailored, example_profile, base_job)
+    report = validate_resume_grounding(tailored, example_profile, base_job, style_guide)
 
     # Should catch fabricated company
     assert len(report.violations) >= 1
@@ -262,6 +269,10 @@ def test_validator_catches_company_suffix_false_positive(example_profile, base_j
 
 def test_validator_catches_prohibited_items(example_profile, base_job):
     """Layer B: All mechanized hard-stops are caught."""
+    from job_finder.web.resume_tailor import load_style_guide
+
+    style_guide = load_style_guide()
+
     tailored = {
         "summary": "Experienced data scientist at TargetCorp",  # Company name in summary
         "skills": ["Python", "SQL"],
@@ -282,7 +293,7 @@ def test_validator_catches_prohibited_items(example_profile, base_job):
         "jd_keywords": ["Python", "SQL"],
     }
 
-    report = validate_resume_grounding(tailored, example_profile, base_job)
+    report = validate_resume_grounding(tailored, example_profile, base_job, style_guide)
 
     # Should catch multiple prohibited items
     prohibited_violations = [v for v in report.violations if v.kind == "prohibited_item"]
@@ -299,7 +310,11 @@ def test_validator_catches_prohibited_items(example_profile, base_job):
 
 
 def test_validator_catches_spark_prohibited(example_profile, base_job):
-    """Layer B: Apache Spark is caught."""
+    """Layer B: Apache Spark is caught (from style_guide banned_tokens)."""
+    from job_finder.web.resume_tailor import load_style_guide
+
+    style_guide = load_style_guide()
+
     tailored = {
         "summary": "Experienced data scientist",
         "skills": ["Python", "SQL", "Apache Spark"],  # Spark prohibited
@@ -314,7 +329,7 @@ def test_validator_catches_spark_prohibited(example_profile, base_job):
         "jd_keywords": ["Python", "SQL"],
     }
 
-    report = validate_resume_grounding(tailored, example_profile, base_job)
+    report = validate_resume_grounding(tailored, example_profile, base_job, style_guide)
 
     prohibited_violations = [v for v in report.violations if v.kind == "prohibited_item"]
     assert len(prohibited_violations) >= 1
@@ -652,10 +667,10 @@ def test_validator_catches_variant_on_wrong_company_section(example_profile, bas
 def test_validator_tiebreaks_concurrent_current_roles_by_start_date(example_profile, base_job):
     """GROUP B4: Concurrent current roles tiebreak by start_date, not document order.
 
-    Profile has two current roles; the one with later start_date should be most-recent.
-    Using a title variant from the earlier role on the later role should violate.
+    This test is now superseded by test_validator_tiebreaks_concurrent_current_roles_discriminating
+    which provides a discriminating test that actually depends on the tiebreak logic.
     """
-    # Create profile with two concurrent current roles
+    # This test is kept for backward compatibility but the discriminating test is better
     profile_concurrent = example_profile.copy()
     profile_concurrent["positions"] = [
         {
@@ -824,12 +839,17 @@ def test_tailor_resume_raises_on_fabrication_title_and_prohibited(example_profil
         "jd_keywords": ["Python", "SQL"],
     }
 
+    # Mock prose adjudicator to return no fabrications (focus on deterministic violations)
+    mock_prose_result = Mock()
+    mock_prose_result.data = {"fabrications": []}
+
     config = {}
     conn = Mock()
 
     with patch("job_finder.web.model_provider.call_model", return_value=mock_result):
-        with pytest.raises(FabricationError) as exc_info:
-            tailor_resume(base_job, example_profile, config, conn)
+        with patch("job_finder.web.resume_grounding.adjudicate_resume_prose", return_value=()):
+            with pytest.raises(FabricationError) as exc_info:
+                tailor_resume(base_job, example_profile, config, conn)
 
         # Check that all three violations are present
         violations = exc_info.value.violations
@@ -866,7 +886,8 @@ def test_tailor_resume_returns_clean_resume(example_profile, base_job):
     conn = Mock()
 
     with patch("job_finder.web.model_provider.call_model", return_value=mock_result):
-        result = tailor_resume(base_job, example_profile, config, conn)
+        with patch("job_finder.web.resume_grounding.adjudicate_resume_prose", return_value=()):
+            result = tailor_resume(base_job, example_profile, config, conn)
 
         # Should return normally with coverage metric
         assert "keyword_coverage" in result
@@ -905,3 +926,454 @@ def test_validator_catches_fabricated_education(example_profile, base_job):
     institution_violations = [v for v in report.violations if v.kind == "institution"]
     assert len(degree_violations) >= 1
     assert len(institution_violations) >= 1
+
+
+# ---------------------------------------------------------------------------
+# Test: Prose adjudicator (GROUP A)
+# ---------------------------------------------------------------------------
+
+
+def test_prose_adjudicator_catches_fabricated_aws_claims(example_profile, base_job):
+    """GROUP A3: Prose adjudicator catches fabricated AWS/Principal Engineer claims.
+
+    The exact review input: summary says "Previously Principal Engineer at Amazon Web Services"
+    and bullets claim "Led a 50-person org at Amazon Web Services", "Hold an active AWS
+    Solutions Architect Professional certification", "Production experience with Kubernetes,
+    Terraform, and Rust". These are NOT in the profile and should be flagged.
+    """
+    from unittest.mock import Mock, patch
+
+    from job_finder.web.resume_grounding import adjudicate_resume_prose
+
+    tailored = {
+        "summary": "Previously Principal Engineer at Amazon Web Services",
+        "skills": ["Python", "SQL"],
+        "sections": [
+            {
+                "company": "TechCorp Solutions",
+                "title": "Senior Data Scientist",
+                "dates": "Mar 2022 - Present",
+                "bullets": [
+                    "Led a 50-person org at Amazon Web Services",
+                    "Hold an active AWS Solutions Architect Professional certification",
+                    "Production experience with Kubernetes, Terraform, and Rust",
+                ],
+            }
+        ],
+        "jd_keywords": ["Python", "SQL"],
+    }
+
+    config = {}
+    conn = Mock()
+
+    # Mock call_model to return fabrications
+    mock_result = Mock()
+    mock_result.data = {
+        "fabrications": [
+            {
+                "claim": "Previously Principal Engineer at Amazon Web Services",
+                "type": "job_title",
+                "section": "summary",
+            },
+            {
+                "claim": "Led a 50-person org at Amazon Web Services",
+                "type": "employer",
+                "section": "sections[0]",
+            },
+            {
+                "claim": "Hold an active AWS Solutions Architect Professional certification",
+                "type": "certification",
+                "section": "sections[0]",
+            },
+            {
+                "claim": "Production experience with Kubernetes, Terraform, and Rust",
+                "type": "tool_skill",
+                "section": "sections[0]",
+            },
+        ]
+    }
+
+    with patch("job_finder.web.model_provider.call_model", return_value=mock_result):
+        violations = adjudicate_resume_prose(tailored, example_profile, config, conn)
+
+    # Should catch all fabrications
+    assert len(violations) >= 4
+    assert all(v.kind == "prose_fabrication" for v in violations)
+
+
+def test_prose_adjudicator_passes_clean_prose(example_profile, base_job):
+    """GROUP A3: Prose adjudicator passes when all claims are grounded in achievements.
+
+    Clean prose (all claims grounded in achievements[]/skills/education) → adjudicator
+    returns none → resume returned.
+    """
+    from unittest.mock import Mock, patch
+
+    from job_finder.web.resume_grounding import adjudicate_resume_prose
+
+    tailored = {
+        "summary": "Senior data scientist with expertise in ML pipelines and A/B testing",
+        "skills": ["Python", "SQL", "Machine Learning"],
+        "sections": [
+            {
+                "company": "TechCorp Solutions",
+                "title": "Senior Data Scientist",
+                "dates": "Mar 2022 - Present",
+                "bullets": [
+                    "Built ML pipeline processing 2M+ daily transactions",
+                    "Led cross-functional team of 4 to ship recommendation engine",
+                ],
+            }
+        ],
+        "jd_keywords": ["Python", "SQL"],
+    }
+
+    config = {}
+    conn = Mock()
+
+    # Mock call_model to return no fabrications
+    mock_result = Mock()
+    mock_result.data = {"fabrications": []}
+
+    with patch("job_finder.web.model_provider.call_model", return_value=mock_result):
+        violations = adjudicate_resume_prose(tailored, example_profile, config, conn)
+
+    # Should pass with no violations
+    assert len(violations) == 0
+
+
+def test_prose_adjudicator_fails_closed_on_provider_error(example_profile, base_job):
+    """GROUP A3: Prose adjudicator fails closed on provider error.
+
+    Provider error (call_model raises) → FAIL CLOSED → FabricationError
+    (NOT a silent pass).
+    """
+    from unittest.mock import Mock, patch
+
+    from job_finder.web.resume_grounding import adjudicate_resume_prose
+
+    tailored = {
+        "summary": "Senior data scientist",
+        "skills": ["Python", "SQL"],
+        "sections": [
+            {
+                "company": "TechCorp Solutions",
+                "title": "Senior Data Scientist",
+                "dates": "Mar 2022 - Present",
+                "bullets": ["Built ML pipeline"],
+            }
+        ],
+        "jd_keywords": ["Python", "SQL"],
+    }
+
+    config = {}
+    conn = Mock()
+
+    # Mock call_model to raise an exception
+    with patch(
+        "job_finder.web.model_provider.call_model", side_effect=Exception("Provider error")
+    ):
+        violations = adjudicate_resume_prose(tailored, example_profile, config, conn)
+
+    # Should return adjudicator_unavailable violation (fail-closed)
+    assert len(violations) == 1
+    assert violations[0].kind == "adjudicator_unavailable"
+
+
+# ---------------------------------------------------------------------------
+# Test: Layer C fallback-to-index-0 fix (GROUP B)
+# ---------------------------------------------------------------------------
+
+
+def test_layer_c_allows_older_only_faithful_subset(example_profile, base_job):
+    """GROUP B1: Layer C allows older-only faithful subset (no fallback to index 0).
+
+    When the tailored resume DROPS the most-recent role and keeps only an OLDER role
+    (legit when tailoring for a role closer to the earlier job), the validator should
+    NOT fall back to index 0. It should validate each section's title against ITS OWN
+    company's allowlist.
+
+    Test: tailored = single section {company:'DataDriven Analytics', title:'Data Scientist'
+    (its true canonical), dates:'2019 - 2022'}, example profile → NO violation.
+    """
+    tailored = {
+        "summary": "Experienced data scientist",
+        "skills": ["Python", "SQL"],
+        "sections": [
+            {
+                "company": "DataDriven Analytics",  # Older company (not most-recent)
+                "title": "Data Scientist",  # Its true canonical title
+                "dates": "Jun 2019 - Feb 2022",
+                "bullets": ["Built ML pipeline"],
+            }
+            # Deliberately omit TechCorp Solutions (most-recent)
+        ],
+        "jd_keywords": ["Python", "SQL"],
+    }
+
+    report = validate_resume_grounding(tailored, example_profile, base_job)
+
+    # Should pass with no violations (title is canonical for that company)
+    assert len(report.violations) == 0
+
+
+# ---------------------------------------------------------------------------
+# Test: Month-aware concurrent-role tiebreak (GROUP C)
+# ---------------------------------------------------------------------------
+
+
+def test_month_aware_concurrent_role_tiebreak(example_profile, base_job):
+    """GROUP C1: Month-aware concurrent-role tiebreak.
+
+    Profile has two concurrent MegaCorp roles — {'Junior Analyst','Jan 2023', end None,
+    variants:['Trainee']} and {'Principal','Nov 2023', end None, no variants}. Tailored
+    MegaCorp section titled 'Trainee' dated 'Nov 2023 - Present' → violation (Nov 2023
+    Principal is the true most-recent; 'Trainee' is not in its allowlist).
+    """
+    # Create profile with two concurrent current roles at same company
+    profile_concurrent = example_profile.copy()
+    profile_concurrent["positions"] = [
+        {
+            "title": "Junior Analyst",
+            "company": "MegaCorp",
+            "start_date": "Jan 2023",  # Earlier start
+            "end_date": None,  # Current
+            "title_variants": ["Trainee"],  # Junior-only variant
+            "achievements": [],
+            "skills": [],
+        },
+        {
+            "title": "Principal",
+            "company": "MegaCorp",
+            "start_date": "Nov 2023",  # Later start → true most-recent
+            "end_date": None,  # Current
+            "title_variants": [],  # No variants
+            "achievements": [],
+            "skills": [],
+        },
+    ]
+
+    tailored = {
+        "summary": "Experienced analyst",
+        "skills": ["Python"],
+        "sections": [
+            {
+                "company": "MegaCorp",
+                "title": "Trainee",  # Junior-only variant on Principal section
+                "dates": "Nov 2023 - Present",
+                "bullets": ["Built systems"],
+            }
+        ],
+        "jd_keywords": ["Python"],
+    }
+
+    report = validate_resume_grounding(tailored, profile_concurrent, base_job)
+
+    # Should catch title violation (Trainee not in Principal's allowlist)
+    title_violations = [v for v in report.violations if v.kind in ("title", "title_unlisted")]
+    assert len(title_violations) >= 1
+
+
+# ---------------------------------------------------------------------------
+# Test: Discriminating tiebreak test (GROUP D)
+# ---------------------------------------------------------------------------
+
+
+def test_validator_tiebreaks_concurrent_current_roles_discriminating(example_profile, base_job):
+    """GROUP D1: Discriminating tiebreak test (outcome depends on tiebreak).
+
+    Rewrite the tiebreak test so the OUTCOME depends on the tiebreak: construct a case
+    where the tailored title is VALID for the TRUE most-recent company's allowlist but
+    INVALID for the wrong one. Prove it FAILS with the C1 fix reverted and PASSES with
+    it applied.
+    """
+    # Create profile with two concurrent current roles at DIFFERENT companies
+    profile_discriminating = example_profile.copy()
+    profile_discriminating["positions"] = [
+        {
+            "title": "Engineer",
+            "company": "OldCo",
+            "start_date": "Jan 2023",  # Earlier start
+            "end_date": None,  # Current
+            "title_variants": ["Director of Engineering"],  # OldCo-only variant
+            "achievements": [],
+            "skills": [],
+        },
+        {
+            "title": "Analyst",
+            "company": "NewCo",
+            "start_date": "Nov 2023",  # Later start → true most-recent
+            "end_date": None,  # Current
+            "title_variants": ["Director of Engineering"],  # NewCo allows this variant
+            "achievements": [],
+            "skills": [],
+        },
+    ]
+
+    tailored = {
+        "summary": "Experienced analyst",
+        "skills": ["Python"],
+        "sections": [
+            {
+                "company": "NewCo",  # True most-recent by start_date
+                "title": "Director of Engineering",  # Valid for NewCo, invalid for OldCo
+                "dates": "Nov 2023 - Present",
+                "bullets": ["Built systems"],
+            }
+        ],
+        "jd_keywords": ["Python"],
+    }
+
+    report = validate_resume_grounding(tailored, profile_discriminating, base_job)
+
+    # Should PASS (no violations) because NewCo is the true most-recent and allows this variant
+    assert len(report.violations) == 0
+
+
+# ---------------------------------------------------------------------------
+# Test: Prohibited-items derivation (GROUP E)
+# ---------------------------------------------------------------------------
+
+
+def test_prohibited_items_derived_from_style_guide(example_profile, base_job):
+    """GROUP E4: Prohibited-items are derived from style_guide, not hardcoded.
+
+    Test (a): a token present in the style guide's banned_tokens fires prohibited_item.
+    Test (b): a token NOT in banned_tokens is ALLOWED — override the passed style_guide
+    in the test to ban a CUSTOM token and assert it fires, and a style_guide whose
+    banned_tokens omits 'dbt' allows 'dbt' (proves derivation, not hardcoding).
+    """
+    from job_finder.web.resume_tailor import load_style_guide
+
+    # Load the actual style guide
+    style_guide = load_style_guide()
+
+    # Test (a): token in banned_tokens fires
+    tailored_with_spark = {
+        "summary": "Experienced data scientist",
+        "skills": ["Python", "SQL", "Apache Spark"],  # Spark is in banned_tokens
+        "sections": [
+            {
+                "company": "TechCorp Solutions",
+                "title": "Senior Data Scientist",
+                "dates": "Mar 2022 - Present",
+                "bullets": ["Built ML pipeline"],
+            }
+        ],
+        "jd_keywords": ["Python", "SQL"],
+    }
+
+    report = validate_resume_grounding(tailored_with_spark, example_profile, base_job, style_guide)
+    prohibited_violations = [v for v in report.violations if v.kind == "prohibited_item"]
+    assert len(prohibited_violations) >= 1
+    assert any("spark" in v.value.lower() for v in prohibited_violations)
+
+    # Test (b): custom banned token fires
+    custom_style_guide = style_guide.copy()
+    custom_style_guide["prohibited_items"] = {
+        "banned_tokens": ["custom_bad_token"],
+        "roi_forbidden_pct": 454,
+        "roi_allowed_pct": 350,
+        "min_years_anchor": 8,
+        "ban_company_name_in_summary": True,
+        "ban_sample_sizes": True,
+        "ban_em_dash_family": True,
+        "ban_third_person": True,
+    }
+
+    tailored_with_custom = {
+        "summary": "Experienced data scientist with custom_bad_token expertise",
+        "skills": ["Python", "SQL"],
+        "sections": [
+            {
+                "company": "TechCorp Solutions",
+                "title": "Senior Data Scientist",
+                "dates": "Mar 2022 - Present",
+                "bullets": ["Built ML pipeline"],
+            }
+        ],
+        "jd_keywords": ["Python", "SQL"],
+    }
+
+    report = validate_resume_grounding(
+        tailored_with_custom, example_profile, base_job, custom_style_guide
+    )
+    prohibited_violations = [v for v in report.violations if v.kind == "prohibited_item"]
+    assert len(prohibited_violations) >= 1
+    assert any("custom_bad_token" in v.value.lower() for v in prohibited_violations)
+
+    # Test (c): style_guide without 'dbt' allows 'dbt'
+    no_dbt_style_guide = style_guide.copy()
+    no_dbt_style_guide["prohibited_items"] = {
+        "banned_tokens": ["spark"],  # No dbt
+        "roi_forbidden_pct": 454,
+        "roi_allowed_pct": 350,
+        "min_years_anchor": 8,
+        "ban_company_name_in_summary": True,
+        "ban_sample_sizes": True,
+        "ban_em_dash_family": True,
+        "ban_third_person": True,
+    }
+
+    tailored_with_dbt = {
+        "summary": "Experienced data scientist",
+        "skills": ["Python", "SQL"],
+        "sections": [
+            {
+                "company": "TechCorp Solutions",
+                "title": "Senior Data Scientist",
+                "dates": "Mar 2022 - Present",
+                "bullets": ["Built ML pipeline using dbt"],
+            }
+        ],
+        "jd_keywords": ["Python", "SQL"],
+    }
+
+    report = validate_resume_grounding(
+        tailored_with_dbt, example_profile, base_job, no_dbt_style_guide
+    )
+    prohibited_violations = [v for v in report.violations if v.kind == "prohibited_item"]
+    # Should NOT catch dbt (it's not in banned_tokens)
+    assert not any("dbt" in v.value.lower() for v in prohibited_violations)
+
+
+def test_example_profile_validates_clean_against_style_guide(example_profile, base_job):
+    """GROUP E4: Example profile validates clean against shipped style guide.
+
+    Since 'banned_tokens' includes 'spark', we removed 'Spark' from the example profile.
+    The example should trip NO prohibited item.
+    """
+    from job_finder.web.resume_tailor import load_style_guide
+
+    style_guide = load_style_guide()
+
+    # Build a clean tailored resume from the example profile
+    tailored = {
+        "summary": "Senior data scientist with expertise in ML pipelines and A/B testing",
+        "skills": ["Python", "SQL", "Machine Learning", "A/B Testing"],
+        "sections": [
+            {
+                "company": "TechCorp Solutions",
+                "title": "Senior Data Scientist",
+                "dates": "Mar 2022 - Present",
+                "bullets": [
+                    "Built ML pipeline processing 2M+ daily transactions",
+                    "Led cross-functional team of 4 to ship recommendation engine",
+                ],
+            },
+            {
+                "company": "DataDriven Analytics",
+                "title": "Data Scientist",
+                "dates": "Jun 2019 - Feb 2022",
+                "bullets": [
+                    "Developed customer churn prediction model (AUC 0.89)",
+                ],
+            },
+        ],
+        "jd_keywords": ["Python", "SQL"],
+    }
+
+    report = validate_resume_grounding(tailored, example_profile, base_job, style_guide)
+
+    # Should pass with no violations (including no prohibited items)
+    assert len(report.violations) == 0
