@@ -7,6 +7,7 @@ from flask import Blueprint, current_app, render_template
 from job_finder.config import DEFAULT_DAILY_BUDGET_USD
 from job_finder.db import (
     get_dashboard_stats,
+    get_liveness_stats,
     get_pending_detections,
     get_pipeline_summary,
     get_recent_activity,
@@ -68,6 +69,7 @@ def _get_stats_context(conn, config):
     cost_stats = get_cost_stats(conn, budget_cap=budget_cap)
     pending_count = stats.get("pending_detections", 0)
     ats_ctx = _get_ats_context(conn)
+    liveness_stats = get_liveness_stats(conn, config)
     return {
         "stats": stats,
         "cost_stats": cost_stats,
@@ -76,6 +78,7 @@ def _get_stats_context(conn, config):
         "ats_last_scan": ats_ctx["last_scan"],
         "company_count": ats_ctx["company_count"],
         "ats_tracked_count": ats_ctx["ats_tracked_count"],
+        "liveness": liveness_stats,
     }
 
 
