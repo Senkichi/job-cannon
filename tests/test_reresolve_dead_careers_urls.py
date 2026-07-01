@@ -64,6 +64,34 @@ def test_is_careers_page_html_content():
     assert not _is_careers_page("https://example.com/about", non_careers_html)
 
 
+def test_is_careers_page_rejects_homepage_redirect():
+    """KEYSTONE: a bare homepage/root URL is rejected even when the page chrome
+    carries a "Careers" nav link — the exact shape of a dead careers_url that
+    302-redirects to the homepage. Exercises _is_careers_page directly rather
+    than a mocked liveness verdict, so it actually guards the detector logic.
+    """
+    homepage_html = (
+        "<html><header><nav>"
+        '<a href="/careers">Careers</a><a href="/about">About</a>'
+        "</nav></header><body>Welcome to Acme. We build things.</body></html>"
+    )
+    assert not _is_careers_page("https://acme.com/", homepage_html)
+    assert not _is_careers_page("https://acme.com", homepage_html)
+    # A culture homepage that says "join our team" is still a homepage.
+    assert not _is_careers_page(
+        "https://acme.com/", "<html><body>Join our team and change the world!</body></html>"
+    )
+
+
+def test_is_careers_page_accepts_ats_subdomain_root():
+    """A subdomain ATS board at root path (e.g. {slug}.recruitee.com) is a valid
+    careers page even though its path is only "/" — the ATS short-circuit must
+    win over the homepage-root rejection so real boards are not lost.
+    """
+    assert _is_careers_page("https://acme.recruitee.com/", "<html>no open positions</html>")
+    assert _is_careers_page("https://acme.breezy.hr/", "")
+
+
 def test_check_careers_url_liveness_live():
     """A live careers page returns (True, 'live', html)."""
     mock_resp = MockResponse(200, "https://example.com/careers", "<html><body>Jobs</body></html>")

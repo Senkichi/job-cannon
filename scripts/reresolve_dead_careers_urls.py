@@ -82,32 +82,47 @@ def _is_parked_domain(html: str) -> bool:
 def _is_careers_page(url: str, html: str | None) -> bool:
     """Check if a URL looks like a careers/jobs page, not a homepage.
 
-    This is the adversarial guard: a redirect to the homepage should NOT be
-    accepted as a valid careers_url. We check:
-    1. URL path contains careers/jobs/openings patterns
-    2. OR the page contains job-related content (if HTML is available)
+    This is the adversarial guard: a redirect to the homepage must NOT be
+    accepted as a valid careers_url. Precedence:
+
+    1. A known ATS URL (host + path encode the board identity) is definitionally
+       a jobs board — accept regardless of page chrome. This covers subdomain
+       boards like ``{slug}.recruitee.com`` whose path is only ``/``.
+    2. A careers-y URL path (``/careers``, ``/jobs``, ...) is accepted.
+    3. A bare homepage/root path is REJECTED even when the page chrome mentions
+       "careers" — a header/footer "Careers" nav link is exactly what a dead
+       careers URL redirecting to the homepage looks like. This is the keystone
+       false-positive this guard exists to kill.
+    4. Otherwise a non-root page is accepted only on a strong jobs-listing phrase
+       in the body. A bare "careers" substring is deliberately excluded — it
+       appears in virtually every site's nav and would re-open case (3).
     """
     if not url:
         return False
 
-    parsed = urlparse(url)
-    path = parsed.path.lower()
+    # (1) A known ATS URL is a jobs board by construction.
+    if extract_ats_from_url_best(url):
+        return True
 
-    # Check URL path for careers-related patterns
+    parsed = urlparse(url)
+    path = parsed.path.lower().rstrip("/")
+
+    # (2) Careers-related URL path.
     careers_patterns = ["/careers", "/jobs", "/openings", "/positions", "/join"]
     if any(pattern in path for pattern in careers_patterns):
         return True
 
-    # If HTML is available, check for job-related content
+    # (3) Bare homepage/root — reject regardless of chrome keywords.
+    if path in ("", "/"):
+        return False
+
+    # (4) Non-root page: require a strong jobs-listing phrase in the body.
     if html:
-        # Look for job-related keywords in the page
         job_keywords = [
             "job opening",
             "open position",
             "we're hiring",
             "we are hiring",
-            "join our team",
-            "careers",
             "job listing",
         ]
         html_lower = html.lower()
@@ -270,7 +285,7 @@ def _process_company(
         return summary
 
     # Step 1: Check liveness of current careers_url
-    is_live, status_category, html = _check_careers_url_liveness(careers_url)
+    is_live, status_category, _html = _check_careers_url_liveness(careers_url)
 
     if is_live and status_category == "live":
         summary["outcome"] = "already_live"
