@@ -622,7 +622,10 @@ def test_check_concentration_respects_ceiling():
     assert _check_concentration(conn, {"health": {"surfaced_concentration_ceiling": 1.5}}) is None
 
     # Ceiling 0.99 allows HHI 1.0
-    assert _check_concentration(conn, {"health": {"surfaced_concentration_ceiling": 0.99}}) is not None
+    assert (
+        _check_concentration(conn, {"health": {"surfaced_concentration_ceiling": 0.99}})
+        is not None
+    )
 
 
 def test_check_concentration_respects_min_jobs():
@@ -655,7 +658,14 @@ def test_check_concentration_excludes_non_surfaced():
         classification = "skip" if i < 50 else ("reject" if i < 90 else "low_signal")
         conn.execute(
             "INSERT INTO jobs (dedup_key, title, company, location, company_id, classification) VALUES (?, ?, ?, ?, ?, ?)",
-            (f"non_surfaced_{i}", f"Non Surfaced {i}", "Company", "Remote", "company_0", classification),
+            (
+                f"non_surfaced_{i}",
+                f"Non Surfaced {i}",
+                "Company",
+                "Remote",
+                "company_0",
+                classification,
+            ),
         )
     conn.commit()
 
