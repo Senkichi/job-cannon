@@ -35,6 +35,7 @@ class FabricationViolation:
         - "dates": invented year
         - "degree": fabricated degree
         - "institution": fabricated institution
+        - "skill": fabricated skill
         - "prohibited_item": hard-stop prohibited token/phrase
         - "title_unlisted": most-recent title not in allowlist
     value: The offending token/phrase as it appeared in the tailored resume.
@@ -86,6 +87,15 @@ def _normalize_company(company: str) -> str:
     return normalize_company(company)
 
 
+def _normalize_company_for_grounding(company: str) -> str:
+    """Normalize company name for grounding: casefold + whitespace collapse only.
+
+    Unlike the dedup normalizer, this does NOT strip legal/suffix words (inc, llc, corp, etc.)
+    because grounding requires exact string equivalence, not dedup-style fuzzy matching.
+    """
+    return " ".join(company.casefold().split())
+
+
 def _normalize_text(text: str) -> str:
     """Light normalization for titles/degrees/institutions/keywords."""
     return " ".join(text.lower().split())
@@ -105,17 +115,19 @@ def _build_profile_fact_sets(profile: dict) -> dict[str, set]:
     """Build normalized fact sets from profile for membership testing.
 
     Returns dict with keys:
-        - companies: set of normalized company names
+        - companies: set of normalized company names (casefold + whitespace only)
         - titles: set of normalized titles (all positions + title_variants)
         - title_by_company: {normalized_company: set of normalized titles}
         - years_by_company: {normalized_company: set of year strings}
         - degrees: set of normalized degree strings
         - institutions: set of normalized institution strings
+        - skills: set of normalized skills (profile + position skills)
     """
     companies = set()
     titles = set()
     title_by_company: dict[str, set] = {}
     years_by_company: dict[str, set] = {}
+    skills = set()
 
     for position in profile.get("positions", []):
         company = position.get("company", "")
@@ -123,8 +135,9 @@ def _build_profile_fact_sets(profile: dict) -> dict[str, set]:
         start_date = position.get("start_date", "")
         end_date = position.get("end_date") or ""
         title_variants = position.get("title_variants", [])
+        position_skills = position.get("skills", [])
 
-        norm_company = _normalize_company(company)
+        norm_company = _normalize_company_for_grounding(company)
         norm_title = _normalize_text(title)
 
         companies.add(norm_company)
@@ -142,6 +155,19 @@ def _build_profile_fact_sets(profile: dict) -> dict[str, set]:
         # Extract years from date strings
         date_years = set(re.findall(r"\b(?:19|20)\d{2}\b", f"{start_date} {end_date}"))
         years_by_company.setdefault(norm_company, set()).update(date_years)
+
+        # Add position skills
+        if isinstance(position_skills, list):
+            for skill in position_skills:
+                if isinstance(skill, str):
+                    skills.add(_normalize_text(skill))
+
+    # Add profile-level skills
+    profile_skills = profile.get("skills", [])
+    if isinstance(profile_skills, list):
+        for skill in profile_skills:
+            if isinstance(skill, str):
+                skills.add(_normalize_text(skill))
 
     # Education facts
     degrees = set()
@@ -161,6 +187,7 @@ def _build_profile_fact_sets(profile: dict) -> dict[str, set]:
         "years_by_company": years_by_company,
         "degrees": degrees,
         "institutions": institutions,
+        "skills": skills,
     }
 
 
@@ -173,45 +200,73 @@ def _check_structural_subset(
     """
     violations = []
 
+    # Build union of all profile years for blank/ungrounded company check
+    all_profile_years = set()
+    for company_years in profile_facts["years_by_company"].values():
+        all_profile_years.update(company_years)
+
     for idx, section in enumerate(tailored.get("sections", [])):
         section_locator = f"sections[{idx}]"
 
-        # Check company
+        # Check company (use grounding normalizer: casefold + whitespace only)
         company = section.get("company", "")
-        if company:
-            norm_company = _normalize_company(company)
-            if norm_company not in profile_facts["companies"]:
-                violations.append(
-                    FabricationViolation(kind="company", value=company, section=section_locator)
-                )
+        norm_company = _normalize_company_for_grounding(company) if company else ""
+        company_is_grounded = company and norm_company in profile_facts["companies"]
 
-        # Check title (layer C handles most-recent allowlist nuance; this is basic membership)
+        if company and not company_is_grounded:
+            violations.append(
+                FabricationViolation(kind="company", value=company, section=section_locator)
+            )
+
+        # Check title (per-company validation, not global)
         title = section.get("title", "")
         if title:
             norm_title = _normalize_text(title)
-            # Check if title belongs to ANY position in profile
-            # Layer C will catch most-recent allowlist violations specifically
-            if norm_title not in profile_facts["titles"]:
-                violations.append(
-                    FabricationViolation(kind="title", value=title, section=section_locator)
-                )
+            # Title must belong to THIS section's company's allowlist
+            if company_is_grounded:
+                company_titles = profile_facts["title_by_company"].get(norm_company, set())
+                if norm_title not in company_titles:
+                    violations.append(
+                        FabricationViolation(kind="title", value=title, section=section_locator)
+                    )
+            else:
+                # If company is ungrounded, title must be in global titles set
+                if norm_title not in profile_facts["titles"]:
+                    violations.append(
+                        FabricationViolation(kind="title", value=title, section=section_locator)
+                    )
 
         # Check dates (no invented years)
         dates = section.get("dates", "")
-        if dates and company:
-            norm_company = _normalize_company(company)
-            # Only check if company is grounded in profile
-            if norm_company in profile_facts["companies"]:
-                tailored_years = _extract_years(dates)
-                profile_years = profile_facts["years_by_company"].get(norm_company, set())
+        if dates:
+            tailored_years = _extract_years(dates)
 
-                # Allow "present"/"current" as special values
+            if company_is_grounded:
+                # Check against this company's years
+                profile_years = profile_facts["years_by_company"].get(norm_company, set())
                 allowed_years = profile_years | {"present", "current"}
                 for year in tailored_years:
                     if year not in allowed_years:
                         violations.append(
                             FabricationViolation(kind="dates", value=year, section=section_locator)
                         )
+            else:
+                # Blank or ungrounded company: check against union of all profile years
+                allowed_years = all_profile_years | {"present", "current"}
+                for year in tailored_years:
+                    if year not in allowed_years:
+                        violations.append(
+                            FabricationViolation(kind="dates", value=year, section=section_locator)
+                        )
+
+    # Check skills (every tailored skill must be grounded)
+    for skill in tailored.get("skills", []):
+        if isinstance(skill, str):
+            norm_skill = _normalize_text(skill)
+            if norm_skill not in profile_facts["skills"]:
+                violations.append(
+                    FabricationViolation(kind="skill", value=skill, section="skills")
+                )
 
     # Check education
     for edu in tailored.get("education", []):
@@ -276,8 +331,8 @@ def _check_prohibited_items(
     # 3. No company name in Professional Summary
     target_company = job.get("company", "")
     if target_company:
-        norm_target = _normalize_company(target_company)
-        norm_summary = _normalize_company(summary)
+        norm_target = _normalize_company_for_grounding(target_company)
+        norm_summary = _normalize_company_for_grounding(summary)
         if norm_target in norm_summary:
             violations.append(
                 FabricationViolation(
@@ -291,22 +346,22 @@ def _check_prohibited_items(
             FabricationViolation(kind="prohibited_item", value="N=", section="bullets")
         )
 
-    # 5. No em dashes in bullets
-    for bullet in bullets:
-        if "—" in bullet:  # U+2014 em dash
-            violations.append(
-                FabricationViolation(kind="prohibited_item", value="—", section="bullets")
+    # 5. No em dashes or en dashes in full text (U+2012..U+2015)
+    if re.search(r"[‒–—―]", full_text):
+        violations.append(
+            FabricationViolation(
+                kind="prohibited_item", value="dash", section="summary/skills/bullets"
             )
+        )
 
-    # 6. ROI figure is 350% not 454%
-    if "454%" in full_text or re.search(r"\b454\b", full_text):
+    # 6. ROI figure is 350% not 454% (anchor to percent sign)
+    if re.search(r"454\s*%", full_text):
         violations.append(
             FabricationViolation(kind="prohibited_item", value="454%", section="bullets")
         )
 
-    # 7. No years-of-experience figure smaller than 8+ anchor
-    year_match = re.search(r"\b(\d+)\+?\s*(?:years|yrs)\b", full_text, re.IGNORECASE)
-    if year_match:
+    # 7. No years-of-experience figure smaller than 8+ anchor (check ALL matches)
+    for year_match in re.finditer(r"\b(\d+)\+?\s*(?:years|yrs)\b", full_text, re.IGNORECASE):
         years = int(year_match.group(1))
         if years < 8:
             violations.append(
@@ -315,8 +370,7 @@ def _check_prohibited_items(
                 )
             )
 
-    # 8. No third-person self-reference (owner's first name or "he"/"his")
-    # Derive owner's first name from most recent position (fallback to profile inference)
+    # 8. No third-person self-reference (owner's first name or "he"/"his"/"she"/"her"/"they"/"their")
     owner_first_name = _derive_owner_first_name(profile)
     if owner_first_name:
         # Word-boundary match on first name as standalone token
@@ -327,10 +381,12 @@ def _check_prohibited_items(
                 )
             )
 
-    # Check for "he"/"his" as standalone tokens
-    if re.search(r"\b he \b|\b his \b", full_text):
+    # Check for third-person pronouns (without literal space requirement)
+    if re.search(r"\b(?:he|his|him|she|her|hers|they|their)\b", full_text):
         violations.append(
-            FabricationViolation(kind="prohibited_item", value="he/his", section="summary/bullets")
+            FabricationViolation(
+                kind="prohibited_item", value="third-person", section="summary/bullets"
+            )
         )
 
     return violations
@@ -338,9 +394,16 @@ def _check_prohibited_items(
 
 def _derive_owner_first_name(profile: dict) -> str:
     """Derive owner's first name from profile (best-effort, fallback empty)."""
-    # Try to derive from most recent position's context or profile metadata
+    # Try to derive from contact.full_name first
+    contact = profile.get("contact", {})
+    full_name = contact.get("full_name", "")
+    if full_name and isinstance(full_name, str):
+        # First token is the first name
+        first_name = full_name.split()[0]
+        return first_name
+
+    # Fallback: try to derive from most recent position's context
     # This is a best-effort heuristic; the real name should be in config if needed
-    # For now, return empty to avoid false positives on common names
     return ""
 
 
@@ -355,7 +418,7 @@ def _identify_most_recent_position(profile: dict) -> dict | None:
     Rules:
         - end_date is null/"present"/"current" → most-recent
         - Else latest start_date
-        - Ties broken by document order (topmost wins)
+        - Among concurrent current roles, break ties by latest start_date (not document order)
     """
     positions = profile.get("positions", [])
     if not positions:
@@ -368,16 +431,19 @@ def _identify_most_recent_position(profile: dict) -> dict | None:
         end_date = position.get("end_date") or ""
         start_date = position.get("start_date", "")
 
-        # Score: current positions first, then by start_date, then by document order
+        # Score: current positions first, then by start_date
         if not end_date or end_date.lower() in ("present", "current"):
-            score = 1000000  # Highest priority
+            # Extract year from start_date for tiebreaking among concurrent roles
+            start_year_match = re.search(r"\b(19|20)\d{2}\b", start_date)
+            start_year = int(start_year_match.group()) if start_year_match else 0
+            score = 1000000 + start_year  # Base 1M + start_year for tiebreak
         else:
             # Extract year from start_date for ordering
             start_year_match = re.search(r"\b(19|20)\d{2}\b", start_date)
             start_year = int(start_year_match.group()) if start_year_match else 0
             score = start_year
 
-        # Document order as tiebreaker (higher index = lower priority)
+        # Document order as final tiebreaker (higher index = lower priority)
         score -= idx * 0.001
 
         if score > most_recent_score:
@@ -399,49 +465,72 @@ def _check_title_allowlist(tailored: dict, profile: dict) -> list[FabricationVio
     if not sections:
         return violations
 
-    # Most-recent tailored section is sections[0] (transform reorders by recency)
-    most_recent_section = sections[0]
+    # Identify the most-recent tailored section by matching company/dates to profile's most-recent
+    most_recent_norm_company = _normalize_company_for_grounding(most_recent.get("company", ""))
+
+    most_recent_section_idx = None
+    for idx, section in enumerate(sections):
+        section_company = section.get("company", "")
+        norm_section_company = _normalize_company_for_grounding(section_company)
+
+        # Match by company (dates matching is harder since sections use dates string)
+        if norm_section_company == most_recent_norm_company:
+            most_recent_section_idx = idx
+            break
+
+    # If no match found, default to sections[0] (backward compatibility)
+    if most_recent_section_idx is None:
+        most_recent_section_idx = 0
+
+    # Validate most-recent section against its allowlist
+    most_recent_section = sections[most_recent_section_idx]
     tailored_title = most_recent_section.get("title", "")
-    if not tailored_title:
-        return violations
+    if tailored_title:
+        norm_tailored_title = _normalize_text(tailored_title)
 
-    norm_tailored_title = _normalize_text(tailored_title)
+        # Build admissible set for most-recent position
+        canonical_title = most_recent.get("title", "")
+        norm_canonical = _normalize_text(canonical_title)
 
-    # Build admissible set for most-recent position
-    canonical_title = most_recent.get("title", "")
-    norm_canonical = _normalize_text(canonical_title)
+        title_variants = most_recent.get("title_variants", [])
+        if isinstance(title_variants, list):
+            norm_variants = {_normalize_text(v) for v in title_variants if isinstance(v, str)}
+        else:
+            # Malformed variants → collapse to canonical only
+            norm_variants = set()
 
-    title_variants = most_recent.get("title_variants", [])
-    if isinstance(title_variants, list):
-        norm_variants = {_normalize_text(v) for v in title_variants if isinstance(v, str)}
-    else:
-        # Malformed variants → collapse to canonical only
-        norm_variants = set()
+        admissible_set = {norm_canonical} | norm_variants
 
-    admissible_set = {norm_canonical} | norm_variants
-
-    # Check if most-recent tailored title is in admissible set
-    if norm_tailored_title not in admissible_set:
-        violations.append(
-            FabricationViolation(
-                kind="title_unlisted", value=tailored_title, section="sections[0]"
+        # Check if most-recent tailored title is in admissible set
+        if norm_tailored_title not in admissible_set:
+            violations.append(
+                FabricationViolation(
+                    kind="title_unlisted",
+                    value=tailored_title,
+                    section=f"sections[{most_recent_section_idx}]",
+                )
             )
-        )
 
     # Older positions: title must equal canonical or be in that position's variants
-    for _idx, section in enumerate(sections[1:], start=1):
+    for idx, section in enumerate(sections):
+        if idx == most_recent_section_idx:
+            continue  # Skip most-recent, already validated
+
         section_title = section.get("title", "")
         if not section_title:
             continue
 
         norm_section_title = _normalize_text(section_title)
         section_company = section.get("company", "")
-        norm_section_company = _normalize_company(section_company)
+        norm_section_company = _normalize_company_for_grounding(section_company)
 
         # Find matching position in profile
         matching_position = None
         for position in profile.get("positions", []):
-            if _normalize_company(position.get("company", "")) == norm_section_company:
+            if (
+                _normalize_company_for_grounding(position.get("company", ""))
+                == norm_section_company
+            ):
                 matching_position = position
                 break
 
@@ -457,9 +546,11 @@ def _check_title_allowlist(tailored: dict, profile: dict) -> list[FabricationVio
 
             pos_admissible = {pos_canonical} | pos_norm_variants
             if norm_section_title not in pos_admissible:
-                # This will be caught by layer A as a title fabrication
-                # Layer C is scoped to most-recent only
-                pass
+                violations.append(
+                    FabricationViolation(
+                        kind="title", value=section_title, section=f"sections[{idx}]"
+                    )
+                )
 
     return violations
 
@@ -522,11 +613,13 @@ def validate_resume_grounding(tailored: dict, profile: dict, job: dict) -> Groun
     (A) SUBSET semantics for STRUCTURAL FACTS: the tailored resume may OMIT true
         facts (tailoring drops irrelevant roles) — that is fine. It may NOT ADD a
         fact absent from the profile — that is fabrication. Checks:
-          - each section's company   ∈ profile positions' companies (normalized)
-          - each section's title      ∈ profile positions' titles (see layer C for
-                                        the most-recent title-variant nuance)
+          - each section's company   ∈ profile positions' companies (casefold+whitespace only)
+          - each section's title      ∈ that section's company's title allowlist
+                                        (per-company, not global)
           - each section's date span ⊆ the profile's known date tokens for that
                                         company (start/end years) — no invented years
+                                        (blank/ungrounded company checks against union of all years)
+          - each skill                ∈ profile skills (profile-level + position-level)
           - each education degree/institution ∈ profile education (normalized)
 
     (B) PROHIBITED-ITEM hard-stops (pure string/regex over the tailored output):
