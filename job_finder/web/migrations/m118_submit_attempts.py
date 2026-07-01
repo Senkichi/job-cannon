@@ -1,5 +1,7 @@
 """Migration 118 — submit_attempts ledger for auto-submit audit trail and rate limiting (issue #604)."""
 
+from __future__ import annotations
+
 from job_finder.web.migrations.types import Migration
 
 MIGRATION = Migration(

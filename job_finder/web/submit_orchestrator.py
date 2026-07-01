@@ -116,11 +116,13 @@ def submit_application_for(
             application_id=application_id,
         )
 
-    # 2. Idempotency — refuse if already submitted
-    existing_app = conn.execute(
-        "SELECT status FROM applications WHERE job_id = ?", (job_id,)
+    # 2. Idempotency — refuse if this job already has a real send in the immutable ledger.
+    # (Do NOT read applications.status: upsert_application resets it to 'pending' on re-prepare.)
+    already_sent = conn.execute(
+        "SELECT 1 FROM submit_attempts WHERE job_id = ? AND outcome IN ('submitted','dispatched') LIMIT 1",
+        (job_id,),
     ).fetchone()
-    if existing_app and existing_app["status"] == "submitted":
+    if already_sent:
         logger.info("Job already submitted, refusing duplicate: job_id=%s", job_id)
         _write_submit_attempt(
             conn=conn,
@@ -141,9 +143,14 @@ def submit_application_for(
     require_strict = auto_submit_config.get("require_strict_target", True)
 
     if require_strict:
-        # Require strict confidence OR known ATS/careers URL
-        is_strict = target_confidence == "strict" or is_ats_or_careers_url(apply_url)
-        if not is_strict:
+        # Safety must gate on the apply_url we are actually about to dispatch — NOT on the
+        # job's direct_url_confidence, which is an independent field (confused-deputy bug).
+        # Trust 'strict' confidence only when the apply_url IS the strict direct_url.
+        is_safe_target = bool(apply_url) and (
+            is_ats_or_careers_url(apply_url)
+            or (target_confidence == "strict" and apply_url == job.get("direct_url"))
+        )
+        if not is_safe_target:
             logger.warning(
                 "Refusing non-strict target URL: job_id=%s, apply_url=%s, confidence=%s",
                 job_id,
@@ -169,7 +176,8 @@ def submit_application_for(
     daily_limit = auto_submit_config.get("daily_limit", 5)
     day_start, day_end = local_day_utc_window()
     today_count = conn.execute(
-        "SELECT COUNT(*) as cnt FROM submit_attempts WHERE occurred_at >= ? AND occurred_at < ?",
+        "SELECT COUNT(*) as cnt FROM submit_attempts "
+        "WHERE occurred_at >= ? AND occurred_at < ? AND outcome IN ('dispatched','submitted')",
         (day_start, day_end),
     ).fetchone()["cnt"]
 
@@ -232,6 +240,8 @@ def submit_application_for(
     # 7. Terminal-state write
     if result.outcome == "submitted":
         _resolve_to_terminal(conn, application_id, "submitted")
+    elif result.outcome == "dispatched":
+        _resolve_to_terminal(conn, application_id, "dispatched")
     elif result.outcome in ("failed", "not_wired"):
         _resolve_to_terminal(conn, application_id, "submit_failed")
     # For 'refused' or 'disabled', we leave the application pending (no terminal state)

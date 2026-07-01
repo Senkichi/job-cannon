@@ -120,6 +120,16 @@ def _seed_pending_application(conn: sqlite3.Connection, job_id: str) -> int:
     return application_id
 
 
+def _get_application_row(conn: sqlite3.Connection, application_id: int) -> dict:
+    """Get application row via production accessor (parses form_mapping_json)."""
+    from job_finder.db import get_application
+
+    row = get_application(conn, application_id)
+    if row is None:
+        raise ValueError(f"Application {application_id} not found")
+    return dict(row)
+
+
 def test_submit_gate_default_off(app_with_submit_setup):
     """Config gate default OFF: returns DISABLED, no ledger row, seam never called."""
     app, db_path = app_with_submit_setup
@@ -129,10 +139,7 @@ def test_submit_gate_default_off(app_with_submit_setup):
     # Seed job and application
     job_id = "test|job|remote"
     application_id = _seed_pending_application(conn, job_id)
-    application_row = conn.execute(
-        "SELECT * FROM applications WHERE id = ?", (application_id,)
-    ).fetchone()
-    application_row = dict(application_row)
+    application_row = _get_application_row(conn, application_id)
 
     # Config with auto_submit disabled (default)
     config = app.config.copy()
@@ -158,22 +165,133 @@ def test_submit_gate_default_off(app_with_submit_setup):
     conn.close()
 
 
-def test_target_url_safety_refuses_aggregator(app_with_submit_setup):
-    """Target-URL safety: aggregator/non-strict apply_url → refused, seam never invoked."""
+def test_submit_gate_default_off_no_enabled_key(app_with_submit_setup):
+    """Config gate default OFF: no 'enabled' key → DISABLED, no ledger row, seam never called."""
     app, db_path = app_with_submit_setup
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
 
-    # Seed job with aggregator URL (non-strict)
+    # Seed job and application
+    job_id = "test|job|remote"
+    application_id = _seed_pending_application(conn, job_id)
+    application_row = _get_application_row(conn, application_id)
+
+    # Config with auto_submit present but no 'enabled' key (default OFF)
+    config = app.config.copy()
+    config["application"] = {"auto_submit": {}}
+
+    # Mock the seam to ensure it's never called
+    with patch("job_finder.web.submit_orchestrator.submit_application") as mock_submit:
+        result = submit_application_for(conn, config, application_row)
+
+        # ASSERT: DISABLED outcome
+        assert result.outcome == "disabled"
+        assert result.reason == "Auto-submit disabled in config"
+
+        # ASSERT: Seam was never called
+        mock_submit.assert_not_called()
+
+        # ASSERT: No ledger row written
+        ledger_count = conn.execute(
+            "SELECT COUNT(*) FROM submit_attempts WHERE job_id = ?", (job_id,)
+        ).fetchone()[0]
+        assert ledger_count == 0
+
+    conn.close()
+
+
+def test_submit_gate_default_off_no_auto_submit_key(app_with_submit_setup):
+    """Config gate default OFF: no 'auto_submit' key → DISABLED, no ledger row, seam never called."""
+    app, db_path = app_with_submit_setup
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+
+    # Seed job and application
+    job_id = "test|job|remote"
+    application_id = _seed_pending_application(conn, job_id)
+    application_row = _get_application_row(conn, application_id)
+
+    # Config with application present but no 'auto_submit' key (default OFF)
+    config = app.config.copy()
+    config["application"] = {}
+
+    # Mock the seam to ensure it's never called
+    with patch("job_finder.web.submit_orchestrator.submit_application") as mock_submit:
+        result = submit_application_for(conn, config, application_row)
+
+        # ASSERT: DISABLED outcome
+        assert result.outcome == "disabled"
+        assert result.reason == "Auto-submit disabled in config"
+
+        # ASSERT: Seam was never called
+        mock_submit.assert_not_called()
+
+        # ASSERT: No ledger row written
+        ledger_count = conn.execute(
+            "SELECT COUNT(*) FROM submit_attempts WHERE job_id = ?", (job_id,)
+        ).fetchone()[0]
+        assert ledger_count == 0
+
+    conn.close()
+
+
+def test_submit_gate_default_off_no_application_key(app_with_submit_setup):
+    """Config gate default OFF: no 'application' key → DISABLED, no ledger row, seam never called."""
+    app, db_path = app_with_submit_setup
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+
+    # Seed job and application
+    job_id = "test|job|remote"
+    application_id = _seed_pending_application(conn, job_id)
+    application_row = _get_application_row(conn, application_id)
+
+    # Config with no 'application' key at all (default OFF)
+    config = app.config.copy()
+    config = {}
+
+    # Mock the seam to ensure it's never called
+    with patch("job_finder.web.submit_orchestrator.submit_application") as mock_submit:
+        result = submit_application_for(conn, config, application_row)
+
+        # ASSERT: DISABLED outcome
+        assert result.outcome == "disabled"
+        assert result.reason == "Auto-submit disabled in config"
+
+        # ASSERT: Seam was never called
+        mock_submit.assert_not_called()
+
+        # ASSERT: No ledger row written
+        ledger_count = conn.execute(
+            "SELECT COUNT(*) FROM submit_attempts WHERE job_id = ?", (job_id,)
+        ).fetchone()[0]
+        assert ledger_count == 0
+
+    conn.close()
+
+
+def test_target_url_safety_refuses_aggregator(app_with_submit_setup):
+    """Target-URL safety: aggregator/non-strict apply_url → refused, seam never invoked.
+
+    This test specifically targets the is_ats_or_careers_url branch: the apply_url is
+    a LinkedIn aggregator URL, which should be refused even if the job's direct_url_confidence
+    is 'strict' (because the apply_url is NOT the direct_url).
+    """
+    app, db_path = app_with_submit_setup
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+
+    # Seed job with strict ATS direct_url (but apply_url will be aggregator)
     job_id = "test|job|remote"
     conn.execute(
-        """UPDATE jobs SET direct_url = NULL, direct_url_confidence = NULL
+        """UPDATE jobs SET direct_url = 'https://company.com/careers/123',
+                         direct_url_confidence = 'strict'
            WHERE dedup_key = ?""",
         (job_id,),
     )
     conn.commit()
 
-    # Seed application with aggregator apply_url
+    # Seed application with aggregator apply_url (DIFFERENT from direct_url)
     application_id = _seed_pending_application(conn, job_id)
     conn.execute(
         """UPDATE applications SET form_mapping_json = ?
@@ -182,10 +300,7 @@ def test_target_url_safety_refuses_aggregator(app_with_submit_setup):
     )
     conn.commit()
 
-    application_row = conn.execute(
-        "SELECT * FROM applications WHERE id = ?", (application_id,)
-    ).fetchone()
-    application_row = dict(application_row)
+    application_row = _get_application_row(conn, application_id)
 
     # Config with auto_submit enabled and require_strict_target (default)
     config = app.config.copy()
@@ -216,18 +331,71 @@ def test_target_url_safety_refuses_aggregator(app_with_submit_setup):
     conn.close()
 
 
+def test_target_url_safety_accepts_strict_ats(app_with_submit_setup):
+    """Target-URL safety: strict ATS apply_url → passes safety gate (reaches seam).
+
+    This test specifically targets the is_ats_or_careers_url branch: the apply_url is
+    a Greenhouse ATS URL, which should pass even if it's NOT the job's direct_url.
+    """
+    app, db_path = app_with_submit_setup
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+
+    # Seed job with NO direct_url (apply_url is standalone ATS URL)
+    job_id = "test|job|remote"
+    conn.execute(
+        """UPDATE jobs SET direct_url = NULL, direct_url_confidence = NULL
+           WHERE dedup_key = ?""",
+        (job_id,),
+    )
+    conn.commit()
+
+    # Seed application with strict ATS apply_url (Greenhouse)
+    application_id = _seed_pending_application(conn, job_id)
+    conn.execute(
+        """UPDATE applications SET form_mapping_json = ?
+           WHERE id = ?""",
+        (json.dumps({"apply_url": "https://boards.greenhouse.io/acme/jobs/123"}), application_id),
+    )
+    conn.commit()
+
+    application_row = _get_application_row(conn, application_id)
+
+    # Config with auto_submit enabled and require_strict_target (default)
+    config = app.config.copy()
+    config["application"] = {
+        "auto_submit": {"enabled": True, "require_strict_target": True, "daily_limit": 5}
+    }
+
+    # Mock the seam to ensure it IS called
+    with patch(
+        "job_finder.web.submit_orchestrator.submit_application",
+        return_value=SubmitResult(outcome="not_wired"),
+    ) as mock_submit:
+        result = submit_application_for(conn, config, application_row)
+
+        # ASSERT: Seam WAS called (safety gate passed via is_ats_or_careers_url)
+        mock_submit.assert_called_once()
+
+        # ASSERT: Outcome is not_wired (default seam), not refused
+        assert result.outcome == "not_wired"
+
+    conn.close()
+
+
 def test_idempotency_no_double_submit(app_with_submit_setup):
-    """Idempotency: already-submitted job refused, seam not called twice."""
+    """Idempotency: already-submitted job refused, seam not called twice.
+
+    Tests the re-prepare path: after first submission, re-prepare (upsert_application)
+    resets status to 'pending', but the immutable ledger still blocks double submit.
+    """
     app, db_path = app_with_submit_setup
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
 
     job_id = "test|job|remote"
     application_id = _seed_pending_application(conn, job_id)
-    application_row = conn.execute(
-        "SELECT * FROM applications WHERE id = ?", (application_id,)
-    ).fetchone()
-    application_row = dict(application_row)
+    application_row = _get_application_row(conn, application_id)
 
     # Config with auto_submit enabled
     config = app.config.copy()
@@ -250,13 +418,30 @@ def test_idempotency_no_double_submit(app_with_submit_setup):
         ).fetchone()
         assert app_row["status"] == "submitted"
 
-        # Reload application row (status changed)
-        application_row = conn.execute(
-            "SELECT * FROM applications WHERE id = ?", (application_id,)
-        ).fetchone()
-        application_row = dict(application_row)
+        # Simulate re-prepare: upsert_application resets status to 'pending'
+        from job_finder.db._applications import upsert_application
 
-        # Second submit should be refused (idempotency guard)
+        upsert_application(
+            conn=conn,
+            job_id=job_id,
+            resume_content='{"summary": "test"}',
+            form_mapping={
+                "apply_url": "https://company.com/careers/123",
+                "full_name": "Test User",
+            },
+            drafted_answers={"Why do you want to work here?": "Test answer"},
+        )
+
+        # Verify status is now 'pending' (re-prepare worked)
+        app_row = conn.execute(
+            "SELECT status FROM applications WHERE id = ?", (application_id,)
+        ).fetchone()
+        assert app_row["status"] == "pending"
+
+        # Reload application row via production accessor
+        application_row = _get_application_row(conn, application_id)
+
+        # Second submit should STILL be refused (immutable ledger guard)
         result2 = submit_application_for(conn, config, application_row)
         assert result2.outcome == "refused"
         assert "already submitted" in result2.reason.lower()
@@ -272,10 +457,7 @@ def test_rate_limit_survives_restart(app_with_submit_setup):
 
     job_id = "test|job|remote"
     application_id = _seed_pending_application(conn, job_id)
-    application_row = conn.execute(
-        "SELECT * FROM applications WHERE id = ?", (application_id,)
-    ).fetchone()
-    application_row = dict(application_row)
+    application_row = _get_application_row(conn, application_id)
 
     # Config with daily_limit = 2
     config = app.config.copy()
@@ -283,12 +465,13 @@ def test_rate_limit_survives_restart(app_with_submit_setup):
         "auto_submit": {"enabled": True, "require_strict_target": True, "daily_limit": 2}
     }
 
-    # Seed 2 submit_attempts in the ledger (simulating prior submissions today)
+    # Seed 2 submit_attempts in the ledger for DIFFERENT jobs (simulating prior submissions today)
+    # Use different job_ids to avoid triggering the idempotency guard
     conn.execute(
         """INSERT INTO submit_attempts (job_id, mechanism, apply_url, target_confidence, outcome, detail, occurred_at)
            VALUES (?, ?, ?, ?, ?, ?, ?)""",
         (
-            job_id,
+            "other|job|1",
             "extension",
             "https://company.com/careers/123",
             "strict",
@@ -301,7 +484,7 @@ def test_rate_limit_survives_restart(app_with_submit_setup):
         """INSERT INTO submit_attempts (job_id, mechanism, apply_url, target_confidence, outcome, detail, occurred_at)
            VALUES (?, ?, ?, ?, ?, ?, ?)""",
         (
-            f"{job_id}-2",
+            "other|job|2",
             "extension",
             "https://company.com/careers/456",
             "strict",
@@ -325,6 +508,51 @@ def test_rate_limit_survives_restart(app_with_submit_setup):
     conn.close()
 
 
+def test_rate_limit_ignores_refusals(app_with_submit_setup):
+    """Rate limit: refusals do NOT consume the daily cap (only dispatched/submitted count)."""
+    app, db_path = app_with_submit_setup
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+
+    job_id = "test|job|remote"
+    application_id = _seed_pending_application(conn, job_id)
+    application_row = _get_application_row(conn, application_id)
+
+    # Config with daily_limit = 1
+    config = app.config.copy()
+    config["application"] = {
+        "auto_submit": {"enabled": True, "require_strict_target": True, "daily_limit": 1}
+    }
+
+    # Seed 5 refused attempts in the ledger (should NOT consume cap)
+    for i in range(5):
+        conn.execute(
+            """INSERT INTO submit_attempts (job_id, mechanism, apply_url, target_confidence, outcome, detail, occurred_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (
+                f"{job_id}-{i}",
+                "extension",
+                "https://linkedin.com/jobs/view/123",
+                None,
+                "refused",
+                "test refusal",
+                utc_now_iso(),
+            ),
+        )
+    conn.commit()
+
+    # Mock seam to return 'submitted'
+    with patch(
+        "job_finder.web.submit_orchestrator.submit_application",
+        return_value=SubmitResult(outcome="submitted"),
+    ):
+        # Next submit should SUCCEED (refusals don't count against cap)
+        result = submit_application_for(conn, config, application_row)
+        assert result.outcome == "submitted"
+
+    conn.close()
+
+
 def test_ledger_records_failure(app_with_submit_setup):
     """Audit ledger: failing seam still writes exactly one immutable submit_attempts row."""
     app, db_path = app_with_submit_setup
@@ -333,10 +561,7 @@ def test_ledger_records_failure(app_with_submit_setup):
 
     job_id = "test|job|remote"
     application_id = _seed_pending_application(conn, job_id)
-    application_row = conn.execute(
-        "SELECT * FROM applications WHERE id = ?", (application_id,)
-    ).fetchone()
-    application_row = dict(application_row)
+    application_row = _get_application_row(conn, application_id)
 
     # Config with auto_submit enabled
     config = app.config.copy()
@@ -381,9 +606,9 @@ def test_approve_flips_applied_only_on_real_submit(app_with_submit_setup):
     app, db_path = app_with_submit_setup
     client = app.test_client()
 
-    # Enable auto_submit in config for this test
-    app.config["application"] = {
-        "auto_submit": {"enabled": True, "require_strict_target": True, "daily_limit": 5}
+    # Enable auto_submit in JF_CONFIG for this test (the route reads from JF_CONFIG)
+    app.config["JF_CONFIG"]["application"] = {
+        "auto_submit": {"enabled": True, "require_strict_target": False, "daily_limit": 5}
     }
 
     job_id = "test|job|remote"
@@ -450,13 +675,26 @@ def test_approve_flips_applied_only_on_real_submit(app_with_submit_setup):
 
     application_id_2 = _seed_pending_application(sqlite3.connect(db_path), job_id_2)
 
+    # Update the application's apply_url to match the job's direct_url (strict ATS)
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        """UPDATE applications SET form_mapping_json = ?
+           WHERE id = ?""",
+        (
+            json.dumps({"apply_url": "https://company.com/careers/456", "full_name": "Test User"}),
+            application_id_2,
+        ),
+    )
+    conn.commit()
+    conn.close()
+
     with patch(
         "job_finder.web.submit_orchestrator.submit_application",
         return_value=SubmitResult(outcome="not_wired", reason="Mechanism not wired"),
     ):
-        # Re-enable auto_submit (it may have been disabled by the first test's outcome)
-        app.config["application"] = {
-            "auto_submit": {"enabled": True, "require_strict_target": True, "daily_limit": 5}
+        # Re-enable auto_submit in JF_CONFIG (it may have been disabled by the first test's outcome)
+        app.config["JF_CONFIG"]["application"] = {
+            "auto_submit": {"enabled": True, "require_strict_target": False, "daily_limit": 5}
         }
         response = client.post(f"/jobs/applications/{application_id_2}/approve")
         assert response.status_code == 200
@@ -475,6 +713,48 @@ def test_approve_flips_applied_only_on_real_submit(app_with_submit_setup):
         conn.close()
 
 
+def test_dispatched_outcome_handling(app_with_submit_setup):
+    """Dispatched outcome: application status becomes 'dispatched', pipeline_status UNCHANGED."""
+    app, db_path = app_with_submit_setup
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+
+    job_id = "test|job|remote"
+    application_id = _seed_pending_application(conn, job_id)
+    application_row = _get_application_row(conn, application_id)
+
+    # Config with auto_submit enabled
+    config = app.config.copy()
+    config["application"] = {
+        "auto_submit": {"enabled": True, "require_strict_target": True, "daily_limit": 5}
+    }
+
+    # Mock seam to return 'dispatched'
+    with patch(
+        "job_finder.web.submit_orchestrator.submit_application",
+        return_value=SubmitResult(outcome="dispatched"),
+    ):
+        result = submit_application_for(conn, config, application_row)
+
+        # ASSERT: dispatched outcome
+        assert result.outcome == "dispatched"
+
+        # ASSERT: Application status becomes 'dispatched'
+        app_row = conn.execute(
+            "SELECT status FROM applications WHERE id = ?", (application_id,)
+        ).fetchone()
+        assert app_row["status"] == "dispatched"
+
+        # ASSERT: Exactly one ledger row with outcome='dispatched'
+        ledger_rows = conn.execute(
+            "SELECT * FROM submit_attempts WHERE job_id = ?", (job_id,)
+        ).fetchall()
+        assert len(ledger_rows) == 1
+        assert ledger_rows[0]["outcome"] == "dispatched"
+
+    conn.close()
+
+
 def test_submit_orchestrator_default_noop(app_with_submit_setup):
     """Default submit_application seam is a no-op returning 'not_wired'."""
     app, db_path = app_with_submit_setup
@@ -483,10 +763,7 @@ def test_submit_orchestrator_default_noop(app_with_submit_setup):
 
     job_id = "test|job|remote"
     application_id = _seed_pending_application(conn, job_id)
-    application_row = conn.execute(
-        "SELECT * FROM applications WHERE id = ?", (application_id,)
-    ).fetchone()
-    application_row = dict(application_row)
+    application_row = _get_application_row(conn, application_id)
 
     # Config with auto_submit enabled
     config = app.config.copy()

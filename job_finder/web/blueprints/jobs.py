@@ -846,7 +846,9 @@ def approve_application(application_id: int):
         return "", 404
 
     # Attempt real submit via the orchestrator (issue #604 spine)
-    config = current_app.config
+    # Pass the real app-config dict (JF_CONFIG), NOT the Flask config wrapper —
+    # the cascade reads config["providers"], which only exists under JF_CONFIG.
+    config = current_app.config.get("JF_CONFIG", {}) or {}
     submit_result = submit_application_for(conn, config, application)
 
     # Only flip pipeline_status to 'applied' on a real 'submitted' outcome
