@@ -343,6 +343,10 @@ def save():
         # boundary keeps disk + the refreshed in-memory config consistent and
         # self-heals any already-stored sentinel on the next save. Idempotent.
         config = normalize_profile_work_arrangement(config)
+        # Heal legacy email-sender config (sources.gmail → sources.imap) on save (idempotent).
+        from job_finder.config import normalize_email_senders
+
+        config = normalize_email_senders(config)
 
         _write_config(config, _config_path())
 
@@ -472,19 +476,10 @@ def _parse_form_to_config(form) -> dict:
     gmail = {}
     if _has("gmail_enabled"):
         gmail["enabled"] = _checked("gmail_enabled")
-    if _has("gmail_lookback_days"):
-        gmail["lookback_days"] = safe_int(form["gmail_lookback_days"], DEFAULT_LOOKBACK_DAYS)
-    senders = {}
-    for sender_key in ("linkedin_alerts", "linkedin_jobs", "glassdoor", "indeed", "ziprecruiter"):
-        fk = f"gmail_sender_{sender_key}"
-        if _has(fk):
-            senders[sender_key] = form[fk]
-    if senders:
-        gmail["senders"] = senders
     if gmail:
         config.setdefault("sources", {})["gmail"] = gmail
 
-    # --- Sources: IMAP (Stage 7.2) ---
+    # --- Sources: IMAP (credentials + email senders + lookback) ---
     # Settings-side counterpart to the onboarding imap_credentials step.
     # app_password is routed through _move_secret_to_keyring in save(); the
     # "only if non-empty" guard on the password field is the same pattern
@@ -508,6 +503,15 @@ def _parse_form_to_config(form) -> dict:
         folder = form["imap_folder"].strip()
         if folder:
             imap["folder"] = folder
+    if _has("imap_lookback_days"):
+        imap["lookback_days"] = safe_int(form["imap_lookback_days"], DEFAULT_LOOKBACK_DAYS)
+    senders = {}
+    for sender_key in ("linkedin_alerts", "linkedin_jobs", "glassdoor", "indeed", "ziprecruiter"):
+        fk = f"imap_sender_{sender_key}"
+        if _has(fk):
+            senders[sender_key] = form[fk]
+    if senders:
+        imap["senders"] = senders
     if imap:
         config.setdefault("sources", {})["imap"] = imap
 

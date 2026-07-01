@@ -258,7 +258,7 @@ def run_ingestion(
         # runner_conn and runs last so a fresh run is logged before old rows are
         # trimmed. Internally error-isolated: a prune failure logs and is ignored.
         lookback_days = (
-            config.get("sources", {}).get("gmail", {}).get("lookback_days", DEFAULT_LOOKBACK_DAYS)
+            config.get("sources", {}).get("imap", {}).get("lookback_days", DEFAULT_LOOKBACK_DAYS)
         )
         _prune_stale_data(runner_conn, lookback_days)
 

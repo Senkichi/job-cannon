@@ -54,9 +54,6 @@ sources:
     email: ""
     app_password: ""
     folder: INBOX
-  gmail:
-    # Gmail API source (OAuth power-user path - requires python -m job_finder.gmail_auth)
-    enabled: false
     # How many days back to search for job alert emails
     lookback_days: 7
     # Sender addresses for job alert emails (defaults work for standard alerts)
@@ -66,6 +63,9 @@ sources:
       glassdoor: noreply@glassdoor.com
       indeed: alert@indeed.com
       ziprecruiter: no-reply@ziprecruiter.com
+  gmail:
+    # Gmail API source (OAuth power-user path - requires python -m job_finder.gmail_auth)
+    enabled: false
   serpapi:
     # Optional: SerpAPI for Google Jobs search (requires paid API key)
     enabled: false

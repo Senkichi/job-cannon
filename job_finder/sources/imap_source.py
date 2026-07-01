@@ -26,7 +26,7 @@ from imapclient import IMAPClient
 import job_finder.web.autoheal.override_loader as _override_loader
 from job_finder.models import Job
 from job_finder.parsers import extract_primary, extract_with_fallback
-from job_finder.sources.gmail_source import (
+from job_finder.sources.email_senders import (
     _archive_parse_failure,
     _should_archive_failure,
     resolve_sender_label,
@@ -119,7 +119,7 @@ class ImapSource:
             processed_message_ids: Ignored - kept for interface compatibility.
                 IMAP uses \Seen flag for dedup, not external ID tracking.
             config: Full config dict (or None). Used to resolve user-overridden
-                sender FROM addresses (``sources.gmail.senders``); None uses the
+                sender FROM addresses (``sources.imap.senders``); None uses the
                 built-in defaults unchanged.
 
         Returns:
@@ -129,7 +129,7 @@ class ImapSource:
         processed_uids: list[str] = []
 
         # Resolve sender maps once so the FROM scope, parser match, and label
-        # lookup all agree on the user-overridden addresses (sources.gmail.senders).
+        # lookup all agree on the user-overridden addresses (sources.imap.senders).
         sender_parsers = resolve_sender_parsers(config)
         sender_label = resolve_sender_label(config)
 

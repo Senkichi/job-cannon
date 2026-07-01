@@ -55,15 +55,15 @@ SOURCES_DIR = JOB_FINDER / "sources"
 # ---------------------------------------------------------------------------
 _INV1_UNREAD_ALLOWLIST: frozenset[str] = frozenset(
     {
-        # --- Gmail sender-alias keys ---
-        # sources.gmail.senders.{linkedin_alerts,linkedin_jobs} are config-
-        # documented aliases but gmail_source.py uses a hardcoded
+        # --- Email sender-alias keys ---
+        # sources.imap.senders.{linkedin_alerts,linkedin_jobs} are config-
+        # documented aliases but email_senders.py uses a hardcoded
         # email-address→parser map and never reads these key names.  The
-        # config values are user documentation for Gmail filter setup.
+        # config values are user documentation for email filter setup.
         "linkedin_alerts",
         "linkedin_jobs",
         # 'glassdoor', 'indeed', 'ziprecruiter' appear as string literals in
-        # gmail_source.py (parser names) and therefore pass without allowlisting.
+        # email_senders.py (parser names) and therefore pass without allowlisting.
         # --- ATS scan schedule ---
         # ats.scan_days / ats.scan_hour are written by settings.py but the
         # scheduler factories use a hardcoded schedule and never read these
@@ -278,7 +278,7 @@ def test_inv2a_form_fields_have_parser_branches():
     # Dynamic field patterns handled via loops in the parser — the parser
     # iterates form keys by prefix rather than individual _has() calls.
     _DYNAMIC_PREFIXES = (
-        "gmail_sender_",  # iterated over configured sender keys
+        "imap_sender_",  # iterated over configured sender keys
         "serpapi_query_",  # indexed query rows
         "serpapi_location_",
         "dataforseo_query_",
@@ -319,7 +319,7 @@ def test_inv2b_parser_branches_have_form_fields():
     # Dynamic field patterns: a parser key like 'drive_folder_id' is flagged
     # if it starts with none of these prefixes AND is absent from form_fields.
     _DYNAMIC_PREFIXES = (
-        "gmail_sender_",
+        "imap_sender_",
         "serpapi_query_",
         "serpapi_location_",
         "thordata_query_",

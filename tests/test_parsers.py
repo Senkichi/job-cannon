@@ -644,7 +644,10 @@ class TestParseFailureArchival:
 
     def test_archive_on_zero_jobs(self, tmp_path, monkeypatch):
         """Parse failure with long non-meta body writes a file to gmail_parse_failures/ under user-data root."""
-        from job_finder.sources.gmail_source import _archive_parse_failure, _should_archive_failure
+        from job_finder.sources.email_senders import (
+            _archive_parse_failure,
+            _should_archive_failure,
+        )
 
         sender = "alert@indeed.com"
         assert _should_archive_failure(_LONG_NONMETA_HTML_BODY, [], sender) is True
@@ -659,7 +662,7 @@ class TestParseFailureArchival:
 
     def test_no_archive_on_meta_email(self):
         """Meta-email body does NOT trigger archival."""
-        from job_finder.sources.gmail_source import _should_archive_failure
+        from job_finder.sources.email_senders import _should_archive_failure
 
         sender = "alert@indeed.com"
         result = _should_archive_failure(_META_HTML_BODY, [], sender)
@@ -669,7 +672,7 @@ class TestParseFailureArchival:
         """A long non-meta email with no recognised job-listing URL is a non-job
         notification (brand-follow digest / alert confirmation / marketing) and
         must NOT be archived — regression guard against false-positive archival."""
-        from job_finder.sources.gmail_source import _should_archive_failure
+        from job_finder.sources.email_senders import _should_archive_failure
 
         result = _should_archive_failure(
             _LONG_NONJOB_NOTIFICATION_BODY, [], "noreply@glassdoor.com"
@@ -678,7 +681,7 @@ class TestParseFailureArchival:
 
     def test_no_archive_on_short_body(self):
         """Short body (< 500 chars) does NOT trigger archival."""
-        from job_finder.sources.gmail_source import _should_archive_failure
+        from job_finder.sources.email_senders import _should_archive_failure
 
         result = _should_archive_failure(_SHORT_BODY, [], "alert@indeed.com")
         assert result is False, "Short body should NOT trigger archival"
@@ -686,7 +689,7 @@ class TestParseFailureArchival:
     def test_no_archive_when_jobs_found(self):
         """If parser returned jobs, no archival needed."""
         from job_finder.models import Job
-        from job_finder.sources.gmail_source import _should_archive_failure
+        from job_finder.sources.email_senders import _should_archive_failure
 
         fake_job = Job(
             title="Data Scientist",
@@ -700,7 +703,7 @@ class TestParseFailureArchival:
 
     def test_archive_creates_directory(self, tmp_path, monkeypatch):
         """gmail_parse_failures/ is created under user-data root if it doesn't exist."""
-        from job_finder.sources.gmail_source import _archive_parse_failure
+        from job_finder.sources.email_senders import _archive_parse_failure
 
         monkeypatch.setenv("JOB_CANNON_USER_DATA_DIR", str(tmp_path))
         failure_dir = tmp_path / "gmail_parse_failures"
@@ -710,7 +713,7 @@ class TestParseFailureArchival:
 
     def test_archive_file_naming(self, tmp_path, monkeypatch):
         """Archived file is named {domain}_{timestamp}.html."""
-        from job_finder.sources.gmail_source import _archive_parse_failure
+        from job_finder.sources.email_senders import _archive_parse_failure
 
         monkeypatch.setenv("JOB_CANNON_USER_DATA_DIR", str(tmp_path))
         _archive_parse_failure("alert@indeed.com", _LONG_NONMETA_HTML_BODY)
@@ -725,7 +728,7 @@ class TestParseFailureArchival:
 
     def test_archive_writes_correct_content(self, tmp_path, monkeypatch):
         """Archived file contains the original HTML body."""
-        from job_finder.sources.gmail_source import _archive_parse_failure
+        from job_finder.sources.email_senders import _archive_parse_failure
 
         monkeypatch.setenv("JOB_CANNON_USER_DATA_DIR", str(tmp_path))
         _archive_parse_failure("alert@indeed.com", _LONG_NONMETA_HTML_BODY)
@@ -736,7 +739,7 @@ class TestParseFailureArchival:
 
     def test_archive_failure_does_not_raise(self, tmp_path, monkeypatch):
         """_archive_parse_failure logs a warning but never raises on write errors."""
-        from job_finder.sources.gmail_source import _archive_parse_failure
+        from job_finder.sources.email_senders import _archive_parse_failure
 
         # Create a FILE at the gmail_parse_failures path so makedirs will fail
         monkeypatch.setenv("JOB_CANNON_USER_DATA_DIR", str(tmp_path))
@@ -1746,7 +1749,10 @@ class TestParseFailureE2E:
 
     def test_e2e_full_flow_should_archive_then_write_file(self, tmp_path, monkeypatch):
         """E2E: simulate parse failure then archive — verify file written to gmail_parse_failures/ under user-data root."""
-        from job_finder.sources.gmail_source import _archive_parse_failure, _should_archive_failure
+        from job_finder.sources.email_senders import (
+            _archive_parse_failure,
+            _should_archive_failure,
+        )
 
         sender = "noreply@glassdoor.com"
 
@@ -1769,7 +1775,7 @@ class TestParseFailureE2E:
 
     def test_e2e_archived_file_content_matches_original_body(self, tmp_path, monkeypatch):
         """E2E: archived file content matches the original HTML body exactly."""
-        from job_finder.sources.gmail_source import _archive_parse_failure
+        from job_finder.sources.email_senders import _archive_parse_failure
 
         sender = "alert@indeed.com"
         monkeypatch.setenv("JOB_CANNON_USER_DATA_DIR", str(tmp_path))
@@ -1798,7 +1804,7 @@ class TestParseFailureE2E:
     def test_e2e_all_parsers_trigger_archival_for_unparseable_non_meta_body(self):
         """_should_archive_failure returns True for all 4 parsers when body is non-meta,
         long enough, and produces zero jobs."""
-        from job_finder.sources.gmail_source import _should_archive_failure
+        from job_finder.sources.email_senders import _should_archive_failure
 
         assert len(_UNPARSEABLE_LONG_HTML) >= 500, (
             f"Test body must be >= 500 chars; got {len(_UNPARSEABLE_LONG_HTML)}"
@@ -1815,7 +1821,7 @@ class TestParseFailureE2E:
     def test_e2e_exactly_499_chars_does_not_trigger_archival(self):
         """Body of exactly 499 chars returns False from _should_archive_failure
         (threshold is >= 500 chars)."""
-        from job_finder.sources.gmail_source import _should_archive_failure
+        from job_finder.sources.email_senders import _should_archive_failure
 
         short_body = "x" * 499
         assert len(short_body) == 499
@@ -1827,7 +1833,7 @@ class TestParseFailureE2E:
 
     def test_e2e_meta_email_does_not_trigger_archival(self):
         """Meta-email body (>= 500 chars) does NOT trigger archival."""
-        from job_finder.sources.gmail_source import _should_archive_failure
+        from job_finder.sources.email_senders import _should_archive_failure
 
         # Build a meta-email body that is >= 500 chars
         meta_body = "job alert digest: Data Scientist positions\n" + "x" * 500
@@ -1839,7 +1845,7 @@ class TestParseFailureE2E:
     def test_e2e_jobs_found_does_not_trigger_archival(self):
         """_should_archive_failure returns False when parser returned jobs (no failure)."""
         from job_finder.models import Job
-        from job_finder.sources.gmail_source import _should_archive_failure
+        from job_finder.sources.email_senders import _should_archive_failure
 
         fake_job = Job(
             title="Senior Engineer",

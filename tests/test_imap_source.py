@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from job_finder.sources.gmail_source import SENDER_PARSERS
+from job_finder.sources.email_senders import SENDER_PARSERS
 from job_finder.sources.imap_source import ImapSource, _build_from_search_criteria
 
 # ---------------------------------------------------------------------------

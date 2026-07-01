@@ -176,7 +176,7 @@ class TestParseFailureDir:
         """_archive_parse_failure creates file under user-data parse_failures_dir."""
         monkeypatch.setenv("JOB_CANNON_USER_DATA_DIR", str(tmp_path))
 
-        from job_finder.sources.gmail_source import _archive_parse_failure
+        from job_finder.sources.email_senders import _archive_parse_failure
 
         _archive_parse_failure("alert@example.com", "x" * 600)
 
@@ -188,7 +188,7 @@ class TestParseFailureDir:
         monkeypatch.setenv("JOB_CANNON_USER_DATA_DIR", str(tmp_path))
         custom_dir = str(tmp_path / "custom_failures")
 
-        from job_finder.sources.gmail_source import _archive_parse_failure
+        from job_finder.sources.email_senders import _archive_parse_failure
 
         _archive_parse_failure("alert@example.com", "x" * 600, failures_dir=custom_dir)
 

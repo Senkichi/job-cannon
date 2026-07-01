@@ -452,6 +452,83 @@ class TestSettingsNumericBlankGuard:
         assert config["scoring"]["daily_budget_usd"] == 0.0
 
 
+class TestSettingsEmailSenderMigration:
+    """Stage 1 Gmail decommission: email sender config moved from sources.gmail
+    to sources.imap. Settings form now writes to sources.imap.senders and
+    sources.imap.lookback_days, and the save path normalizes legacy configs."""
+
+    def test_save_imap_sender_override_roundtrip(self, settings_client, settings_app):
+        """POST imap_sender_* fields → persisted to sources.imap.senders."""
+        # Seed config with legacy sources.gmail.senders override
+        config_path = settings_app._test_config_path
+        with open(config_path, encoding="utf-8") as f:
+            existing = yaml.safe_load(f)
+        existing["sources"] = {
+            "gmail": {
+                "enabled": False,
+                "senders": {"linkedin_alerts": "old@x.com"},
+                "lookback_days": 14,
+            }
+        }
+        with open(config_path, "w", encoding="utf-8") as f:
+            yaml.dump(existing, f, default_flow_style=False)
+
+        # POST with renamed imap_sender_* fields carrying an override
+        resp = settings_client.post(
+            "/settings/save",
+            data={
+                "target_titles": "Staff Data Scientist\nSenior Data Scientist",
+                "profile_skills": "Python\nSQL\nSpark",
+                "imap_sender_linkedin_alerts": "custom@x.com",
+                "imap_lookback_days": "21",
+            },
+        )
+        assert resp.status_code == 302
+
+        # Reload via load_config and assert sources.imap.senders holds it
+        from job_finder.config import load_config
+
+        reloaded = load_config(config_path)
+        assert reloaded["sources"]["imap"]["senders"]["linkedin_alerts"] == "custom@x.com"
+        assert reloaded["sources"]["imap"]["lookback_days"] == 21
+
+        # sources.gmail.senders is absent (deleted after move)
+        assert "senders" not in reloaded.get("sources", {}).get("gmail", {})
+
+    def test_save_blank_sender_fields_preserve_override(self, settings_client, settings_app):
+        """POST with blank sender fields → existing override survives (no clobber)."""
+        config_path = settings_app._test_config_path
+        with open(config_path, encoding="utf-8") as f:
+            existing = yaml.safe_load(f)
+        existing["sources"] = {
+            "imap": {
+                "enabled": True,
+                "senders": {"linkedin_alerts": "custom@x.com"},
+                "lookback_days": 21,
+            }
+        }
+        with open(config_path, "w", encoding="utf-8") as f:
+            yaml.dump(existing, f, default_flow_style=False)
+
+        # POST a SECOND save with sender fields left blank
+        resp = settings_client.post(
+            "/settings/save",
+            data={
+                "target_titles": "Staff Data Scientist\nSenior Data Scientist",
+                "profile_skills": "Python\nSQL\nSpark",
+                # imap_sender_* fields omitted (blank)
+            },
+        )
+        assert resp.status_code == 302
+
+        # Assert the override STILL survives (empty-block-deep-merged-over-populated clobber case)
+        from job_finder.config import load_config
+
+        reloaded = load_config(config_path)
+        assert reloaded["sources"]["imap"]["senders"]["linkedin_alerts"] == "custom@x.com"
+        assert reloaded["sources"]["imap"]["lookback_days"] == 21
+
+
 class TestSettingsKeyringWrite:
     """Commit 3.5: SerpAPI keys submitted via the Settings form
     land in the OS keyring; the plaintext field in config.yaml is cleared on
