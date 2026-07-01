@@ -13,12 +13,44 @@ import json
 import logging
 import sqlite3
 
+from job_finder.web import user_data_dirs
 from job_finder.web.direct_link import apply_url_for
 from job_finder.web.model_provider import call_model
 from job_finder.web.profile_schema import load_profile
 from job_finder.web.resume_tailor import tailor_resume as _real_tailor_resume
 
 logger = logging.getLogger(__name__)
+
+# Structured-output schema for a single drafted answer. Without a schema the
+# production-primary ollama provider forces format="json" and returns a PARSED
+# dict (never a raw str), so a bare str(result.data) would surface a brace-wrapped
+# Python-repr to the user. Constraining to {"answer": str} makes the shape
+# deterministic across providers and lets us read the prose out cleanly.
+_DRAFT_ANSWER_SCHEMA = {
+    "type": "object",
+    "properties": {"answer": {"type": "string"}},
+    "required": ["answer"],
+    "additionalProperties": False,
+}
+
+
+def _extract_answer(data: object) -> str:
+    """Pull the prose answer out of a call_model result.
+
+    Handles both the structured dict (ollama/JSON providers -> {"answer": ...})
+    and a raw string (text providers), never repr-ing a dict into the UI.
+    """
+    if isinstance(data, str):
+        return data.strip()
+    if isinstance(data, dict):
+        answer = data.get("answer")
+        if isinstance(answer, str):
+            return answer.strip()
+        # Fallback: first string value in the dict (defensive against key drift).
+        for value in data.values():
+            if isinstance(value, str):
+                return value.strip()
+    return ""
 
 
 def _tailor_resume(*, conn: sqlite3.Connection, config: dict, job: dict, profile: dict) -> str:
@@ -63,7 +95,11 @@ def prepare_application_package(conn: sqlite3.Connection, config: dict, job: dic
     All three values MUST be non-empty for a real (non-stubbed) run.
     Performs NO network submission of any kind.
     """
-    profile = load_profile()
+    # Resolve the profile via the sanctioned user-data path (CWD-independent),
+    # mirroring the profile blueprint and scorer — a bare load_profile() would
+    # read a CWD-relative "experience_profile.json" and silently return an EMPTY
+    # profile when launched from any non-data-root CWD (e.g. `serve` in a worktree).
+    profile = load_profile(str(user_data_dirs.profile_path()))
 
     # 1. Tailored resume (via the resume-tailor seam)
     resume_content = tailor_resume(conn=conn, config=config, job=job, profile=profile)
@@ -147,7 +183,8 @@ def _draft_free_text_answers(
             system = (
                 "You are a job application assistant. Draft a concise, professional "
                 "answer to the given question based on the candidate's profile and "
-                "the job description. Keep the answer under 150 words."
+                "the job description. Keep the answer under 150 words. Respond with "
+                'JSON of the form {"answer": "<your drafted answer>"}.'
             )
             messages = [
                 {
@@ -164,14 +201,13 @@ def _draft_free_text_answers(
                 tier="quick",
                 system=system,
                 messages=messages,
+                output_schema=_DRAFT_ANSWER_SCHEMA,
                 conn=conn,
                 config=config,
                 job_id=job.get("dedup_key"),
                 purpose="application_draft",
             )
-            # ModelResult has a `data` attribute (dict for structured output, str for text)
-            # For text responses (no output_schema), data contains the text content
-            answers[question] = result.data if isinstance(result.data, str) else str(result.data)
+            answers[question] = _extract_answer(result.data)
         except Exception as e:
             logger.warning("Failed to draft answer for %s: %s", question, e)
             answers[question] = ""

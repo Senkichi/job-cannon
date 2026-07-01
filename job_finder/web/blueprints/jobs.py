@@ -779,11 +779,23 @@ def prepare_application(dedup_key: str):
     if job is None:
         return "", 404
     try:
-        pkg = prepare_application_package(conn, current_app.config, job)  # assemble
+        # Pass the real app-config dict (JF_CONFIG), NOT the Flask config wrapper —
+        # the cascade reads config["providers"], which only exists under JF_CONFIG.
+        config = current_app.config.get("JF_CONFIG", {}) or {}
+        pkg = prepare_application_package(conn, config, job)  # assemble
 
-        # Enforce non-empty contract: resume and at least one drafted answer must be non-empty
-        if not pkg["resume_content"] or pkg["resume_content"].strip() == "":
+        # Enforce non-empty contract: resume and at least one drafted answer must be non-empty.
+        # resume_content is json.dumps(dict); "{}" is a truthy non-empty STRING but an EMPTY
+        # resume — parse and require actual structure so a hollow package can't look complete.
+        resume_content = pkg["resume_content"]
+        if not resume_content or not resume_content.strip():
             raise ValueError("Resume content is empty — cannot prepare application package.")
+        try:
+            parsed_resume = json.loads(resume_content)
+        except (TypeError, ValueError):
+            parsed_resume = None
+        if isinstance(parsed_resume, dict) and not any(parsed_resume.values()):
+            raise ValueError("Resume content has no tailored sections — cannot prepare package.")
         if not pkg["drafted_answers"] or all(
             not ans or ans.strip() == "" for ans in pkg["drafted_answers"].values()
         ):

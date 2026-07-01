@@ -256,12 +256,12 @@ def test_prepare_application_end_to_end(app_with_migrations):
     # ASSERT: No HTTP submission occurred (patches would have raised if called)
 
 
-def test_prepare_application_with_real_tailor_seam(app_with_migrations):
-    """Test the UNPATCHED assembler against the real resume_tailor (mock only call_model).
+def test_prepare_application_serializes_structured_resume(app_with_migrations):
+    """Assembler serializes a structured resume dict from the seam into JSON storage.
 
-    This test patches the seam (tailor_resume) to return a JSON string matching the
-    real resume_tailor output schema, proving the wired path handles structured
-    resume data correctly.
+    NOTE: this patches the tailor_resume SEAM (does not run the real resume_tailor);
+    the genuine end-to-end seam is exercised by
+    test_prepare_application_runs_real_tailor_seam below.
     """
     app, db_path, profile_path = app_with_migrations
     client = app.test_client()
@@ -347,3 +347,116 @@ def test_prepare_application_with_real_tailor_seam(app_with_migrations):
                     conn.close()
 
     # ASSERT: No HTTP submission occurred
+
+
+def test_prepare_application_runs_real_tailor_seam(app_with_migrations):
+    """Exercise the REAL resume_tailor through the UNPATCHED assembler seam.
+
+    Patches ONLY call_model (both the resume_tailor internal import and the
+    application_prepare draft import), NOT application_prepare.tailor_resume — so
+    the real _tailor_resume adapter runs (positional call + json.dumps of the
+    returned dict). Also feeds call_model an OLLAMA-SHAPED dict for the draft
+    answers (the real provider returns a parsed dict, never a str) and asserts the
+    persisted answer is clean prose, pinning the str(dict)-repr regression.
+    """
+    app, db_path, profile_path = app_with_migrations
+    client = app.test_client()
+    dedup_key = "test|job|remote"
+
+    from job_finder.web.model_provider import ModelResult
+
+    tailored_resume = {
+        "summary": "REAL-SEAM-SUMMARY: Senior Data Scientist, 5+ years ML.",
+        "skills": ["Python", "Machine Learning", "SQL"],
+        "sections": [
+            {
+                "company": "Test Company",
+                "title": "Senior Data Scientist",
+                "dates": "2020-01-01 - present",
+                "bullets": ["Built a thing"],
+            }
+        ],
+        "jd_keywords": ["Python", "Machine Learning"],
+    }
+
+    def _resume_call_model(**kwargs):
+        # resume_tailor's internal call_model -> return the structured resume DICT.
+        return ModelResult(
+            data=tailored_resume,
+            cost_usd=0.0,
+            input_tokens=0,
+            output_tokens=0,
+            model="qwen2.5:14b",
+            provider="ollama",
+            schema_valid=True,
+        )
+
+    def _draft_call_model(**kwargs):
+        # application_prepare's draft call_model -> ollama-shaped dict, NOT a str.
+        return ModelResult(
+            data={"answer": "I am genuinely excited about this role."},
+            cost_usd=0.0,
+            input_tokens=0,
+            output_tokens=0,
+            model="qwen2.5:14b",
+            provider="ollama",
+            schema_valid=True,
+        )
+
+    with (
+        patch("requests.post", side_effect=AssertionError("HTTP POST should not occur")),
+        patch("httpx.post", side_effect=AssertionError("HTTP POST should not occur")),
+        # resume_tailor imports call_model from model_provider INSIDE the function.
+        patch("job_finder.web.model_provider.call_model", side_effect=_resume_call_model),
+        # application_prepare imports call_model at module level for draft answers.
+        patch("job_finder.web.application_prepare.call_model", side_effect=_draft_call_model),
+    ):
+        response = client.post(f"/jobs/{dedup_key}/prepare-application")
+        assert response.status_code == 200
+
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        row = conn.execute("SELECT * FROM applications WHERE job_id = ?", (dedup_key,)).fetchone()
+        assert row is not None, "the real seam should produce a stored package"
+
+        # resume_content must be json.dumps of the DICT the real resume_tailor returned
+        # (proves the _tailor_resume adapter ran: positional call + json.dumps).
+        resume_dict = json.loads(row["resume_content"])
+        assert resume_dict["summary"] == tailored_resume["summary"]
+        assert resume_dict["skills"] == tailored_resume["skills"]
+
+        # Drafted answers must be CLEAN PROSE, never a Python-repr of the dict.
+        drafted_answers = json.loads(row["drafted_answers_json"])
+        assert len(drafted_answers) > 0
+        for ans in drafted_answers.values():
+            assert ans == "I am genuinely excited about this role."
+            assert "{" not in ans and "'answer'" not in ans, "answer must not be a str(dict) repr"
+        conn.close()
+
+
+def test_prepare_application_empty_profile_renders_error(app_with_migrations):
+    """An empty profile (no positions/skills) makes the REAL resume_tailor raise
+    ValueError; the route must render the error fragment at 200 and persist nothing."""
+    app, db_path, profile_path = app_with_migrations
+    client = app.test_client()
+    dedup_key = "test|job|remote"
+
+    from job_finder.web.profile_schema import EMPTY_PROFILE
+
+    with (
+        patch("requests.post", side_effect=AssertionError("HTTP POST should not occur")),
+        # Override the fixture's profile mock with an EMPTY profile.
+        patch(
+            "job_finder.web.application_prepare.load_profile",
+            return_value=dict(EMPTY_PROFILE),
+        ),
+    ):
+        response = client.post(f"/jobs/{dedup_key}/prepare-application")
+        # Error fragment renders at 200 (HTMX outerHTML requires 200), not a 500.
+        assert response.status_code == 200
+
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        row = conn.execute("SELECT * FROM applications WHERE job_id = ?", (dedup_key,)).fetchone()
+        assert row is None, "no package should be persisted when tailoring fails"
+        conn.close()
