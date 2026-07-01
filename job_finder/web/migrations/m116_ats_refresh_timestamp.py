@@ -1,4 +1,4 @@
-"""Migration 115 — ATS mutable refresh-timestamp CAPTURE column.
+"""Migration 116 — ATS mutable refresh-timestamp CAPTURE column.
 
 Adds one nullable column holding the mutable last-updated/refresh timestamp
 captured raw-as-provided from the ATS public JSON at ingest. CAPTURE stage of
@@ -23,7 +23,7 @@ from __future__ import annotations
 from job_finder.web.migrations.types import Migration
 
 MIGRATION = Migration(
-    version=115,
+    version=116,
     description="ats capture: add ats_refreshed_at column (mutable refresh timestamp)",
     sql=["ALTER TABLE jobs ADD COLUMN ats_refreshed_at TEXT DEFAULT NULL"],
 )
