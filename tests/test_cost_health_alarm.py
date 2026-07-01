@@ -171,6 +171,72 @@ def test_free_providers_imported_not_hardcoded():
 
 
 # ---------------------------------------------------------------------------
+# Non-LLM quota-row scoping (issue #581 review: serpapi_enrichment false paid-leak)
+# ---------------------------------------------------------------------------
+
+
+def test_serpapi_enrichment_row_is_not_a_paid_leak():
+    """A serpapi_enrichment quota row (provider not in the LLM roster, cost 0) must
+    NOT be reported as paid inference -- review CRITICAL regression."""
+    conn = _costs_conn()
+    _add_cost(conn, "ollama", days_ago=1)  # healthy free rung
+    _add_cost(conn, "serpapi_enrichment", days_ago=1)  # $0 search quota, not inference
+    assert _check_cost_health(conn, {"health": {"cost_health_window_days": 7}}) is None
+
+
+def test_serpapi_row_alone_does_not_trigger_free_rung():
+    """serpapi_enrichment is excluded from the inference denominator: with only a
+    serpapi row and no LLM scoring, the free-rung arm stays silent (no activity)."""
+    conn = _costs_conn()
+    _add_cost(conn, "serpapi_enrichment", days_ago=1)
+    assert _check_cost_health(conn, {"health": {"cost_health_window_days": 7}}) is None
+
+
+def test_google_cse_search_row_excluded_from_inference():
+    """google_cse (a documented non-LLM search label in FREE_PROVIDERS) is excluded
+    from the inference set: alone it neither leaks nor counts as free scoring."""
+    conn = _costs_conn()
+    _add_cost(conn, "google_cse", days_ago=1)
+    assert _check_cost_health(conn, {"health": {"cost_health_window_days": 7}}) is None
+
+
+def test_paid_leak_still_fires_next_to_quota_rows():
+    """A real paid-AI row (anthropic_api) still fires even when non-LLM quota rows
+    share the ledger -- the fix must not silence genuine paid inference."""
+    conn = _costs_conn()
+    _add_cost(conn, "serpapi_enrichment", days_ago=1)
+    _add_cost(conn, "ollama", days_ago=1)
+    _add_cost(conn, "anthropic_api", days_ago=1)
+    issue = _check_cost_health(conn, {"health": {"cost_health_window_days": 7}})
+    assert issue is not None and "anthropic_api" in issue
+    assert "serpapi_enrichment" not in issue  # a quota row is never named as a leak
+
+
+def test_broken_free_rung_counts_only_inference_rows():
+    """Free-rung 'absent' fires on paid-only inference and does NOT count serpapi
+    quota rows toward the reported scoring-call total (2 inference calls, not 3)."""
+    conn = _costs_conn()
+    _add_cost(conn, "serpapi_enrichment", days_ago=1)
+    _add_cost(conn, "anthropic_api", days_ago=1)
+    _add_cost(conn, "anthropic_api", days_ago=1)
+    issue = _check_cost_health(conn, {"health": {"cost_health_window_days": 7}})
+    assert issue is not None
+    assert "free providers absent despite 2 scoring calls" in issue
+
+
+def test_min_activity_zero_empty_ledger_no_false_alarm():
+    """min_activity <= 0 on an empty ledger must not fire 'free providers absent
+    despite 0 scoring calls' -- review MEDIUM boundary fix."""
+    conn = _costs_conn()
+    assert (
+        _check_cost_health(
+            conn, {"health": {"cost_health_window_days": 7, "cost_health_min_activity": 0}}
+        )
+        is None
+    )
+
+
+# ---------------------------------------------------------------------------
 # Integration through run_health_check
 # ---------------------------------------------------------------------------
 
