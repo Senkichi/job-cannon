@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
+import math
 import sqlite3
 from datetime import UTC, date, datetime
 
 from job_finder.db._queries import _SUB_SCORE_SUM_SQL, surfaced_classification_sql, target_membership_sql
-
-import math
 
 _DEFAULT_COLD_START_EXCLUDE_DAYS = 30
 
