@@ -231,6 +231,26 @@ class TestProbeRippling:
             assert _probe_rippling("joinroot") is False
 
 
+class TestProbeIbm:
+    def test_ibm_200_is_hit(self):
+        from job_finder.web.ats_prober import _probe_ibm
+
+        with patch(
+            "job_finder.web.ats_prober.requests.post",
+            return_value=_FakeResp(200),
+        ):
+            assert _probe_ibm("ibm") is True
+
+    def test_ibm_404_is_miss(self):
+        from job_finder.web.ats_prober import _probe_ibm
+
+        with patch(
+            "job_finder.web.ats_prober.requests.post",
+            return_value=_FakeResp(404),
+        ):
+            assert _probe_ibm("ibm") is False
+
+
 # ---------------------------------------------------------------------------
 # Scanner shape
 # ---------------------------------------------------------------------------
@@ -375,6 +395,53 @@ class TestRipplingScanner:
         assert job["description"] == ""  # list endpoint omits description
 
 
+class TestIbmScanner:
+    def test_fetch_postings_extracts_results(self):
+        from job_finder.web.ats_platforms._platforms_ibm import (
+            _fetch_postings,
+        )
+
+        sample = {
+            "results": [
+                {
+                    "field_text_01": "114614",
+                    "title": "Senior Data Scientist",
+                    "field_keyword_05": "us",
+                    "field_keyword_08": "Data Science",
+                    "field_keyword_19": "Armonk",
+                }
+            ]
+        }
+        with patch(
+            "job_finder.web.ats_platforms._registry.requests.post",
+            return_value=_FakeResp(200, sample),
+        ):
+            postings = _fetch_postings("ibm")
+        assert len(postings) == 1
+        assert postings[0]["field_text_01"] == "114614"
+
+    def test_posting_to_job_builds_canonical_dict(self):
+        from job_finder.web.ats_platforms._platforms_ibm import (
+            _posting_to_job,
+        )
+
+        posting = {
+            "field_text_01": "114614",
+            "title": "Senior Data Scientist",
+            "field_keyword_05": "us",
+            "field_keyword_08": "Data Science",
+            "field_keyword_19": "Armonk",
+            "description": "Build AI models",
+        }
+        job = _posting_to_job(posting, "ibm")
+        assert job["title"] == "Senior Data Scientist"
+        assert job["company_source"] == "IBM"
+        assert job["location"] == "Armonk, us"
+        assert job["source_url"] == "https://careers.ibm.com/careers/JobDetail?jobId=114614"
+        assert job["source_id"] == "114614"
+        assert job["department"] == "Data Science"
+
+
 class TestJobviteScannerIsStub:
     def test_fetch_postings_always_returns_empty(self):
         from job_finder.web.ats_platforms._platforms_jobvite import (
@@ -403,6 +470,11 @@ class TestDispatcherWiring:
 
         for platform in ("workable", "jobvite", "paylocity", "rippling"):
             assert platform in _PLATFORM_SCANNERS, f"{platform} missing from _PLATFORM_SCANNERS"
+
+    def test_ibm_in_dispatcher(self):
+        from job_finder.web.ats_scanner._run import _PLATFORM_SCANNERS
+
+        assert "ibm" in _PLATFORM_SCANNERS, "ibm missing from _PLATFORM_SCANNERS"
 
     def test_dispatcher_uses_central_registry(self):
         """The scan dispatch MUST consume the single central registry, never a
@@ -486,6 +558,7 @@ class TestDispatcherWiring:
             ("jobvite", "job_finder.web.ats_prober._probe_jobvite"),
             ("paylocity", "job_finder.web.ats_prober._probe_paylocity"),
             ("rippling", "job_finder.web.ats_prober._probe_rippling"),
+            ("ibm", "job_finder.web.ats_prober._probe_ibm"),
         ):
             with patch(probe_target, return_value=True):
                 assert _verify_live(platform, "any") is True
