@@ -346,6 +346,7 @@ def get_cost_stats(conn: sqlite3.Connection, budget_cap: float | None = None) ->
         month (float): Total paid spend this calendar month.
         projected_monthly (float): month_spend / days_elapsed * 30.
         by_feature (list[dict]): [{purpose, calls, spend}] grouped by purpose (paid only).
+        by_provider (list[dict]): [{provider, calls, spend}] grouped by provider (paid only).
         budget_cap (float): The daily budget cap.
 
     Args:
@@ -400,12 +401,26 @@ def get_cost_stats(conn: sqlite3.Connection, budget_cap: float | None = None) ->
     ).fetchall()
     by_feature = [{"purpose": row[0], "calls": row[1], "spend": float(row[2])} for row in rows]
 
+    # By-provider breakdown (paid providers only)
+    provider_rows = conn.execute(
+        f"SELECT provider, COUNT(*) AS calls, COALESCE(SUM(cost_usd), 0.0) AS spend "
+        f"FROM scoring_costs "
+        f"WHERE provider NOT IN ({free_placeholders}) "
+        f"GROUP BY provider "
+        f"ORDER BY spend DESC",
+        free,
+    ).fetchall()
+    by_provider = [
+        {"provider": row[0], "calls": row[1], "spend": float(row[2])} for row in provider_rows
+    ]
+
     return {
         "today": today_spend,
         "week": week_spend,
         "month": month_spend,
         "projected_monthly": projected_monthly,
         "by_feature": by_feature,
+        "by_provider": by_provider,
         "budget_cap": budget_cap,
     }
 

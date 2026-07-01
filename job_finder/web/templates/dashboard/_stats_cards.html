@@ -147,30 +147,103 @@
 <!-- Off-Platform Miss Log stat card -->
 {% if off_platform_miss_log and off_platform_miss_log.total > 0 %}
 <div class="mt-4">
-  <div class="bg-slate-800 rounded-xl border {% if off_platform_miss_log.reachable > 0 %}border-amber-600{% else %}border-slate-700{% endif %} p-4">
-    <div class="flex items-center justify-between">
-      <div class="flex items-center gap-3">
-        <svg class="w-5 h-5 text-amber-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
-        </svg>
-        <div>
-          <span class="text-xs font-medium text-slate-400 uppercase tracking-wider">Off-Platform Misses</span>
-          <div class="flex items-center gap-2 mt-0.5">
-            <span class="text-sm font-semibold text-slate-100">{{ off_platform_miss_log.total }} total</span>
-            {% if off_platform_miss_log.reachable > 0 %}
-            <span class="text-xs text-amber-400">({{ off_platform_miss_log.reachable }} reachable)</span>
-            {% endif %}
-          </div>
-        </div>
+  {% include "dashboard/_off_platform_misses.html" %}
+</div>
+{% endif %}
+
+<!-- SLI Metrics Row -->
+<div class="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+  <!-- Crawl Latency SLI -->
+  <div class="bg-slate-800 rounded-xl border border-slate-700 p-4">
+    <span class="text-xs font-medium text-slate-400 uppercase tracking-wider">Crawl Latency</span>
+    {% if crawl_latency_sli.p50_days is not none %}
+    <div class="mt-2 space-y-1">
+      <div class="flex justify-between text-sm">
+        <span class="text-slate-400">p50</span>
+        <span class="text-slate-200">{{ "%.1f" | format(crawl_latency_sli.p50_days) }}d</span>
       </div>
-      <div class="text-right">
-        <div class="text-xs text-slate-400">Reachability breakdown</div>
-        <div class="text-xs text-slate-500 mt-0.5">
-          {{ off_platform_miss_log.unreachable_untracked }} untracked · {{ off_platform_miss_log.unreachable_unsupported }} unsupported · {{ off_platform_miss_log.unreachable_scan_disabled }} disabled
-        </div>
+      <div class="flex justify-between text-sm">
+        <span class="text-slate-400">p95</span>
+        <span class="text-slate-200">{{ "%.1f" | format(crawl_latency_sli.p95_days) }}d</span>
+      </div>
+      <div class="flex justify-between text-sm">
+        <span class="text-slate-400">p99</span>
+        <span class="text-slate-200">{{ "%.1f" | format(crawl_latency_sli.p99_days) }}d</span>
       </div>
     </div>
+    <div class="mt-2 text-xs text-slate-500">
+      {{ crawl_latency_sli.sample_n }} samples ({{ crawl_latency_sli.exact_coverage_pct }}% exact coverage)
+    </div>
+    {% else %}
+    <div class="mt-2 text-sm text-slate-500">No data yet</div>
+    {% endif %}
+  </div>
+
+  <!-- Surfed Concentration (HHI) -->
+  <div class="bg-slate-800 rounded-xl border border-slate-700 p-4">
+    <span class="text-xs font-medium text-slate-400 uppercase tracking-wider">Surfaced Concentration</span>
+    {% if surfaced_concentration.by_employer and surfaced_concentration.by_employer.hhi is not none %}
+    <div class="mt-2 space-y-1">
+      <div class="flex justify-between text-sm">
+        <span class="text-slate-400">Employer HHI</span>
+        <span class="text-slate-200">{{ "%.3f" | format(surfaced_concentration.by_employer.hhi) }}</span>
+      </div>
+      <div class="flex justify-between text-sm">
+        <span class="text-slate-400">Platform HHI</span>
+        <span class="text-slate-200">{{ "%.3f" | format(surfaced_concentration.by_platform.hhi) if surfaced_concentration.by_platform.hhi is not none else "N/A" }}</span>
+      </div>
+    </div>
+    <div class="mt-2 text-xs text-slate-500">
+      {{ surfaced_concentration.by_employer.total }} surfaced jobs across {{ surfaced_concentration.by_employer.n_groups }} employers
+    </div>
+    {% else %}
+    <div class="mt-2 text-sm text-slate-500">No surfaced jobs yet</div>
+    {% endif %}
+  </div>
+
+  <!-- Score Rot Stratigraphy -->
+  <div class="bg-slate-800 rounded-xl border border-slate-700 p-4">
+    <span class="text-xs font-medium text-slate-400 uppercase tracking-wider">Score Model Stratigraphy</span>
+    {% if model_breakdown %}
+    <div class="mt-2 space-y-1">
+      {% for item in model_breakdown[:3] %}
+      <div class="flex justify-between text-sm">
+        <span class="text-slate-400 truncate max-w-[120px]">{{ item.scoring_model }}</span>
+        <span class="text-slate-200">{{ item["COUNT(*)"] }}</span>
+      </div>
+      {% endfor %}
+      {% if model_breakdown | length > 3 %}
+      <div class="text-xs text-slate-500">+{{ model_breakdown | length - 3 }} more models</div>
+      {% endif %}
+    </div>
+    {% else %}
+    <div class="mt-2 text-sm text-slate-500">No scored jobs yet</div>
+    {% endif %}
+  </div>
+</div>
+
+<!-- Funnel Drop-Bucket Breakdown -->
+{% if funnel and funnel.funnel %}
+<div class="mt-4">
+  <div class="bg-slate-800 rounded-xl border border-slate-700 p-4">
+    <span class="text-xs font-medium text-slate-400 uppercase tracking-wider">Last Run Funnel Breakdown</span>
+    {% if funnel.funnel.drop_buckets %}
+    <div class="mt-3 grid grid-cols-2 sm:grid-cols-4 gap-3">
+      {% for bucket, count in funnel.funnel.drop_buckets.items() %}
+      <div class="bg-slate-700/50 rounded-lg p-2 text-center">
+        <div class="text-lg font-bold text-slate-200">{{ count }}</div>
+        <div class="text-xs text-slate-400">{{ bucket | replace('_', ' ') | title }}</div>
+      </div>
+      {% endfor %}
+    </div>
+    <div class="mt-3 flex justify-between text-xs text-slate-500">
+      <span>Jobs in: {{ funnel.funnel.jobs_in }}</span>
+      <span>Jobs passed: {{ funnel.funnel.jobs_passed }}</span>
+      <span>Unexplained: {{ funnel.funnel.unexplained or 0 }}</span>
+    </div>
+    {% else %}
+    <div class="mt-2 text-sm text-slate-500">No drop data available</div>
+    {% endif %}
   </div>
 </div>
 {% endif %}

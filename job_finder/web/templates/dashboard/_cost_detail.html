@@ -74,6 +74,31 @@
   <p class="text-xs text-slate-500 text-center py-2">No API calls recorded yet.</p>
   {% endif %}
 
+  <!-- By-provider breakdown -->
+  {% if cost_stats.by_provider %}
+  <div class="mt-4">
+    <div class="text-xs text-slate-500 uppercase tracking-wide mb-2">By Provider (Paid)</div>
+    <table class="w-full text-xs">
+      <thead>
+        <tr class="text-left text-slate-500 border-b border-slate-700">
+          <th class="pb-1 font-medium">Provider</th>
+          <th class="pb-1 font-medium text-right">Calls</th>
+          <th class="pb-1 font-medium text-right">Spend</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in cost_stats.by_provider %}
+        <tr class="border-b border-slate-800/50">
+          <td class="py-1 text-slate-300 font-mono">{{ item.provider }}</td>
+          <td class="py-1 text-slate-400 text-right">{{ item.calls }}</td>
+          <td class="py-1 text-slate-300 text-right">${{ "%.4f" | format(item.spend) }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
   <div class="text-right">
     <a href="{{ url_for('settings.index') }}" class="text-xs text-violet-400 hover:text-violet-300 transition-colors">Adjust budget in Settings →</a>
   </div>

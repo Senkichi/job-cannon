@@ -57,6 +57,7 @@ from ._dashboard_queries import get_pipeline_summary as get_pipeline_summary
 from ._dashboard_queries import get_recent_activity as get_recent_activity
 from ._dashboard_queries import get_recent_pipeline_events as get_recent_pipeline_events
 from ._dashboard_queries import get_recent_runs as get_recent_runs
+from ._dashboard_queries import get_surfaced_concentration as get_surfaced_concentration
 
 # Job CRUD + the JOBS_ALL_COLUMNS projection.
 from ._jobs import JOBS_ALL_COLUMNS as JOBS_ALL_COLUMNS
