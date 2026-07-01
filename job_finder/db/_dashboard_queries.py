@@ -670,3 +670,147 @@ def get_surfaced_concentration(conn: sqlite3.Connection) -> dict:
         "by_employer": employer_metrics,
         "by_platform": platform_metrics,
     }
+
+
+def get_off_platform_miss_log(conn: sqlite3.Connection, fit_floor: float | None = None) -> dict:
+    """Return off-platform miss log with reachability classification.
+
+    Jobs where the JSON sources array contains 'off_platform_email' are
+    classified by reachability into four buckets:
+    - reachable: company tracked, scannable ATS, scan_enabled=1 (funnel-leak bug)
+    - unreachable_untracked: no matching companies row (coverage decision)
+    - unreachable_unsupported: company tracked but ATS not scannable (coverage decision)
+    - unreachable_scan_disabled: company tracked, scannable ATS, but scan_enabled=0 (scope decision)
+
+    The three unreachable_* buckets ratify the scanner walk-away ruling; only
+    reachable cases are potential discovery-stage bugs.
+
+    Args:
+        conn: Open sqlite3 connection.
+        fit_floor: Mean sub-score threshold for target-set membership. When supplied,
+            `reachable_above_fit_floor` is populated; when None (caller has no config),
+            that field stays None. Caller-supplied per module convention
+            (see get_target_set_size), never fetched internally.
+
+    Returns:
+        dict with keys:
+            total (int): total off-platform jobs
+            reachable (int): reachable misses (potential funnel leaks)
+            unreachable_untracked (int): company not tracked
+            unreachable_unsupported (int): ATS not scannable
+            unreachable_scan_disabled (int): scan disabled for scannable ATS
+            reachable_above_fit_floor (int | None): reachable misses that are target-set
+                members (None when fit_floor not supplied)
+            cases (list[dict]): per-case details with dedup_key, company, ats_platform,
+                                scan_enabled, bucket, first_seen
+        Returns zeroed dict on pre-migration (missing companies table).
+    """
+    try:
+        from job_finder.web.ats_registry import SCANNABLE_TARGET_PLATFORMS
+    except ImportError:
+        # Guard against missing SCANNABLE_TARGET_PLATFORMS (should not happen in production)
+        SCANNABLE_TARGET_PLATFORMS = frozenset()
+
+    try:
+        # Select off-platform jobs, LEFT JOIN companies on the canonical FK
+        # (jobs.company_id = companies.id) — the SAME linkage the sibling
+        # get_surfaced_concentration() and company_resolver use. jobs.company holds
+        # the RAW parser name while companies.name is normalized, so a name-join
+        # would miss ~99% of links and invert the metric (reachable -> untracked).
+        # c.id (NULL vs non-NULL) distinguishes an unlinked job from a tracked one.
+        rows = conn.execute(
+            """SELECT j.dedup_key, j.company, j.first_seen,
+                      c.id as company_id, c.ats_platform, c.scan_enabled
+               FROM jobs j
+               LEFT JOIN companies c ON j.company_id = c.id
+               WHERE EXISTS (
+                   SELECT 1 FROM json_each(j.sources) WHERE value = 'off_platform_email'
+               )"""
+        ).fetchall()
+    except sqlite3.OperationalError as exc:
+        # Gracefully handle missing companies table (pre-migration)
+        if "no such table" in str(exc).lower():
+            return {
+                "total": 0,
+                "reachable": 0,
+                "unreachable_untracked": 0,
+                "unreachable_unsupported": 0,
+                "unreachable_scan_disabled": 0,
+                "reachable_above_fit_floor": None,
+                "cases": [],
+            }
+        raise
+
+    # Bucket each row in Python (avoids embedding platform list in SQL, honors RULE #9)
+    buckets = {
+        "reachable": 0,
+        "unreachable_untracked": 0,
+        "unreachable_unsupported": 0,
+        "unreachable_scan_disabled": 0,
+    }
+    cases = []
+
+    for row in rows:
+        dedup_key = row["dedup_key"]
+        company = row["company"]
+        company_id = row["company_id"]
+        ats_platform = row["ats_platform"]
+        scan_enabled = row["scan_enabled"]
+        first_seen = row["first_seen"]
+
+        # Classify reachability
+        if company_id is None:
+            # No matching companies row
+            bucket = "unreachable_untracked"
+        elif ats_platform is None or ats_platform not in SCANNABLE_TARGET_PLATFORMS:
+            # Company tracked but ATS not scannable (NULL or unsupported platform)
+            bucket = "unreachable_unsupported"
+        elif scan_enabled == 0:
+            # Scannable ATS but scan EXPLICITLY disabled. NULL (unknown) is NOT
+            # counted here — the schema default is enabled (m007), so a NULL falls
+            # through to 'reachable' rather than being read as a scope decision.
+            bucket = "unreachable_scan_disabled"
+        else:
+            # Reachable (potential funnel leak)
+            bucket = "reachable"
+
+        buckets[bucket] += 1
+        cases.append(
+            {
+                "dedup_key": dedup_key,
+                "company": company,
+                "ats_platform": ats_platform,
+                "scan_enabled": scan_enabled,
+                "bucket": bucket,
+                "first_seen": first_seen,
+            }
+        )
+
+    total = sum(buckets.values())
+
+    # Optional: of the reachable misses, how many are actual target-set members
+    # (scored, mean sub-score >= fit_floor, not a hard negative) — i.e. reachable
+    # misses that are REAL discovery bugs worth acting on, not just noise. The caller
+    # supplies fit_floor (module convention: see get_target_set_size); it stays None
+    # when the caller has no config, so the field degrades to None rather than lying.
+    reachable_above_fit_floor = None
+    if fit_floor is not None:
+        reachable_dedup_keys = [c["dedup_key"] for c in cases if c["bucket"] == "reachable"]
+        if reachable_dedup_keys:
+            placeholders = ",".join(["?"] * len(reachable_dedup_keys))
+            where_clause = target_membership_sql(fit_floor)
+            row = conn.execute(
+                f"SELECT COUNT(*) FROM jobs WHERE dedup_key IN ({placeholders}) AND {where_clause}",
+                reachable_dedup_keys,
+            ).fetchone()
+            reachable_above_fit_floor = row[0] if row else 0
+
+    return {
+        "total": total,
+        "reachable": buckets["reachable"],
+        "unreachable_untracked": buckets["unreachable_untracked"],
+        "unreachable_unsupported": buckets["unreachable_unsupported"],
+        "unreachable_scan_disabled": buckets["unreachable_scan_disabled"],
+        "reachable_above_fit_floor": reachable_above_fit_floor,
+        "cases": cases,
+    }

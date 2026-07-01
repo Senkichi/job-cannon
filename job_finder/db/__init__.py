@@ -34,6 +34,12 @@ the two coexist by design and S7d does NOT collapse them.
 
 from __future__ import annotations
 
+# Application package persistence (prepare-layer review queue).
+from ._applications import get_application as get_application
+from ._applications import get_application_by_job as get_application_by_job
+from ._applications import resolve_application as resolve_application
+from ._applications import upsert_application as upsert_application
+
 # v3.0 scoring-rule cluster — pure logic, no DB deps.
 # PEP 484 explicit re-export form (`as X`) documents the contract and
 # silences pyright's reportUnusedImport.
@@ -46,6 +52,7 @@ from ._dashboard_queries import get_dashboard_stats as get_dashboard_stats
 from ._dashboard_queries import get_distinct_locations as get_distinct_locations
 from ._dashboard_queries import get_jobs_by_status as get_jobs_by_status
 from ._dashboard_queries import get_liveness_stats as get_liveness_stats
+from ._dashboard_queries import get_off_platform_miss_log as get_off_platform_miss_log
 from ._dashboard_queries import get_pipeline_summary as get_pipeline_summary
 from ._dashboard_queries import get_recent_activity as get_recent_activity
 from ._dashboard_queries import get_recent_pipeline_events as get_recent_pipeline_events

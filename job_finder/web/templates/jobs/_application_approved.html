@@ -1,0 +1,7 @@
+<div id="application-{{ application.id }}"
+     class="bg-slate-700/50 rounded-lg border border-emerald-700/50 px-4 py-3
+            text-emerald-400 text-sm transition-opacity duration-1000"
+     hx-on::load="setTimeout(() => this.style.opacity = '0', 2000);
+                  setTimeout(() => this.remove(), 3000)">
+  Application approved for {{ job.company or 'this job' }} &rarr; Applied
+</div>

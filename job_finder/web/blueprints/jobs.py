@@ -22,6 +22,7 @@ from flask import (
 
 from job_finder.config import JD_STORAGE_MAX_CHARS
 from job_finder.db import (
+    get_application,
     get_distinct_country_codes,
     get_distinct_locations,
     get_distinct_sources,
@@ -31,7 +32,9 @@ from job_finder.db import (
     get_pipeline_events,
     load_job_context,
     persist_job_notes,
+    resolve_application,
     update_pipeline_status,
+    upsert_application,
     upsert_job,
 )
 from job_finder.db._jd_full import set_jd_full as _set_jd_full
@@ -57,6 +60,7 @@ def _get_stale_count(conn) -> int:
     return row[0] if row else 0
 
 
+from job_finder.web.application_prepare import prepare_application_package
 from job_finder.web.blueprints import PIPELINE_STATUSES
 from job_finder.web.data_enricher import enrich_job
 from job_finder.web.db_helpers import get_db
@@ -765,6 +769,97 @@ def update_status(dedup_key: str):
         resp = make_response(status_html)
 
     return resp
+
+
+@jobs_bp.route("/<path:dedup_key>/prepare-application", methods=["POST"], strict_slashes=False)
+def prepare_application(dedup_key: str):
+    """Assemble + store an application package, render the review card. Submits nothing."""
+    conn = get_db()
+    job = get_job(conn, dedup_key)
+    if job is None:
+        return "", 404
+    try:
+        # Pass the real app-config dict (JF_CONFIG), NOT the Flask config wrapper —
+        # the cascade reads config["providers"], which only exists under JF_CONFIG.
+        config = current_app.config.get("JF_CONFIG", {}) or {}
+        pkg = prepare_application_package(conn, config, job)  # assemble
+
+        # Enforce non-empty contract: resume and at least one drafted answer must be non-empty.
+        # resume_content is json.dumps(dict); "{}" is a truthy non-empty STRING but an EMPTY
+        # resume — parse and require actual structure so a hollow package can't look complete.
+        resume_content = pkg["resume_content"]
+        if not resume_content or not resume_content.strip():
+            raise ValueError("Resume content is empty — cannot prepare application package.")
+        try:
+            parsed_resume = json.loads(resume_content)
+        except (TypeError, ValueError):
+            parsed_resume = None
+        if isinstance(parsed_resume, dict) and not any(parsed_resume.values()):
+            raise ValueError("Resume content has no tailored sections — cannot prepare package.")
+        if not pkg["drafted_answers"] or all(
+            not ans or ans.strip() == "" for ans in pkg["drafted_answers"].values()
+        ):
+            raise ValueError(
+                "All drafted answers are empty — LLM provider may be unavailable. "
+                "Check your provider configuration and retry."
+            )
+
+        app_id = upsert_application(
+            conn,
+            dedup_key,
+            pkg["resume_content"],
+            pkg["form_mapping"],
+            pkg["drafted_answers"],
+        )
+        application = get_application(conn, app_id)
+        return render_template(
+            "jobs/_application_review.html", job=job, application=application
+        )  # 200
+    except ValueError as e:
+        # resume_tailor raises ValueError on empty profile or missing jd_full
+        # Render error fragment with 200 for HTMX outerHTML swap
+        return render_template(
+            "jobs/_application_error.html",
+            job=job,
+            error_message=str(e),
+        )  # 200
+
+
+@jobs_bp.route(
+    "/applications/<int:application_id>/approve", methods=["POST"], strict_slashes=False
+)
+def approve_application(application_id: int):
+    """Owner approves: flip the job to 'applied' (dual-write) + resolve the package."""
+    conn = get_db()
+    application = get_application(conn, application_id)
+    if application is None:
+        return "", 404
+    update_pipeline_status(
+        conn,
+        application["job_id"],
+        "applied",
+        source="manual",
+        evidence="application package approved",
+    )
+    resolve_application(conn, application_id, "approved")
+    job = get_job(conn, application["job_id"])
+    return render_template(
+        "jobs/_application_approved.html", job=job, application=application
+    )  # 200
+
+
+@jobs_bp.route("/applications/<int:application_id>/reject", methods=["POST"], strict_slashes=False)
+def reject_application(application_id: int):
+    """Owner rejects the prepared package: resolve as rejected, pipeline_status unchanged."""
+    conn = get_db()
+    application = get_application(conn, application_id)
+    if application is None:
+        return "", 404
+    resolve_application(conn, application_id, "rejected")
+    return (
+        "",
+        200,
+    )  # empty primary swap removes the card; HTMX needs 200 not 204
 
 
 @jobs_bp.route("/<path:dedup_key>/detail-inline", strict_slashes=False)
