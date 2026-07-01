@@ -81,6 +81,25 @@ def _reconfigure_stdio_utf8() -> None:
             pass
 
 
+def _positive_interval_min(value: str) -> int:
+    """argparse type for --healthcheck-interval-min: a positive integer of minutes.
+
+    Rejects < 1 loudly at parse time. A zero/negative cadence would otherwise render
+    a malformed, non-firing deadman manifest (``PT0M`` / ``StartInterval 0`` /
+    ``OnUnitActiveSec=0min``) while the installer still reports success — silently
+    disabling the very probe meant to catch a down instance.
+    """
+    try:
+        minutes = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(
+            f"must be an integer number of minutes, got {value!r}"
+        ) from None
+    if minutes < 1:
+        raise argparse.ArgumentTypeError(f"must be >= 1 minute, got {minutes}")
+    return minutes
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="job-cannon",
@@ -220,10 +239,11 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     supervisor.add_argument(
         "--healthcheck-interval-min",
-        type=int,
+        type=_positive_interval_min,
         default=15,
         metavar="MINUTES",
-        help="Cadence for the periodic healthcheck probe (default: 15). Ignored for --uninstall.",
+        help="Cadence for the periodic healthcheck probe (default: 15, must be >= 1). "
+        "Ignored for --uninstall.",
     )
 
     # ``stop`` — gracefully stop the running instance(s) and disable the
