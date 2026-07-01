@@ -1,5 +1,7 @@
 """Tests for ADP Workforce Now ATS platform scanner."""
 
+from urllib.parse import urlparse
+
 from job_finder.web.ats_platforms._platforms_adp import (
     SCANNER,
     _employment_type,
@@ -134,7 +136,7 @@ def test_scanner_posting_to_job():
     assert job["location"] == "San Francisco, CA"
     assert job["source_id"] == "9201405840307_1"
     assert job["posted_date"] == "2026-06-25"
-    assert job["source_url"].startswith("https://workforcenow.adp.com")
+    assert urlparse(job["source_url"]).hostname == "workforcenow.adp.com"
     assert "634946" in job["source_url"]
 
 

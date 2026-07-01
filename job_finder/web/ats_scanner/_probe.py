@@ -119,6 +119,8 @@ _URL_FASTPATH_PLATFORMS: frozenset[str] = frozenset(
         "rippling",
         # SuccessFactors -- public XML feed
         "successfactors",
+        # ADP Workforce Now -- public JSON requisitions feed
+        "adp",
     }
 )
 
