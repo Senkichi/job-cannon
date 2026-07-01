@@ -42,8 +42,10 @@ def test_extractor_version_bumped_for_round6_patterns():
     UKG Pro Recruiting / UltiPro, m049-v8 for SuccessFactors, m049-v9 for Phenom,
     m049-v10 for Phenom www.* exclusion, m049-v11 for ADP Workforce Now); every
     material regex change bumps it.
+
+    Updated to m050-v1 after PR-4: URL patterns migrated to ats_registry.
     """
-    assert ATS_EXTRACTOR_VERSION == "m049-v11"
+    assert ATS_EXTRACTOR_VERSION == "m050-v1"
 
 
 # ---------------------------------------------------------------------------
