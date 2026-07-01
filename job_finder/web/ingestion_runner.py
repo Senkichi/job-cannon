@@ -36,7 +36,25 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
-def _apply_title_gate(jobs: list[Job], config: dict, source_label: str) -> list[Job]:
+def is_scannable_output(job: Job) -> bool:
+    """Return True iff job has valid output: non-empty title, company, source_url.
+
+    "Scanned" = valid output, not HTTP 200 / incidental parse-success. A row
+    failing this predicate counts as parse_empty, not as jobs_in. This is the
+    non-negotiable "output-validity defines scanned" rule from METRICS.md.
+
+    Title length plausibility band: between 3 and 200 characters (rejects
+    obviously malformed titles without needing a config threshold).
+    """
+    if not job.title or not job.company or not job.source_url:
+        return False
+    title_len = len(job.title)
+    return 3 <= title_len <= 200
+
+
+def _apply_title_gate(
+    jobs: list[Job], config: dict, source_label: str, summary: dict | None = None
+) -> list[Job]:
     """Apply the Stage 7.6 title-gate invariant to a non-portal ingestion source.
 
     Reads ``profile.target_titles`` + ``profile.exclusions.title_keywords`` from
@@ -49,6 +67,15 @@ def _apply_title_gate(jobs: list[Job], config: dict, source_label: str) -> list[
     ``_title_matches`` at only 26-72%; the rest were off-target rows the
     upstream ``q=``/alert-config could not filter and that reached scoring
     anyway. This gate closes that downstream leak with one consistent rule.
+
+    Args:
+        jobs: List of Job objects to filter.
+        config: Full config dict.
+        source_label: Source name for logging.
+        summary: Optional mutable summary dict to increment title_gate bucket.
+
+    Returns:
+        Filtered list of Job objects.
     """
     if not jobs:
         return jobs
@@ -74,6 +101,10 @@ def _apply_title_gate(jobs: list[Job], config: dict, source_label: str) -> list[
             len(target_titles),
             len(exclusions),
         )
+        if summary is not None:
+            funnel = summary.setdefault("funnel", {})
+            drop_buckets = funnel.setdefault("drop_buckets", {})
+            drop_buckets["title_gate"] = drop_buckets.get("title_gate", 0) + (pre - post)
     return filtered
 
 
@@ -224,7 +255,7 @@ def _fetch_gmail(config: dict, conn: sqlite3.Connection, summary: dict) -> list[
         # — gate filters Job objects, not message tracking. summary +
         # run-level log use the post-gate count (matches Stage 7.6 portal_search
         # semantics: dashboard's *_fetched reflects what reached downstream).
-        jobs = _apply_title_gate(jobs, config, "gmail")
+        jobs = _apply_title_gate(jobs, config, "gmail", summary)
         summary["gmail_fetched"] = len(jobs)
 
         # --- Log the run-level summary to email_parse_log ---
@@ -346,7 +377,7 @@ def _run_simple_source(
                 post_extract(source)
             except Exception:
                 logger.exception("post_extract hook failed for %s", spec.name)
-        jobs = _apply_title_gate(jobs, config, spec.name)
+        jobs = _apply_title_gate(jobs, config, spec.name, summary)
         summary[f"{spec.name}_fetched"] = len(jobs)
         _clear_source_error(db_path, spec.name)
         logger.info("%s: fetched %d jobs", spec.name, len(jobs))
@@ -752,7 +783,7 @@ def _collect_dataforseo_results(
         jobs = source.collect_results(task_ids)
         elapsed = time.monotonic() - t0
         if config is not None:
-            jobs = _apply_title_gate(jobs, config, "dataforseo")
+            jobs = _apply_title_gate(jobs, config, "dataforseo", summary)
         summary["dataforseo_fetched"] = len(jobs)
         logger.info("DataForSEO collect: %.1fs, %d jobs", elapsed, len(jobs))
         return jobs
@@ -778,6 +809,17 @@ def _score_and_persist(
         summary: Mutable summary dict to update.
         new_job_keys: Mutable list; new job dedup_keys are appended here.
     """
+    # Extract ATS platform for per-platform stratification
+    ats_platform = "unknown"
+    try:
+        from job_finder.web.ats_detection import extract_ats_from_urls
+
+        source_url = job.source_url or ""
+        source_urls = [source_url] if source_url else []
+        ats_platform, _ = extract_ats_from_urls(source_urls)
+    except Exception:
+        pass  # Default to "unknown" if extraction fails
+
     try:
         # Score the job (updates job.score and job.score_breakdown in place)
         scored_job = scorer.score_jobs([job])
@@ -792,11 +834,29 @@ def _score_and_persist(
 
         try:
             parsed = ParsedJob.from_job(job)
-        except (DenylistedCompanyError, ListingTileError):
-            # Preserve the pre-48.07 shim early-return: a denylisted company
-            # (I-10) — or a result-count tile (I-14, #211) — is reported as
-            # "unchanged" so the per-job error counter does not fire and
-            # ingestion summary counts stay identical.
+        except DenylistedCompanyError:
+            # Issue #587: increment denylist bucket instead of silent return
+            funnel = summary.setdefault("funnel", {})
+            drop_buckets = funnel.setdefault("drop_buckets", {})
+            drop_buckets["denylist"] = drop_buckets.get("denylist", 0) + 1
+            # Per-platform stratification
+            funnel_by_platform = funnel.setdefault("funnel_by_platform", {})
+            platform_stats = funnel_by_platform.setdefault(ats_platform, {})
+            platform_drop_buckets = platform_stats.setdefault("drop_buckets", {})
+            platform_drop_buckets["denylist"] = platform_drop_buckets.get("denylist", 0) + 1
+            return
+        except ListingTileError:
+            # Issue #587: increment listing_tile bucket instead of silent return
+            funnel = summary.setdefault("funnel", {})
+            drop_buckets = funnel.setdefault("drop_buckets", {})
+            drop_buckets["listing_tile"] = drop_buckets.get("listing_tile", 0) + 1
+            # Per-platform stratification
+            funnel_by_platform = funnel.setdefault("funnel_by_platform", {})
+            platform_stats = funnel_by_platform.setdefault(ats_platform, {})
+            platform_drop_buckets = platform_stats.setdefault("drop_buckets", {})
+            platform_drop_buckets["listing_tile"] = (
+                platform_drop_buckets.get("listing_tile", 0) + 1
+            )
             return
         result = upsert_job(
             conn,
@@ -810,12 +870,35 @@ def _score_and_persist(
             # diverges from ParsedJob's key whenever clean_title strips a
             # req-id / location suffix / dash qualifier / logo letter.
             new_job_keys.append(result.dedup_key)
+            # Issue #587: increment passed bucket
+            funnel = summary.setdefault("funnel", {})
+            funnel["jobs_passed"] = funnel.get("jobs_passed", 0) + 1
+            # Per-platform stratification
+            funnel_by_platform = funnel.setdefault("funnel_by_platform", {})
+            platform_stats = funnel_by_platform.setdefault(ats_platform, {})
+            platform_stats["jobs_passed"] = platform_stats.get("jobs_passed", 0) + 1
         elif result.kind == "updated":
             summary["jobs_updated"] += 1
+            # Issue #587: increment passed bucket
+            funnel = summary.setdefault("funnel", {})
+            funnel["jobs_passed"] = funnel.get("jobs_passed", 0) + 1
+            # Per-platform stratification
+            funnel_by_platform = funnel.setdefault("funnel_by_platform", {})
+            platform_stats = funnel_by_platform.setdefault(ats_platform, {})
+            platform_stats["jobs_passed"] = platform_stats.get("jobs_passed", 0) + 1
         elif result.kind == "touched":
             # Re-sighting of a known job from another feed: last_seen + source
             # union only (D-15 folded the former touch-path helper into upsert).
             summary["jobs_touch_only"] = summary.get("jobs_touch_only", 0) + 1
+            # Issue #587: increment dedup bucket
+            funnel = summary.setdefault("funnel", {})
+            drop_buckets = funnel.setdefault("drop_buckets", {})
+            drop_buckets["dedup"] = drop_buckets.get("dedup", 0) + 1
+            # Per-platform stratification
+            funnel_by_platform = funnel.setdefault("funnel_by_platform", {})
+            platform_stats = funnel_by_platform.setdefault(ats_platform, {})
+            platform_drop_buckets = platform_stats.setdefault("drop_buckets", {})
+            platform_drop_buckets["dedup"] = platform_drop_buckets.get("dedup", 0) + 1
 
         # Company auto-population: create/update company record for every job
         _upsert_job_company(conn, job)
@@ -823,6 +906,13 @@ def _score_and_persist(
     except Exception as e:
         error_msg = f"{job.title} @ {job.company}: {e}"
         summary["job_errors"].append(error_msg)
+        # Issue #587: increment errored bucket
+        funnel = summary.setdefault("funnel", {})
+        funnel["jobs_errored"] = funnel.get("jobs_errored", 0) + 1
+        # Per-platform stratification
+        funnel_by_platform = funnel.setdefault("funnel_by_platform", {})
+        platform_stats = funnel_by_platform.setdefault(ats_platform, {})
+        platform_stats["jobs_errored"] = platform_stats.get("jobs_errored", 0) + 1
         logger.warning("Failed to score/persist job '%s' at '%s': %s", job.title, job.company, e)
 
 

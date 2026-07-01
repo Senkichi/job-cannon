@@ -25,6 +25,7 @@ import pytest
 from flask import Flask
 
 from job_finder.web.scheduler._runners import (
+    _check_funnel_unexplained,
     _check_owner_idle,
     _check_score_rot,
     run_health_check,
@@ -298,3 +299,201 @@ def test_owner_idle_participates_in_escalation(migrated_db, events_file):
     assert fire.call_count == 1
     escalated_keys = {e["signal_key"] for e in fire.call_args.args[0]}
     assert "owner_idle" in escalated_keys
+
+
+# ---------------------------------------------------------------------------
+# _check_funnel_unexplained (issue #587)
+# ---------------------------------------------------------------------------
+
+
+def _runs_conn() -> sqlite3.Connection:
+    """Minimal runs table (only the columns the funnel check reads)."""
+    conn = sqlite3.connect(":memory:")
+    conn.execute(
+        "CREATE TABLE runs (id INTEGER PRIMARY KEY AUTOINCREMENT, "
+        "timestamp TEXT NOT NULL, source TEXT NOT NULL, jobs_fetched INTEGER DEFAULT 0, "
+        "jobs_new INTEGER DEFAULT 0, jobs_scored INTEGER DEFAULT 0, metadata TEXT)"
+    )
+    return conn
+
+
+def _add_run(
+    conn: sqlite3.Connection,
+    source: str,
+    metadata: dict | None,
+    days_ago: float = 0,
+) -> None:
+    metadata_json = json.dumps(metadata) if metadata else "{}"
+    conn.execute(
+        "INSERT INTO runs (timestamp, source, jobs_fetched, jobs_new, jobs_scored, metadata) "
+        "VALUES (?, ?, 0, 0, 0, ?)",
+        (_days_ago(days_ago), source, metadata_json),
+    )
+    conn.commit()
+
+
+def test_check_funnel_unexplained_fires():
+    """Test that _check_funnel_unexplained returns issue when unexplained > threshold."""
+    conn = _runs_conn()
+    funnel = {
+        "jobs_in": 10,
+        "jobs_passed": 7,
+        "jobs_errored": 0,
+        "drop_buckets": {
+            "no_jd_full": 0,
+            "title_gate": 0,
+            "location_gate": 0,
+            "dedup": 2,
+            "denylist": 0,
+            "listing_tile": 0,
+            "parse_empty": 0,
+        },
+        "unexplained": 1,  # 10 - (7 + 2 + 0) = 1
+    }
+    _add_run(conn, "ingestion", funnel)
+    issue = _check_funnel_unexplained(conn, {"health": {"funnel_unexplained_max": 0}})
+    assert issue is not None and issue.startswith("Funnel unexplained")
+    assert "1 rows" in issue
+
+
+def test_check_funnel_unexplained_silent_when_zero():
+    """Test that _check_funnel_unexplained returns None when unexplained == 0."""
+    conn = _runs_conn()
+    funnel = {
+        "jobs_in": 10,
+        "jobs_passed": 8,
+        "jobs_errored": 0,
+        "drop_buckets": {
+            "no_jd_full": 0,
+            "title_gate": 0,
+            "location_gate": 0,
+            "dedup": 2,
+            "denylist": 0,
+            "listing_tile": 0,
+            "parse_empty": 0,
+        },
+        "unexplained": 0,  # 10 - (8 + 2 + 0) = 0
+    }
+    _add_run(conn, "ingestion", funnel)
+    assert _check_funnel_unexplained(conn, {"health": {"funnel_unexplained_max": 0}}) is None
+
+
+def test_check_funnel_unexplained_disabled_by_negative_threshold():
+    """Test that _check_funnel_unexplained is disabled when threshold < 0."""
+    conn = _runs_conn()
+    funnel = {
+        "jobs_in": 10,
+        "jobs_passed": 7,
+        "jobs_errored": 0,
+        "drop_buckets": {
+            "no_jd_full": 0,
+            "title_gate": 0,
+            "location_gate": 0,
+            "dedup": 2,
+            "denylist": 0,
+            "listing_tile": 0,
+            "parse_empty": 0,
+        },
+        "unexplained": 1,
+    }
+    _add_run(conn, "ingestion", funnel)
+    assert _check_funnel_unexplained(conn, {"health": {"funnel_unexplained_max": -1}}) is None
+
+
+def test_check_funnel_unexplained_respects_threshold():
+    """Test that _check_funnel_unexplained respects the threshold."""
+    conn = _runs_conn()
+    funnel = {
+        "jobs_in": 10,
+        "jobs_passed": 7,
+        "jobs_errored": 0,
+        "drop_buckets": {
+            "no_jd_full": 0,
+            "title_gate": 0,
+            "location_gate": 0,
+            "dedup": 2,
+            "denylist": 0,
+            "listing_tile": 0,
+            "parse_empty": 0,
+        },
+        "unexplained": 1,
+    }
+    _add_run(conn, "ingestion", funnel)
+    # Threshold 5, unexplained 1 -> silent
+    assert _check_funnel_unexplained(conn, {"health": {"funnel_unexplained_max": 5}}) is None
+    # Threshold 0, unexplained 1 -> fires
+    issue = _check_funnel_unexplained(conn, {"health": {"funnel_unexplained_max": 0}})
+    assert issue is not None
+
+
+def test_check_funnel_unexplained_silent_when_no_run():
+    """Test that _check_funnel_unexplained returns None when no ingestion run exists."""
+    conn = _runs_conn()
+    # Add a non-ingestion run
+    _add_run(conn, "gmail", None)
+    assert _check_funnel_unexplained(conn, {"health": {"funnel_unexplained_max": 0}}) is None
+
+
+def test_check_funnel_unexplained_silent_when_no_metadata():
+    """Test that _check_funnel_unexplained returns None when run has no metadata."""
+    conn = _runs_conn()
+    _add_run(conn, "ingestion", None)
+    assert _check_funnel_unexplained(conn, {"health": {"funnel_unexplained_max": 0}}) is None
+
+
+def test_check_funnel_unexplained_silent_when_malformed_metadata():
+    """Test that _check_funnel_unexplained returns None when metadata is malformed."""
+    conn = _runs_conn()
+    _add_run(conn, "ingestion", "not-json")
+    assert _check_funnel_unexplained(conn, {"health": {"funnel_unexplained_max": 0}}) is None
+
+
+def test_funnel_unexplained_participates_in_escalation(migrated_db, events_file):
+    """The funnel_unexplained signal escalates under its own key after the threshold."""
+    db_path, conn = migrated_db
+    app = _make_app(db_path)
+    app.config["JF_CONFIG"] = {"health": {"funnel_unexplained_max": 0}}
+
+    recent = (datetime.now(UTC) - timedelta(hours=1)).replace(tzinfo=None).isoformat()
+    conn.executemany(
+        "INSERT INTO user_activity (action, entity_id, metadata, occurred_at) VALUES (?, ?, ?, ?)",
+        [
+            ("scheduled_sync", None, "{}", recent),
+            ("scheduled_staleness", None, "{}", recent),
+        ],
+    )
+    conn.commit()
+
+    # Add a run with unexplained drops
+    funnel = {
+        "jobs_in": 10,
+        "jobs_passed": 7,
+        "jobs_errored": 0,
+        "drop_buckets": {
+            "no_jd_full": 0,
+            "title_gate": 0,
+            "location_gate": 0,
+            "dedup": 2,
+            "denylist": 0,
+            "listing_tile": 0,
+            "parse_empty": 0,
+        },
+        "unexplained": 1,
+    }
+    conn.execute(
+        "INSERT INTO runs (timestamp, source, jobs_fetched, jobs_new, jobs_scored, metadata) "
+        "VALUES (?, ?, 0, 0, 0, ?)",
+        (recent, "ingestion", json.dumps(funnel)),
+    )
+    conn.commit()
+
+    with (
+        patch("job_finder.gmail_auth.get_credentials", return_value=object()),
+        patch("job_finder.web.scheduler._runners._fire_escalation") as fire,
+    ):
+        for _ in range(3):  # default escalation threshold
+            run_health_check(app)
+
+    assert fire.call_count == 1
+    escalated_keys = {e["signal_key"] for e in fire.call_args.args[0]}
+    assert "funnel_unexplained" in escalated_keys

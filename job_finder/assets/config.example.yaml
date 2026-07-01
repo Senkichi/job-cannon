@@ -203,6 +203,13 @@ health:
   # this FRACTION of them would now differ -- i.e. the board is carrying verdicts
   # from a stale scoring era. Set > 1 to disable. Default 0.01 (1%).
   score_rot_fraction: 0.01
+  # Funnel unexplained-drop alarm: the heartbeat reads the last ingestion run's
+  # persisted funnel reconciliation identity and flags when the unexplained drop
+  # count exceeds this threshold. The unexplained count is the self-auditing
+  # invariant: jobs_in must equal jobs_passed + sum(drop_buckets) + jobs_errored.
+  # Any non-zero value indicates a silent-drop bug (a code path that discards a
+  # row without incrementing a counter). Set < 0 to disable. Default 0.
+  funnel_unexplained_max: 0
 
 # --- Metrics ---
 metrics:
