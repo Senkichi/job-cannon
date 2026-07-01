@@ -21,6 +21,7 @@ from job_finder.parsers import extract_primary, extract_with_fallback, has_job_u
 from job_finder.parsers.glassdoor_parser import parse_glassdoor_alert
 from job_finder.parsers.greenhouse_parser import parse_greenhouse_alert
 from job_finder.parsers.indeed_parser import parse_indeed_alert, parse_indeed_match_alert
+from job_finder.parsers.jobright_parser import parse_jobright_alert
 from job_finder.parsers.linkedin_parser import parse_linkedin_alert
 from job_finder.parsers.monster_parser import parse_monster_alert
 from job_finder.parsers.trueup_parser import parse_trueup_alert
@@ -101,6 +102,7 @@ SENDERS: tuple[SenderSpec, ...] = (
     SenderSpec("no-reply@us.greenhouse-jobs.com", parse_greenhouse_alert, "greenhouse"),
     SenderSpec("hello@trueup.io", parse_trueup_alert, "trueup"),
     SenderSpec("monster@notifications.monster.com", parse_monster_alert, "monster"),
+    SenderSpec("noreply@jobright.ai", parse_jobright_alert, "jobright", "jobright"),
 )
 
 # Derived lookup maps — insertion order preserved from SENDERS.

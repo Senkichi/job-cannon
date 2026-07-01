@@ -9,6 +9,7 @@ import logging
 from job_finder.parsers.glassdoor_parser import parse_glassdoor_alert
 from job_finder.parsers.greenhouse_parser import parse_greenhouse_alert
 from job_finder.parsers.indeed_parser import parse_indeed_alert, parse_indeed_match_alert
+from job_finder.parsers.jobright_parser import parse_jobright_alert
 from job_finder.parsers.linkedin_parser import parse_linkedin_alert
 from job_finder.parsers.monster_parser import parse_monster_alert
 from job_finder.parsers.trueup_parser import parse_trueup_alert
@@ -226,6 +227,44 @@ class TestTrueUpZeroYieldWarning:
         """Short body → no WARNING."""
         with caplog.at_level(logging.WARNING, logger="job_finder.parsers.trueup_parser"):
             result = parse_trueup_alert("<html></html>")
+        assert result == []
+        warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+        assert warnings == []
+
+
+# ---------------------------------------------------------------------------
+# JobRight
+# ---------------------------------------------------------------------------
+
+_JOBRIGHT_JUNK_HTML = "<html><body>" + "No jobright job links here. " * 30 + "</body></html>"
+
+# Account/marketing preamble (>500 chars) — first 200 chars mark it non-job, so
+# the zero-yield warning must be suppressed even though it yields 0 jobs.
+_JOBRIGHT_ACCOUNT = "Verify your email address to activate your JobRight account. " * 12
+
+
+class TestJobRightZeroYieldWarning:
+    def test_large_junk_html_emits_warning(self, caplog):
+        """HTML body >500 chars with no JobRight links → one WARNING naming jobright."""
+        with caplog.at_level(logging.WARNING, logger="job_finder.parsers.jobright_parser"):
+            result = parse_jobright_alert(_JOBRIGHT_JUNK_HTML)
+        assert result == []
+        warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+        assert len(warnings) == 1
+        assert "jobright" in warnings[0].message.lower()
+
+    def test_account_email_emits_no_warning(self, caplog):
+        """Account/marketing preamble must not emit a WARNING (not a parse failure)."""
+        with caplog.at_level(logging.WARNING, logger="job_finder.parsers.jobright_parser"):
+            result = parse_jobright_alert(_JOBRIGHT_ACCOUNT)
+        assert result == []
+        warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+        assert warnings == []
+
+    def test_short_body_emits_no_warning(self, caplog):
+        """Body under 500 chars must not emit a WARNING."""
+        with caplog.at_level(logging.WARNING, logger="job_finder.parsers.jobright_parser"):
+            result = parse_jobright_alert("<html></html>")
         assert result == []
         warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
         assert warnings == []

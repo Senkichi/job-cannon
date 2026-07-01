@@ -66,6 +66,7 @@ sources:
       glassdoor: noreply@glassdoor.com
       indeed: alert@indeed.com
       ziprecruiter: no-reply@ziprecruiter.com
+      jobright: noreply@jobright.ai
   serpapi:
     # Optional: SerpAPI for Google Jobs search (requires paid API key)
     enabled: false
