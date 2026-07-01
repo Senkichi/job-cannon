@@ -1,5 +1,5 @@
 """Tests for round-6 ATS platform additions (audit B2-roadmap):
-Workable, Jobvite, Paylocity, Rippling.
+Workable, Jobvite, Paylocity, Rippling, IBM.
 
 Covers:
 - URL detection: extract_ats_from_url_best returns the expected
@@ -8,10 +8,10 @@ Covers:
   jobs, False on empty / non-200 / exception.
 - Scanner: each SCANNER's fetch_postings returns expected shape from
   a stub HTTP response; posting_to_job builds the canonical job dict.
-- Dispatcher: _PLATFORM_SCANNERS dict contains all 4 new platforms,
+- Dispatcher: _PLATFORM_SCANNERS dict contains all 5 new platforms,
   pointing at the right SCANNER. The fast-path verifier dispatches
   by platform name.
-- Reconcile path: _verify_live can promote each of the 4 platforms
+- Reconcile path: _verify_live can promote each of the 5 platforms
   when given a probe that returns True.
 
 Jobvite is intentionally a stub (no public unauthenticated JSON API);
@@ -21,6 +21,8 @@ its scanner returns []. Tests reflect that contract.
 from __future__ import annotations
 
 from unittest.mock import patch
+
+import pytest
 
 from job_finder.web.ats_detection import (
     ATS_EXTRACTOR_VERSION,
@@ -232,14 +234,27 @@ class TestProbeRippling:
 
 
 class TestProbeIbm:
-    def test_ibm_200_is_hit(self):
+    def test_ibm_200_with_hits_is_hit(self):
         from job_finder.web.ats_prober import _probe_ibm
 
+        response_body = {
+            "hits": {"hits": [{"_source": {"field_text_01": 123, "title": "Engineer"}}]}
+        }
         with patch(
             "job_finder.web.ats_prober.requests.post",
-            return_value=_FakeResp(200),
+            return_value=_FakeResp(200, response_body),
         ):
             assert _probe_ibm("ibm") is True
+
+    def test_ibm_200_with_empty_hits_is_miss(self):
+        from job_finder.web.ats_prober import _probe_ibm
+
+        response_body = {"hits": {"hits": []}}
+        with patch(
+            "job_finder.web.ats_prober.requests.post",
+            return_value=_FakeResp(200, response_body),
+        ):
+            assert _probe_ibm("ibm") is False
 
     def test_ibm_404_is_miss(self):
         from job_finder.web.ats_prober import _probe_ibm
@@ -396,50 +411,131 @@ class TestRipplingScanner:
 
 
 class TestIbmScanner:
-    def test_fetch_postings_extracts_results(self):
+    def test_fetch_postings_extracts_from_real_fixture(self):
+        """Full fetch+map from real captured response."""
+        import json
+
         from job_finder.web.ats_platforms._platforms_ibm import (
             _fetch_postings,
         )
 
-        sample = {
-            "results": [
-                {
-                    "field_text_01": "114614",
-                    "title": "Senior Data Scientist",
-                    "field_keyword_05": "us",
-                    "field_keyword_08": "Data Science",
-                    "field_keyword_19": "Armonk",
-                }
-            ]
-        }
+        with open("tests/fixtures/ibm_search_api_response.json") as f:
+            fixture = json.load(f)
+
         with patch(
             "job_finder.web.ats_platforms._registry.requests.post",
-            return_value=_FakeResp(200, sample),
+            return_value=_FakeResp(200, fixture),
         ):
             postings = _fetch_postings("ibm")
-        assert len(postings) == 1
-        assert postings[0]["field_text_01"] == "114614"
+        assert len(postings) == 5
+        # First posting from fixture
+        assert postings[0]["title"] == "Quantum Hardware Design Engineer"
+        assert postings[0]["field_text_01"] == 108263
+        assert postings[0]["field_keyword_19"] == "Yorktown Heights, US"
 
-    def test_posting_to_job_builds_canonical_dict(self):
+    def test_posting_to_job_maps_all_canonical_keys(self):
+        """Full field-mapping assertion — all canonical keys emitted correctly."""
         from job_finder.web.ats_platforms._platforms_ibm import (
             _posting_to_job,
         )
 
         posting = {
-            "field_text_01": "114614",
-            "title": "Senior Data Scientist",
-            "field_keyword_05": "us",
-            "field_keyword_08": "Data Science",
-            "field_keyword_19": "Armonk",
-            "description": "Build AI models",
+            "field_text_01": 108263,
+            "title": "Quantum Hardware Design Engineer",
+            "field_keyword_05": "United States",
+            "field_keyword_08": "Infrastructure & Technology",
+            "field_keyword_19": "Yorktown Heights, US",
         }
         job = _posting_to_job(posting, "ibm")
-        assert job["title"] == "Senior Data Scientist"
+        # Assert all canonical keys are present and correctly mapped
+        assert job["title"] == "Quantum Hardware Design Engineer"
         assert job["company_source"] == "IBM"
-        assert job["location"] == "Armonk, us"
-        assert job["source_url"] == "https://careers.ibm.com/careers/JobDetail?jobId=114614"
-        assert job["source_id"] == "114614"
-        assert job["department"] == "Data Science"
+        assert job["location"] == "Yorktown Heights, US, United States"
+        assert job["source_url"] == "https://careers.ibm.com/careers/JobDetail?jobId=108263"
+        assert job["source_id"] == "108263"  # Coerced from int to str
+        assert job["department"] == "Infrastructure & Technology"
+        assert job["description"] == ""  # Not exposed in list response
+        assert job["salary_min"] is None
+        assert job["salary_max"] is None
+        assert job["comp_json"] is None
+        assert job["posted_date"] is None
+        assert job["is_remote"] is None
+        assert job["employment_type"] is None
+        assert "locations_structured" in job
+
+    def test_posting_to_job_returns_none_for_missing_job_id(self):
+        """None-guard: posting missing field_text_01 returns None."""
+        from job_finder.web.ats_platforms._platforms_ibm import (
+            _posting_to_job,
+        )
+
+        posting = {
+            "title": "Engineer",
+            "field_keyword_05": "us",
+            "field_keyword_08": "Engineering",
+            "field_keyword_19": "Armonk",
+        }
+        assert _posting_to_job(posting, "ibm") is None
+
+    def test_fetch_postings_paginates_correctly(self):
+        """Pagination: two mocked pages — full page then short page, offset advances."""
+        from job_finder.web.ats_platforms._platforms_ibm import (
+            _PAGE_SIZE,
+            _fetch_postings,
+        )
+
+        page1_hits = [
+            {"_source": {"field_text_01": i, "title": f"Job {i}"}} for i in range(_PAGE_SIZE)
+        ]
+        page2_hits = [{"_source": {"field_text_01": _PAGE_SIZE, "title": "Last Job"}}]
+        page1 = {"hits": {"hits": page1_hits}}
+        page2 = {"hits": {"hits": page2_hits}}
+
+        responses = [_FakeResp(200, page1), _FakeResp(200, page2)]
+        with patch(
+            "job_finder.web.ats_platforms._registry.requests.post",
+            side_effect=responses,
+        ):
+            postings = _fetch_postings("ibm")
+        assert len(postings) == _PAGE_SIZE + 1
+        # Verify all _source dicts were extracted
+        assert all(isinstance(p, dict) and "field_text_01" in p for p in postings)
+
+    def test_fetch_postings_raises_board_gone_on_first_page_404(self):
+        """Board-gone: first-page 404 raises BoardGoneError."""
+        from job_finder.web.ats_platforms._platforms_ibm import (
+            _fetch_postings,
+        )
+        from job_finder.web.ats_platforms._registry import BoardGoneError
+
+        with patch(
+            "job_finder.web.ats_platforms._registry.requests.post",
+            return_value=_FakeResp(404),
+        ):
+            with pytest.raises(BoardGoneError):
+                _fetch_postings("ibm")
+
+    def test_integration_via_run_platform_scan(self):
+        """Integration via run_platform_scan: exercises title_of lambda + title-gate + None-skip."""
+        import json
+
+        from job_finder.web.ats_platforms._platforms_ibm import SCANNER
+        from job_finder.web.ats_platforms._registry import run_platform_scan
+
+        with open("tests/fixtures/ibm_search_api_response.json") as f:
+            fixture = json.load(f)
+
+        with patch(
+            "job_finder.web.ats_platforms._registry.requests.post",
+            return_value=_FakeResp(200, fixture),
+        ):
+            jobs = run_platform_scan(SCANNER, "ibm", [], [])
+        # All 5 postings should be converted to jobs
+        assert len(jobs) == 5
+        # First job should have correct mapping
+        assert jobs[0]["title"] == "Quantum Hardware Design Engineer"
+        assert jobs[0]["company_source"] == "IBM"
+        assert jobs[0]["source_id"] == "108263"
 
 
 class TestJobviteScannerIsStub:
@@ -468,13 +564,8 @@ class TestDispatcherWiring:
     def test_all_round6_platforms_in_dispatcher(self):
         from job_finder.web.ats_scanner._run import _PLATFORM_SCANNERS
 
-        for platform in ("workable", "jobvite", "paylocity", "rippling"):
+        for platform in ("workable", "jobvite", "paylocity", "rippling", "ibm"):
             assert platform in _PLATFORM_SCANNERS, f"{platform} missing from _PLATFORM_SCANNERS"
-
-    def test_ibm_in_dispatcher(self):
-        from job_finder.web.ats_scanner._run import _PLATFORM_SCANNERS
-
-        assert "ibm" in _PLATFORM_SCANNERS, "ibm missing from _PLATFORM_SCANNERS"
 
     def test_dispatcher_uses_central_registry(self):
         """The scan dispatch MUST consume the single central registry, never a
@@ -500,11 +591,12 @@ class TestDispatcherWiring:
             assert platform not in NON_SCANNABLE_PLATFORMS
             assert platform in _PLATFORM_SCANNERS, f"{platform} missing from scan dispatch"
 
-    def test_round6_platforms_except_jobvite_in_fastpath_set(self):
+    def test_round6_platforms_except_jobvite_ibm_in_fastpath_set(self):
         """Workable / Paylocity / Rippling are URL-fast-path eligible.
 
-        Jobvite is intentionally excluded — see the jobvite-exclusion test
-        below and the comment on _URL_FASTPATH_PLATFORMS in _probe.py.
+        Jobvite and IBM are intentionally excluded — jobvite because it's a
+        JS-app stub (see the jobvite-exclusion test below), IBM because it's
+        single-tenant (slug is constant "ibm").
         """
         from job_finder.web.ats_scanner._probe import _URL_FASTPATH_PLATFORMS
 

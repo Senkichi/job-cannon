@@ -687,19 +687,26 @@ def _probe_ibm(slug: str) -> bool:
     body = {
         "appId": "careers",
         "scopes": ["careers2"],
-        "search": {
-            "term": {"country": "us"},
-        },
-        "pagination": {
-            "size": 1,
-            "from": 0,
-        },
+        "query": {"bool": {"must": []}},
+        "size": 1,
+        "from": 0,
+        "_source": [
+            "field_text_01",
+            "title",
+            "field_keyword_05",
+            "field_keyword_08",
+            "field_keyword_19",
+        ],
     }
     try:
         r = requests.post(
             url, json=body, headers={"Content-Type": "application/json"}, timeout=_PROBE_TIMEOUT
         )
-        return r.status_code == 200
+        if r.status_code != 200:
+            return False
+        payload = r.json()
+        hits = payload.get("hits", {}).get("hits", [])
+        return len(hits) > 0
     except Exception as e:
         logger.debug("_probe_ibm('%s') failed: %s", slug, e)
         return False

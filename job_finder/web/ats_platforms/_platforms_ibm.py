@@ -4,11 +4,12 @@ IBM exposes a bespoke, unauthenticated JSON search API::
 
     POST https://www-api.ibm.com/search/api/v2
     Content-Type: application/json
-    {"appId": "careers", "scopes": ["careers2"], "search": {"term": {"country": "us"}}}
+    {"appId": "careers", "scopes": ["careers2"], "query": {"bool": {"must": []}},
+     "size": 50, "from": 0, "_source": [...]}
 
-Response shape: ``{"results": [...]}``. Each result carries
-``field_text_01`` (jobId), ``field_keyword_05`` (country),
-``field_keyword_08`` (job category), ``field_keyword_19`` (city), and
+Response shape: Elasticsearch-style with ``{"hits": {"hits": [{"_source": {...}}]}}``.
+Each hit's ``_source`` carries ``field_text_01`` (jobId), ``field_keyword_05``
+(country), ``field_keyword_08`` (job category), ``field_keyword_19`` (city), and
 ``title``. The list endpoint omits the full job description; ``jd_full``
 is filled later by enrichment.
 
@@ -54,13 +55,16 @@ def _search_body(page: int) -> dict:
     return {
         "appId": "careers",
         "scopes": ["careers2"],
-        "search": {
-            "term": {"country": "us"},
-        },
-        "pagination": {
-            "size": _PAGE_SIZE,
-            "from": page * _PAGE_SIZE,
-        },
+        "query": {"bool": {"must": []}},
+        "size": _PAGE_SIZE,
+        "from": page * _PAGE_SIZE,
+        "_source": [
+            "field_text_01",
+            "title",
+            "field_keyword_05",
+            "field_keyword_08",
+            "field_keyword_19",
+        ],
     }
 
 
@@ -118,12 +122,16 @@ def _fetch_postings(slug: str) -> list[dict]:
             logger.warning("scan_ibm('%s') JSON parse error: %s", slug, exc)
             break
 
-        results = payload.get("results") or []
-        if not results:
+        hits = payload.get("hits", {}).get("hits", [])
+        if not hits:
             break
-        out.extend(results)
+        # Extract _source from each hit
+        for hit in hits:
+            source = hit.get("_source")
+            if source:
+                out.append(source)
 
-        if len(results) < _PAGE_SIZE:
+        if len(hits) < _PAGE_SIZE:
             break
         page += 1
 
@@ -134,6 +142,8 @@ def _posting_to_job(posting: dict, slug: str) -> dict | None:
     job_id = posting.get("field_text_01")
     if not job_id:
         return None
+    # field_text_01 is an integer in the API response; coerce to str
+    job_id = str(job_id)
 
     location = _location(posting)
 
@@ -142,13 +152,13 @@ def _posting_to_job(posting: dict, slug: str) -> dict | None:
         "company_source": "IBM",
         "location": location,
         "locations_structured": parse_locations(location),
-        # List endpoint only carries a short blurb; jd_full is filled by enrichment.
-        "description": posting.get("description", "") or "",
-        "source_url": _job_url(str(job_id)),
+        # List endpoint does not expose description; jd_full is filled by enrichment.
+        "description": "",
+        "source_url": _job_url(job_id),
         "salary_min": None,
         "salary_max": None,
         "comp_json": None,
-        "source_id": str(job_id),
+        "source_id": job_id,
         "posted_date": None,  # Not exposed in the list response
         "is_remote": None,  # Not exposed in the list response
         "employment_type": None,  # Not exposed in the list response
