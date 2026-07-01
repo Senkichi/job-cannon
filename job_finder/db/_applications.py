@@ -79,10 +79,12 @@ def get_application_by_job(conn: sqlite3.Connection, job_id: str) -> dict | None
 
 
 def resolve_application(conn: sqlite3.Connection, application_id: int, resolution: str) -> None:
-    """Set status to 'approved' or 'rejected' and resolved_at=utc_now_iso().
+    """Set status to a terminal state and resolved_at=utc_now_iso().
+
+    Valid resolutions: 'approved', 'rejected', 'submitted', 'submit_failed'.
     Raise ValueError for any other resolution.
     """
-    _VALID_RESOLUTIONS = ("approved", "rejected")
+    _VALID_RESOLUTIONS = ("approved", "rejected", "submitted", "submit_failed")
     if resolution not in _VALID_RESOLUTIONS:
         raise ValueError(
             f"Invalid resolution: {resolution!r}. Must be one of: {', '.join(_VALID_RESOLUTIONS)}."

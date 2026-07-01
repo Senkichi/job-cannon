@@ -829,23 +829,47 @@ def prepare_application(dedup_key: str):
     "/applications/<int:application_id>/approve", methods=["POST"], strict_slashes=False
 )
 def approve_application(application_id: int):
-    """Owner approves: flip the job to 'applied' (dual-write) + resolve the package."""
+    """Owner approves: attempt real submit via orchestrator, then flip to 'applied' only on success.
+
+    Closes the fraud surface where jobs were marked 'applied' with zero actual submission.
+    Now calls submit_application_for BEFORE the pipeline_status dual-write, and only
+    flips to 'applied' on a real 'submitted' outcome. On refusal/failure/not_wired,
+    resolves to 'submit_failed' and renders a failure card (pipeline_status unchanged).
+    """
+    from flask import current_app
+
+    from job_finder.web.submit_orchestrator import submit_application_for
+
     conn = get_db()
     application = get_application(conn, application_id)
     if application is None:
         return "", 404
-    update_pipeline_status(
-        conn,
-        application["job_id"],
-        "applied",
-        source="manual",
-        evidence="application package approved",
-    )
-    resolve_application(conn, application_id, "approved")
-    job = get_job(conn, application["job_id"])
-    return render_template(
-        "jobs/_application_approved.html", job=job, application=application
-    )  # 200
+
+    # Attempt real submit via the orchestrator (issue #604 spine)
+    config = current_app.config
+    submit_result = submit_application_for(conn, config, application)
+
+    # Only flip pipeline_status to 'applied' on a real 'submitted' outcome
+    if submit_result.outcome == "submitted":
+        update_pipeline_status(
+            conn,
+            application["job_id"],
+            "applied",
+            source="manual",
+            evidence="application package approved and submitted",
+        )
+        job = get_job(conn, application["job_id"])
+        return render_template(
+            "jobs/_application_approved.html", job=job, application=application
+        )  # 200
+    else:
+        # On refusal/failure/not_wired, render a failure card (pipeline_status unchanged)
+        job = get_job(conn, application["job_id"])
+        return render_template(
+            "jobs/_application_error.html",
+            job=job,
+            error_message=f"Submit failed: {submit_result.reason or submit_result.outcome}",
+        )  # 200
 
 
 @jobs_bp.route("/applications/<int:application_id>/reject", methods=["POST"], strict_slashes=False)
