@@ -202,7 +202,7 @@ def run_ats_scan(
     Returns:
         Dict with keys: companies_scanned, jobs_discovered, jobs_new,
         scored, classified_apply, classified_consider, classified_skip,
-        classified_reject, errors.
+        classified_reject, errors, degraded_sources.
     """
     # TESTING guard: skip real API calls during tests
     if config.get("TESTING"):
@@ -219,6 +219,7 @@ def run_ats_scan(
             "html_scraped": 0,
             "homepages_discovered": 0,
             "errors": [],
+            "degraded_sources": [],
         }
 
     # Extract keyword filter settings from config
@@ -258,6 +259,7 @@ def run_ats_scan(
         "html_scraped": 0,
         "homepages_discovered": 0,
         "errors": [],
+        "degraded_sources": [],
     }
     all_new_job_keys: list[str] = []
 
@@ -327,6 +329,21 @@ def run_ats_scan(
             _log_ats_scan_run(conn, summary)
     finally:
         reset_max_pages(_workday_budget_token)
+
+    # --- Post-scan detection pass (mirrors pipeline_runner.py:280-291) ---
+    # Runs after the standalone_connection block has closed, so run_detection
+    # opening its own connection cannot self-lock.
+    from job_finder.web.autoheal.health_monitor import run_detection
+
+    summary["degraded_sources"] = run_detection(db_path, config)
+
+    # Phase C / C5: attempt auto-heal for newly-degraded sources. Flag-gated
+    # (autoheal.heal_enabled, default true since D6) and fully error-isolated —
+    # a heal failure must never break the scan. Piggybacks this detection pass;
+    # no scheduler job.
+    from job_finder.web.pipeline_runner import _run_heal_pass
+
+    _run_heal_pass(db_path, config, summary["degraded_sources"])
 
     logger.info(
         "ATS scan complete: %d companies scanned, %d jobs discovered, %d new, %d scored "
