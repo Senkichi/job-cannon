@@ -8,11 +8,13 @@ from __future__ import annotations
 import sqlite3
 
 from scripts.marquee_audit import (
+    audit_company,
     extract_req_id_from_url,
     gt_name_to_company,
     is_target_role,
     match_role,
     normalize_title,
+    render_report,
 )
 
 
@@ -96,6 +98,24 @@ def test_match_role_by_req_id():
     assert result.our_title == "Data Scientist"
 
 
+def test_match_role_consumed_tracking():
+    """Role matching tracks consumed jobs to prevent double-counting (regression for Finding 4)."""
+    gt_role1 = {"title": "Data Scientist", "req_id": "JR1", "url": None}
+    gt_role2 = {"title": "Data Analyst", "req_id": "JR2", "url": None}
+    our_jobs = [
+        {"title": "Data Scientist", "source_id": "JR1", "source_urls_raw": "[]"},
+    ]
+
+    consumed = set()
+    result1 = match_role(gt_role1, our_jobs, consumed)
+    assert result1.matched is True
+    assert len(consumed) == 1
+
+    # Second GT role should not match the already-consumed job
+    result2 = match_role(gt_role2, our_jobs, consumed)
+    assert result2.matched is False
+
+
 def test_match_role_by_req_id_in_path():
     """Role matching extracts req_id from source_id path."""
     gt_role = {
@@ -136,6 +156,27 @@ def test_match_role_by_url():
     assert result.match_method == "url"
 
 
+def test_match_role_by_url_req_id_extraction():
+    """Role matching extracts req_id from job URLs and compares to GT req_id."""
+    gt_role = {
+        "title": "Senior Data Scientist",
+        "req_id": "JR2019886",
+        "url": "https://nvidia.wd5.myworkdayjobs.com/job/US-CA-Santa-Clara/Senior-Data-Scientist_JR2019886",
+    }
+    # Job URL has location segment, GT URL doesn't - but req_id should match
+    our_jobs = [
+        {
+            "title": "Senior Data Scientist",
+            "source_id": None,
+            "source_urls_raw": '["https://nvidia.wd5.myworkdayjobs.com/job/Senior-Data-Scientist_JR2019886"]',
+        },
+    ]
+
+    result = match_role(gt_role, our_jobs)
+    assert result.matched is True
+    assert result.match_method == "url"
+
+
 def test_match_role_by_title_fuzzy():
     """Role matching falls back to fuzzy title match when req_id/URL fail."""
     gt_role = {"title": "Senior Data Scientist", "req_id": None, "url": None}
@@ -160,8 +201,40 @@ def test_match_role_no_match():
     assert result.match_method == "none"
 
 
-def test_gt_name_to_company_intel_special_case():
-    """Intel mapping avoids matching Intelsio."""
+def test_match_role_intern_disqualifier():
+    """Role matching disqualifies intern vs non-intern mismatches (regression for Finding 4)."""
+    gt_role = {"title": "Senior Data Scientist, Ads Ranking", "req_id": None, "url": None}
+    our_jobs = [
+        {
+            "title": "Data Scientist, Ads Ranking - Intern",
+            "source_id": None,
+            "source_urls_raw": "[]",
+        },
+    ]
+
+    result = match_role(gt_role, our_jobs)
+    assert result.matched is False  # Intern should not match non-intern GT role
+
+
+def test_match_role_fuzzy_threshold():
+    """Role matching uses fuzzy threshold instead of substring containment (regression for Finding 4)."""
+    gt_role = {"title": "Data Scientist", "req_id": None, "url": None}
+    our_jobs = [
+        {
+            "title": "Senior Data Scientist, Machine Learning, Ads Ranking",
+            "source_id": None,
+            "source_urls_raw": "[]",
+        },
+    ]
+
+    result = match_role(gt_role, our_jobs)
+    # Should match via fuzzy threshold (token_set_ratio >= 70)
+    assert result.matched is True
+    assert result.match_method == "title_fuzzy"
+
+
+def test_gt_name_to_company_exact_match():
+    """Company mapping prefers exact match."""
     conn = sqlite3.connect(":memory:")
     conn.row_factory = sqlite3.Row
     conn.execute("CREATE TABLE companies (id INTEGER PRIMARY KEY, name_raw TEXT)")
@@ -171,7 +244,25 @@ def test_gt_name_to_company_intel_special_case():
 
     result = gt_name_to_company(conn, "Intel")
     assert len(result.company_ids) == 1
-    assert result.note == "exact 'Intel' only (avoid Intelsio)"
+    assert result.note == "exact match on 'Intel'"
+
+
+def test_gt_name_to_company_ambiguous_prefix():
+    """Company mapping flags ambiguity when multiple companies share a prefix (regression for Finding 3)."""
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    conn.execute("CREATE TABLE companies (id INTEGER PRIMARY KEY, name_raw TEXT)")
+    # Use a GT name that doesn't have an exact match but has prefix matches
+    conn.execute("INSERT INTO companies (name_raw) VALUES ('Salesforce Inc')")
+    conn.execute("INSERT INTO companies (name_raw) VALUES ('SalesForce-ad')")
+    conn.commit()
+
+    result = gt_name_to_company(conn, "Salesforce")
+    # Should flag ambiguity rather than silently pooling
+    assert len(result.company_ids) == 2
+    assert "AMBIGUOUS" in result.note
+    assert "Salesforce Inc" in result.note
+    assert "SalesForce-ad" in result.note
 
 
 def test_gt_name_to_company_not_found():
@@ -184,3 +275,68 @@ def test_gt_name_to_company_not_found():
     result = gt_name_to_company(conn, "NonExistent Company")
     assert len(result.company_ids) == 0
     assert result.note == "NOT in companies"
+
+
+def test_audit_company_verdict_branches():
+    """audit_company produces correct verdicts for different scenarios (regression for Finding 6)."""
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    conn.execute(
+        "CREATE TABLE companies (id INTEGER PRIMARY KEY, name_raw TEXT, ats_platform TEXT)"
+    )
+    conn.execute(
+        "CREATE TABLE jobs (id INTEGER PRIMARY KEY, title TEXT, source_id TEXT, source_urls_raw TEXT, company_id INTEGER)"
+    )
+    conn.execute("INSERT INTO companies (name_raw, ats_platform) VALUES ('TestCorp', 'workday')")
+    conn.execute(
+        "INSERT INTO jobs (title, source_id, source_urls_raw, company_id) VALUES ('Data Scientist', 'JR1', '[]', 1)"
+    )
+    conn.execute(
+        "INSERT INTO jobs (title, source_id, source_urls_raw, company_id) VALUES ('Software Engineer', 'JR2', '[]', 1)"
+    )
+    conn.commit()
+
+    gt_entry = {
+        "company": "TestCorp",
+        "role_count": 10,
+        "roles": [
+            {"title": "Data Scientist", "req_id": "JR1", "url": None},
+        ],
+        "confidence": "high",
+    }
+
+    result = audit_company(conn, gt_entry)
+    assert result.company == "TestCorp"
+    assert result.gt_role_count == 10
+    assert result.our_target_count == 1
+    assert result.sample_matched == 1
+    assert result.platform == "workday"
+    assert "fully covered" in result.verdict
+
+
+def test_render_report():
+    """render_report produces human-readable output (regression for Finding 6)."""
+    from scripts.marquee_audit import AuditResult
+
+    results = [
+        AuditResult(
+            company="TestCorp",
+            gt_role_count=10,
+            our_target_count=5,
+            sample_size=2,
+            sample_matched=1,
+            platform="workday",
+            verdict="partial: 1 sample role not found",
+            confidence="high",
+            match_methods={"req_id": 1, "none": 1},
+            missed_details=["Data Analyst"],
+        )
+    ]
+
+    report = render_report(results)
+    assert "TestCorp" in report
+    assert "10" in report
+    assert "5" in report
+    assert "1/2" in report
+    assert "workday" in report
+    assert "Data Analyst" in report

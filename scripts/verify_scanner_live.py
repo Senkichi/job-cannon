@@ -1,23 +1,24 @@
 #!/usr/bin/env python3
 """Live scanner verification harness for ATS platform scanners.
 
-Runs a live single-company scan, then diffs captured jobs against a fresh
-ground-truth fetch for that company. Exits non-zero if a live analyst/DS role
+Runs a live single-company scan, then diffs captured jobs against an independent
+ground-truth file for that company. Exits non-zero if a live analyst/DS role
 is missed. This is the adversarial harness referenced by every scanner issue's
 DoD — a single reproducible command instead of prose.
 
 Usage:
-    uv run python scripts/verify_scanner_live.py <company_id>
+    uv run python scripts/verify_scanner_live.py <company_id> --ground-truth <path>
 
 The script:
 1. Fetches the company's ATS platform and slug from the DB
 2. Runs the platform scanner for that company
-3. Fetches fresh ground-truth from the live ATS board
+3. Loads ground-truth from the provided JSON file
 4. Diffs captured jobs against ground-truth
 5. Reports coverage and exits with appropriate code (0=covered, 1=gap found)
 
 This is an adversarial test: it deliberately checks that the scanner is not
-missing live roles that should be captured.
+missing live roles that should be captured. The --ground-truth argument is
+required to ensure independent verification (self-comparison would be tautological).
 """
 
 from __future__ import annotations
@@ -210,12 +211,15 @@ def verify_coverage(
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Live scanner verification harness")
+    parser = argparse.ArgumentParser(
+        description="Live scanner verification harness. Requires --ground-truth to provide independent ground-truth data for adversarial verification."
+    )
     parser.add_argument("company_id", type=int, help="Company ID from the database")
     parser.add_argument(
         "--ground-truth",
         type=Path,
-        help="Optional path to ground-truth JSON file (if not provided, uses scanner output as ground-truth)",
+        required=True,
+        help="Path to ground-truth JSON file with independent capture of live roles",
     )
     args = parser.parse_args()
 
@@ -250,23 +254,13 @@ def main() -> int:
         print(f"Target roles (analyst/DS): {len(captured_targets)}")
         print()
 
-        # If ground-truth file provided, use it; otherwise use captured as ground-truth
-        # (for self-verification mode)
-        if args.ground_truth:
-            if not args.ground_truth.exists():
-                print(f"Error: Ground-truth file not found: {args.ground_truth}")
-                return 1
-            gt_data = json.loads(args.ground_truth.read_text(encoding="utf-8"))
-            ground_truth = gt_data.get("roles", [])
-            print(f"Ground-truth roles: {len(ground_truth)}")
-        else:
-            # Self-verification mode: use captured as ground-truth
-            # This is useful for testing that the scanner itself is working
-            ground_truth = captured_targets
-            print(
-                f"Self-verification mode: using captured {len(ground_truth)} jobs as ground-truth"
-            )
-
+        # Load ground-truth from file (required for adversarial verification)
+        if not args.ground_truth.exists():
+            print(f"Error: Ground-truth file not found: {args.ground_truth}")
+            return 1
+        gt_data = json.loads(args.ground_truth.read_text(encoding="utf-8"))
+        ground_truth = gt_data.get("roles", [])
+        print(f"Ground-truth roles: {len(ground_truth)}")
         print()
 
         # Verify coverage
@@ -287,10 +281,10 @@ def main() -> int:
 
         # Exit code: 0 if all matched, 1 if any missed
         if matched == total_gt:
-            print("✓ All ground-truth roles matched")
+            print("[OK] All ground-truth roles matched")
             return 0
         else:
-            print(f"✗ {total_gt - matched} ground-truth role(s) missed")
+            print(f"[MISS] {total_gt - matched} ground-truth role(s) missed")
             return 1
 
     finally:

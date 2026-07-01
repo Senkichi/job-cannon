@@ -24,6 +24,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from thefuzz import fuzz
+
 # Ensure the repo root is importable
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _REPO_ROOT not in sys.path:
@@ -123,57 +125,90 @@ def extract_req_id_from_url(url: str) -> str | None:
 def gt_name_to_company(conn: sqlite3.Connection, gt_name: str) -> CompanyMatch:
     """Map a GT company name to our companies rows.
 
-    Returns (company_ids, note). Uses robust name mapping with special cases
-    for known collision risks (e.g., Intel vs Intelsio).
+    Returns (company_ids, note). Prefers exact match; if multiple candidates
+    exist, returns all with an ambiguity warning rather than silently pooling.
     """
     # Strip parentheticals / 'Corporation'
     base = re.sub(r"\(.*?\)", "", gt_name).replace("Corporation", "").strip()
 
-    # Special case: Intel must not match 'Intelsio'
-    if base.lower() == "intel":
-        rows = conn.execute(
-            "SELECT id FROM companies WHERE name_raw='Intel' OR name_raw LIKE 'Intel %' OR name_raw LIKE 'Intel,%'"
-        ).fetchall()
+    # Try exact match first
+    rows = conn.execute(
+        "SELECT id, name_raw FROM companies WHERE name_raw=?",
+        (base,),
+    ).fetchall()
+    if rows:
         ids = [r["id"] for r in rows]
         return CompanyMatch(
             company_ids=ids,
-            note="exact 'Intel' only (avoid Intelsio)" if ids else "NOT in companies",
+            note=f"exact match on '{base}'",
         )
 
-    # General case: exact match or prefix match
+    # If no exact match, try prefix match but check for collisions
     rows = conn.execute(
-        "SELECT id FROM companies WHERE name_raw=? OR name_raw LIKE ? ORDER BY (name_raw=?) DESC, LENGTH(name_raw) LIMIT 3",
-        (base, f"{base}%", base),
+        "SELECT id, name_raw FROM companies WHERE name_raw LIKE ? ORDER BY LENGTH(name_raw) LIMIT 5",
+        (f"{base}%",),
     ).fetchall()
-    ids = [r["id"] for r in rows]
+    if rows:
+        ids = [r["id"] for r in rows]
+        names = [r["name_raw"] for r in rows]
+        if len(rows) > 1:
+            # Ambiguity: multiple companies share the prefix
+            note = f"AMBIGUOUS: {len(rows)} candidates match prefix '{base}': {', '.join(names)}"
+        else:
+            note = f"prefix match on '{base}' (matched '{names[0]}')"
+        return CompanyMatch(
+            company_ids=ids,
+            note=note,
+        )
+
     return CompanyMatch(
-        company_ids=ids,
-        note="" if ids else "NOT in companies",
+        company_ids=[],
+        note="NOT in companies",
     )
 
 
 def match_role(
     gt_role: dict[str, Any],
     our_jobs: list[dict[str, Any]],
+    consumed: set[int] | None = None,
 ) -> RoleMatch:
     """Match a single GT role against our board.
 
     Matching priority:
     1. req_id match (if both sides have it)
     2. URL match (if both sides have it)
-    3. Fuzzy title match (normalized, seniority-stripped)
+    3. Fuzzy title match (normalized, seniority-stripped, with threshold)
+
+    Args:
+        gt_role: Ground-truth role dict
+        our_jobs: List of our job dicts
+        consumed: Set of job indices already matched (to prevent double-counting)
+
+    Returns:
+        RoleMatch with match status and method
     """
+    if consumed is None:
+        consumed = set()
+
     gt_title = gt_role.get("title", "")
     gt_req_id = gt_role.get("req_id", "")
     gt_url = gt_role.get("url", "")
 
+    # Employment-type disqualifiers (hard mismatches)
+    gt_lower = gt_title.lower()
+    gt_is_intern = "intern" in gt_lower
+    gt_is_contract = "contract" in gt_lower
+
     # Try req_id match first
     if gt_req_id:
-        for job in our_jobs:
+        for idx, job in enumerate(our_jobs):
+            if idx in consumed:
+                continue
             job_source_id = job.get("source_id", "")
             if job_source_id:
                 # Direct match
                 if job_source_id == gt_req_id:
+                    consumed.add(idx)
                     return RoleMatch(
                         matched=True,
                         match_method="req_id",
@@ -182,6 +217,7 @@ def match_role(
                 # Extract req_id from source_id (e.g., /job/.../JR2019886)
                 job_req_from_source = extract_req_id_from_url(job_source_id)
                 if job_req_from_source and job_req_from_source == gt_req_id:
+                    consumed.add(idx)
                     return RoleMatch(
                         matched=True,
                         match_method="req_id",
@@ -191,21 +227,37 @@ def match_role(
     # Try URL match
     if gt_url:
         gt_req_from_url = extract_req_id_from_url(gt_url)
-        for job in our_jobs:
+        for idx, job in enumerate(our_jobs):
+            if idx in consumed:
+                continue
             job_urls_raw = job.get("source_urls_raw", "")
             if job_urls_raw:
                 try:
                     job_urls = json.loads(job_urls_raw)
+                    # Direct URL match
                     if gt_url in job_urls:
+                        consumed.add(idx)
                         return RoleMatch(
                             matched=True,
                             match_method="url",
                             our_title=job.get("title"),
                         )
-                    # Also try req_id extracted from URL
+                    # Extract req_id from each job URL and compare to GT req_id
+                    if gt_req_from_url:
+                        for job_url in job_urls:
+                            job_req_from_url = extract_req_id_from_url(job_url)
+                            if job_req_from_url and job_req_from_url == gt_req_from_url:
+                                consumed.add(idx)
+                                return RoleMatch(
+                                    matched=True,
+                                    match_method="url",
+                                    our_title=job.get("title"),
+                                )
+                    # Also try req_id extracted from URL against source_id
                     if gt_req_from_url:
                         job_source_id = job.get("source_id", "")
                         if job_source_id and job_source_id == gt_req_from_url:
+                            consumed.add(idx)
                             return RoleMatch(
                                 matched=True,
                                 match_method="url",
@@ -217,19 +269,37 @@ def match_role(
     # Fallback to fuzzy title match
     gt_norm = normalize_title(gt_title)
     if gt_norm and len(gt_norm) > 3:  # Avoid matching on very short titles
-        for job in our_jobs:
+        for idx, job in enumerate(our_jobs):
+            if idx in consumed:
+                continue
             job_title = job.get("title", "")
+            job_lower = job_title.lower()
+
+            # Hard disqualifier: employment-type mismatch
+            if gt_is_intern and "intern" not in job_lower:
+                continue
+            if not gt_is_intern and "intern" in job_lower:
+                continue
+            if gt_is_contract and "contract" not in job_lower:
+                continue
+            if not gt_is_contract and "contract" in job_lower:
+                continue
+
             job_norm = normalize_title(job_title)
             if job_norm:
                 # Exact match
                 if gt_norm == job_norm:
+                    consumed.add(idx)
                     return RoleMatch(
                         matched=True,
                         match_method="title_fuzzy",
                         our_title=job_title,
                     )
-                # Substring match for longer titles (avoid false positives on short)
-                if len(gt_norm) > 8 and (gt_norm in job_norm or job_norm in gt_norm):
+                # Fuzzy match with threshold (token ratio similarity)
+                # Use thefuzz for calibrated similarity
+                similarity = fuzz.token_set_ratio(gt_norm, job_norm)
+                if similarity >= 70:  # 70% threshold for fuzzy match
+                    consumed.add(idx)
                     return RoleMatch(
                         matched=True,
                         match_method="title_fuzzy",
@@ -292,9 +362,10 @@ def audit_company(
     sample_matched = 0
     match_methods: dict[str, int] = {}
     missed_details = []
+    consumed: set[int] = set()  # Track which jobs have been matched
 
     for role in gt_roles:
-        result = match_role(role, our_targets)
+        result = match_role(role, our_targets, consumed)
         if result.matched:
             sample_matched += 1
         else:
