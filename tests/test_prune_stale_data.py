@@ -80,21 +80,32 @@ def test_prune_stale_data_deletes_imap_rows(db_conn):
 
 
 def test_prune_stale_data_respects_ttl(db_conn):
-    """Rows within TTL are preserved regardless of sender."""
+    """Rows within TTL are preserved regardless of sender.
+
+    The "past TTL" cases use a small extra margin (seconds) beyond the exact
+    boundary. The seed timestamp here and the cutoff computed inside
+    ``_prune_stale_data`` (via SQLite's own ``datetime('now', ...)``) are two
+    independently-evaluated "now" instants, each truncated to whole-second
+    resolution. Without a margin, a row seeded at exactly ``ttl_days`` ago can
+    land in the same whole second as the cutoff and survive the strict ``<``
+    comparison, making the assertion flaky. A several-second margin makes the
+    outcome deterministic regardless of how fast the test executes.
+    """
     lookback_days = 7
     ttl_days = max(lookback_days * 2, 14)  # 14 days
+    margin = timedelta(seconds=5)
 
     # Insert rows at various ages
     now = datetime.now()
     ages = [
-        (ttl_days - 1, "within_ttl_imap", "imap"),  # Just within TTL
-        (ttl_days, "at_ttl_imap", "imap"),  # At TTL boundary (deleted by < condition)
-        (ttl_days + 1, "just_over_ttl_imap", "imap"),  # Just over TTL
-        (ttl_days + 10, "well_over_ttl_gmail", "gmail"),  # Well over TTL
+        (timedelta(days=ttl_days - 1), "within_ttl_imap", "imap"),  # within TTL
+        (timedelta(days=ttl_days) + margin, "past_ttl_imap", "imap"),  # just past TTL
+        (timedelta(days=ttl_days + 1), "just_over_ttl_imap", "imap"),  # well past TTL
+        (timedelta(days=ttl_days + 10), "well_over_ttl_gmail", "gmail"),  # well past TTL
     ]
 
-    for days_ago, msg_id, sender in ages:
-        date = (now - timedelta(days=days_ago)).strftime("%Y-%m-%d %H:%M:%S")
+    for age, msg_id, sender in ages:
+        date = (now - age).strftime("%Y-%m-%d %H:%M:%S")
         db_conn.execute(
             "INSERT INTO email_parse_log (message_id, processed_at, sender) VALUES (?, ?, ?)",
             (msg_id, date, sender),
