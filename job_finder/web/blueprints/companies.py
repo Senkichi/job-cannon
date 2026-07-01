@@ -128,8 +128,8 @@ def index():
 
     # Suggested companies (WP6): feed-frequent companies not tracked yet.
     # Cold-start fallback (Issue #660): pass profile for cold-start ranking.
-    from job_finder.web.company_suggestions import get_suggested_companies
     from job_finder.web import user_data_dirs
+    from job_finder.web.company_suggestions import get_suggested_companies
 
     profile = None
     try:

@@ -55,11 +55,14 @@ def get_suggested_companies(
             tracked.add(row[1])
 
     # Check if we have owner history (any apply/consider classifications)
-    has_history = conn.execute(
-        """SELECT 1 FROM jobs
+    has_history = (
+        conn.execute(
+            """SELECT 1 FROM jobs
            WHERE classification IN ('apply', 'consider')
            LIMIT 1"""
-    ).fetchone() is not None
+        ).fetchone()
+        is not None
+    )
 
     if has_history:
         # Standard ranking: good_cnt DESC, job_cnt DESC

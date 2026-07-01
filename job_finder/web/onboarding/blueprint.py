@@ -911,7 +911,9 @@ def done():
                             target_companies = cfg.get("profile", {}).get("target_companies", [])
                             if not target_companies:
                                 # Load experience profile for cold-start ranking
-                                profile_path = user_data_dirs.user_data_root() / "experience_profile.json"
+                                profile_path = (
+                                    user_data_dirs.user_data_root() / "experience_profile.json"
+                                )
                                 try:
                                     with open(profile_path, encoding="utf-8") as f:
                                         profile = json.load(f)
