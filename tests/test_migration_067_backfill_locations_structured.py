@@ -75,6 +75,7 @@ class TestMigration067Behavior:
         # (PRAGMA user_version=67), so by default it won't re-fire.
         # Force a re-run by manually rolling user_version back to 66.
         with closing(sqlite3.connect(db_path)) as conn:
+            conn.execute("DELETE FROM schema_migrations WHERE version > 66")
             conn.execute("PRAGMA user_version = 66")
             conn.commit()
         run_migrations(db_path)
@@ -127,6 +128,7 @@ class TestMigration067Behavior:
                     "2026-05-27",
                 ),
             )
+            conn.execute("DELETE FROM schema_migrations WHERE version > 66")
             conn.execute("PRAGMA user_version = 66")
             conn.commit()
         run_migrations(db_path)
@@ -228,6 +230,7 @@ class TestMigration067Behavior:
                     "2026-05-27",
                 ),
             )
+            conn.execute("DELETE FROM schema_migrations WHERE version > 66")
             conn.execute("PRAGMA user_version = 66")
             conn.commit()
         run_migrations(db_path)
@@ -238,6 +241,7 @@ class TestMigration067Behavior:
                 "FROM jobs WHERE dedup_key = ?",
                 ("k4",),
             ).fetchone()
+            conn.execute("DELETE FROM schema_migrations WHERE version > 66")
             conn.execute("PRAGMA user_version = 66")
             conn.commit()
         run_migrations(db_path)

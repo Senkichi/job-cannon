@@ -108,8 +108,8 @@ class TestMigration066Behavior:
           - structured cols populated from parser output (m067 invariant)
         """
         run_migrations(tmp_db_path)
-        # Reset state to simulate pre-m066: drop the new columns and roll
-        # version back so re-running re-applies m066 and m067.
+        # Reset state to simulate pre-m066: drop the new columns and forget
+        # migrations above 65 in the ledger so re-running re-applies m066 and m067.
         with closing(sqlite3.connect(tmp_db_path)) as conn:
             conn.execute("ALTER TABLE jobs DROP COLUMN locations_structured")
             conn.execute("ALTER TABLE jobs DROP COLUMN workplace_type")
@@ -120,6 +120,7 @@ class TestMigration066Behavior:
                 "VALUES ('legacy-1', 'SWE', 'Acme', 'San Francisco, CA', "
                 "'San Francisco, CA', '2026-05-27T00:00:00', '2026-05-27T00:00:00')"
             )
+            conn.execute("DELETE FROM schema_migrations WHERE version > 65")
             conn.execute("PRAGMA user_version = 65")
             conn.commit()
 

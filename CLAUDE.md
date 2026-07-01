@@ -10,7 +10,7 @@ Job Cannon is a personal job search command center. Flask web app (localhost:500
 
 - **Backend**: Python 3.13, Flask 3.1, Jinja2 + jinja2-fragments
 - **Frontend**: HTMX 2.x, Tailwind CSS (CDN), SortableJS, vanilla JS only
-- **Database**: SQLite with WAL mode, raw SQL (no ORM), schema migrations via `pragma user_version`
+- **Database**: SQLite with WAL mode, raw SQL (no ORM), schema migrations via a `schema_migrations` applied-set ledger (`pragma user_version` kept only as a best-effort cache)
 - **Background**: APScheduler 3.11 (pinned <4.0 — 4.x has breaking async API)
 - **AI**: Multi-provider cascade via `job_finder.web.model_provider.call_model()`. Production primary is Ollama (qwen2.5:14b); cascade falls through Groq, Cerebras, Gemini before reaching the Anthropic CLI fallback ($0 via Claude.ai subscription). The Anthropic SDK client is constructed as an availability gate (no-key clients are skipped), but inference itself dispatches through `claude -p` CLI subprocesses — see `claude_client.py` module docstring.
 - **APIs**: Gmail API v1 (OAuth 2.0, read-only); SerpAPI / Thordata / DataForSEO / portal-search aggregator (all optional)
@@ -88,6 +88,7 @@ tests/
 
 **Database**:
 - Migrations stored as list of discrete SQL strings (not semicolon-delimited)
+- "Applied" is set membership in the `schema_migrations` ledger — NOT `user_version > N`. A migration merged in below the current max still runs (no silent skip). Create new migrations with `python scripts/new_migration.py "<slug>"` (mints a collision-free version — never hand-pick a number). Legacy DBs backfill the ledger from `user_version` once on first run.
 - `CREATE TABLE IF NOT EXISTS` for idempotent migration on both empty and populated DBs
 - Stale detector creates own sqlite3 connection (thread-safe for APScheduler, not Flask g.db)
 - sort_by validated against Python allowlist before SQL interpolation (no parameterized column names in SQLite)
