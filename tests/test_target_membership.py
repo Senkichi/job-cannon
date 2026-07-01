@@ -6,7 +6,7 @@ import sqlite3
 import pytest
 
 from job_finder.config import get_fit_floor
-from job_finder.constants import CLASSIFICATIONS, SUB_SCORE_KEYS
+from job_finder.constants import SUB_SCORE_KEYS
 from job_finder.db._dashboard_queries import get_target_set_size
 from job_finder.db._queries import is_target_member, target_membership_sql
 
@@ -29,7 +29,7 @@ class TestTargetMembershipSQLPythonParity:
 
     def test_all_4s_consider_is_member(self, in_memory_db):
         """All-4s consider job (mean 4.0 >= 3.5) is a member."""
-        sub_scores = {key: 4 for key in SUB_SCORE_KEYS}
+        sub_scores = dict.fromkeys(SUB_SCORE_KEYS, 4)
         classification = "consider"
         fit_floor = 3.5
 
@@ -43,15 +43,13 @@ class TestTargetMembershipSQLPythonParity:
             ("job1", json.dumps(sub_scores), classification),
         )
         where_clause = target_membership_sql(fit_floor)
-        row = in_memory_db.execute(
-            f"SELECT COUNT(*) FROM jobs WHERE {where_clause}"
-        ).fetchone()
+        row = in_memory_db.execute(f"SELECT COUNT(*) FROM jobs WHERE {where_clause}").fetchone()
         sql_verdict = row[0] == 1
         assert sql_verdict is True
 
     def test_all_3s_is_non_member(self, in_memory_db):
         """All-3s job (mean 3.0 < 3.5) is not a member."""
-        sub_scores = {key: 3 for key in SUB_SCORE_KEYS}
+        sub_scores = dict.fromkeys(SUB_SCORE_KEYS, 3)
         classification = "consider"
         fit_floor = 3.5
 
@@ -63,9 +61,7 @@ class TestTargetMembershipSQLPythonParity:
             ("job1", json.dumps(sub_scores), classification),
         )
         where_clause = target_membership_sql(fit_floor)
-        row = in_memory_db.execute(
-            f"SELECT COUNT(*) FROM jobs WHERE {where_clause}"
-        ).fetchone()
+        row = in_memory_db.execute(f"SELECT COUNT(*) FROM jobs WHERE {where_clause}").fetchone()
         sql_verdict = row[0] == 1
         assert sql_verdict is False
 
@@ -90,15 +86,13 @@ class TestTargetMembershipSQLPythonParity:
             ("job1", json.dumps(sub_scores), classification),
         )
         where_clause = target_membership_sql(fit_floor)
-        row = in_memory_db.execute(
-            f"SELECT COUNT(*) FROM jobs WHERE {where_clause}"
-        ).fetchone()
+        row = in_memory_db.execute(f"SELECT COUNT(*) FROM jobs WHERE {where_clause}").fetchone()
         sql_verdict = row[0] == 1
         assert sql_verdict is True
 
     def test_mean_3_6_reject_is_non_member(self, in_memory_db):
         """Mean-3.6 reject is not a member (hard-negative exclusion)."""
-        sub_scores = {key: 3.6 for key in SUB_SCORE_KEYS}
+        sub_scores = dict.fromkeys(SUB_SCORE_KEYS, 3.6)
         classification = "reject"
         fit_floor = 3.5
 
@@ -110,9 +104,7 @@ class TestTargetMembershipSQLPythonParity:
             ("job1", json.dumps(sub_scores), classification),
         )
         where_clause = target_membership_sql(fit_floor)
-        row = in_memory_db.execute(
-            f"SELECT COUNT(*) FROM jobs WHERE {where_clause}"
-        ).fetchone()
+        row = in_memory_db.execute(f"SELECT COUNT(*) FROM jobs WHERE {where_clause}").fetchone()
         sql_verdict = row[0] == 1
         assert sql_verdict is False
 
@@ -129,9 +121,7 @@ class TestTargetMembershipSQLPythonParity:
             ("job1", None, classification),
         )
         where_clause = target_membership_sql(fit_floor)
-        row = in_memory_db.execute(
-            f"SELECT COUNT(*) FROM jobs WHERE {where_clause}"
-        ).fetchone()
+        row = in_memory_db.execute(f"SELECT COUNT(*) FROM jobs WHERE {where_clause}").fetchone()
         sql_verdict = row[0] == 1
         assert sql_verdict is False
 
@@ -149,9 +139,7 @@ class TestTargetMembershipSQLPythonParity:
             ("job1", json.dumps(sub_scores), classification),
         )
         where_clause = target_membership_sql(fit_floor)
-        row = in_memory_db.execute(
-            f"SELECT COUNT(*) FROM jobs WHERE {where_clause}"
-        ).fetchone()
+        row = in_memory_db.execute(f"SELECT COUNT(*) FROM jobs WHERE {where_clause}").fetchone()
         sql_verdict = row[0] == 1
         assert sql_verdict is False
 
@@ -161,7 +149,7 @@ class TestBoundaryConditions:
 
     def test_exact_fit_floor_is_member(self):
         """Mean exactly == fit_floor (3.5) is a member (>=)."""
-        sub_scores = {key: 3.5 for key in SUB_SCORE_KEYS}
+        sub_scores = dict.fromkeys(SUB_SCORE_KEYS, 3.5)
         classification = "consider"
         fit_floor = 3.5
 
@@ -170,7 +158,7 @@ class TestBoundaryConditions:
 
     def test_just_below_fit_floor_is_non_member(self):
         """Mean just below fit_floor (3.49) is not a member."""
-        sub_scores = {key: 3.49 for key in SUB_SCORE_KEYS}
+        sub_scores = dict.fromkeys(SUB_SCORE_KEYS, 3.49)
         classification = "consider"
         fit_floor = 3.5
 
@@ -215,31 +203,31 @@ class TestTargetSetSize:
         # Member: all-4s consider
         conn.execute(
             "INSERT INTO jobs VALUES (?, ?, ?)",
-            ("member1", json.dumps({k: 4 for k in SUB_SCORE_KEYS}), "consider"),
+            ("member1", json.dumps(dict.fromkeys(SUB_SCORE_KEYS, 4)), "consider"),
         )
 
         # Member: mean-3.6 apply
         conn.execute(
             "INSERT INTO jobs VALUES (?, ?, ?)",
-            ("member2", json.dumps({k: 3.6 for k in SUB_SCORE_KEYS}), "apply"),
+            ("member2", json.dumps(dict.fromkeys(SUB_SCORE_KEYS, 3.6)), "apply"),
         )
 
         # Non-member: all-3s (mean 3.0 < 3.5)
         conn.execute(
             "INSERT INTO jobs VALUES (?, ?, ?)",
-            ("nonmember1", json.dumps({k: 3 for k in SUB_SCORE_KEYS}), "consider"),
+            ("nonmember1", json.dumps(dict.fromkeys(SUB_SCORE_KEYS, 3)), "consider"),
         )
 
         # Non-member: reject (hard-negative)
         conn.execute(
             "INSERT INTO jobs VALUES (?, ?, ?)",
-            ("nonmember2", json.dumps({k: 4 for k in SUB_SCORE_KEYS}), "reject"),
+            ("nonmember2", json.dumps(dict.fromkeys(SUB_SCORE_KEYS, 4)), "reject"),
         )
 
         # Non-member: low_signal (hard-negative)
         conn.execute(
             "INSERT INTO jobs VALUES (?, ?, ?)",
-            ("nonmember3", json.dumps({k: 4 for k in SUB_SCORE_KEYS}), "low_signal"),
+            ("nonmember3", json.dumps(dict.fromkeys(SUB_SCORE_KEYS, 4)), "low_signal"),
         )
 
         # Non-member: NULL sub_scores
@@ -273,8 +261,8 @@ class TestRule9SingleSource:
         assert hasattr(queries_module, "CLASSIFICATIONS")
 
         # Verify they're the same objects as in constants.py
-        from job_finder.constants import SUB_SCORE_KEYS as CONST_SUB_SCORE_KEYS
         from job_finder.constants import CLASSIFICATIONS as CONST_CLASSIFICATIONS
+        from job_finder.constants import SUB_SCORE_KEYS as CONST_SUB_SCORE_KEYS
 
         assert queries_module.SUB_SCORE_KEYS is CONST_SUB_SCORE_KEYS
         assert queries_module.CLASSIFICATIONS is CONST_CLASSIFICATIONS
@@ -282,6 +270,7 @@ class TestRule9SingleSource:
     def test_is_target_member_uses_sub_score_keys(self):
         """is_target_member iterates over SUB_SCORE_KEYS, not a hardcoded list."""
         import inspect
+
         import job_finder.db._queries as queries_module
 
         source = inspect.getsource(queries_module.is_target_member)
@@ -293,6 +282,7 @@ class TestRule9SingleSource:
     def test_is_target_member_uses_classifications(self):
         """is_target_member checks against ('reject', 'low_signal'), not re-listed."""
         import inspect
+
         import job_finder.db._queries as queries_module
 
         source = inspect.getsource(queries_module.is_target_member)
@@ -333,7 +323,7 @@ class TestGetTargetSetSizeWithMigratedDb:
                 "Test",
                 "2026-01-01T00:00:00",
                 "2026-01-01T00:00:00",
-                json.dumps({k: 4 for k in SUB_SCORE_KEYS}),
+                json.dumps(dict.fromkeys(SUB_SCORE_KEYS, 4)),
                 "consider",
                 "discovered",
             ),
@@ -358,7 +348,7 @@ class TestGetTargetSetSizeWithMigratedDb:
                 "Test",
                 "2026-01-01T00:00:00",
                 "2026-01-01T00:00:00",
-                json.dumps({k: 3 for k in SUB_SCORE_KEYS}),
+                json.dumps(dict.fromkeys(SUB_SCORE_KEYS, 3)),
                 "consider",
                 "discovered",
             ),
@@ -392,7 +382,7 @@ class TestGetTargetSetSizeWithMigratedDb:
                 "Test",
                 "2026-01-01T00:00:00",
                 "2026-01-01T00:00:00",
-                json.dumps({k: 4 for k in SUB_SCORE_KEYS}),
+                json.dumps(dict.fromkeys(SUB_SCORE_KEYS, 4)),
                 "consider",
                 "discovered",
             ),
@@ -416,7 +406,7 @@ class TestGetTargetSetSizeWithMigratedDb:
                 "Test",
                 "2026-01-01T00:00:00",
                 "2026-01-01T00:00:00",
-                json.dumps({k: 3.6 for k in SUB_SCORE_KEYS}),
+                json.dumps(dict.fromkeys(SUB_SCORE_KEYS, 3.6)),
                 "consider",
                 "discovered",
             ),

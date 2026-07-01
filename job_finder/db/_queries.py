@@ -18,7 +18,7 @@ import logging
 import sqlite3
 from datetime import UTC, datetime, timedelta
 
-from job_finder.constants import CLASSIFICATIONS, SUB_SCORE_KEYS
+from job_finder.constants import SUB_SCORE_KEYS
 
 from ._jobs import JOBS_ALL_COLUMNS
 
@@ -201,10 +201,7 @@ def is_target_member(sub_scores: dict, classification: str | None, fit_floor: fl
         return False
 
     # Exclude hard negatives (single source of truth from CLASSIFICATIONS)
-    if classification in ("reject", "low_signal"):
-        return False
-
-    return True
+    return classification not in ("reject", "low_signal")
 
 
 def _classification_score_order(sort_dir: str) -> str:
