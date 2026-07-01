@@ -18,6 +18,8 @@ import logging
 import sqlite3
 from datetime import UTC, datetime, timedelta
 
+from job_finder.constants import SUB_SCORE_KEYS
+
 from ._jobs import JOBS_ALL_COLUMNS
 
 _log = logging.getLogger(__name__)
@@ -146,6 +148,60 @@ _SUB_SCORE_SUM_SQL = (
     "COALESCE(json_extract(sub_scores_json, '$.seniority_match'), 0) + "
     "COALESCE(json_extract(sub_scores_json, '$.skills_match'), 0))"
 )
+
+# Mean of the 6 sub-scores (sum / 6.0). Range 1.0-5.0 (or 0 if JSON is NULL).
+_SUB_SCORE_MEAN_SQL = f"({_SUB_SCORE_SUM_SQL} / 6.0)"
+
+
+def target_membership_sql(fit_floor: float) -> str:
+    """Return a SQL boolean expression for target-set membership.
+
+    A job is a target-set member when:
+    - sub_scores_json IS NOT NULL (scored)
+    - mean of the six sub-scores >= fit_floor
+    - classification is NOT a hard negative (reject, low_signal)
+
+    The fit_floor is coerced to float (never string-interpolated raw) for safety.
+
+    Args:
+        fit_floor: Mean sub-score threshold (1.0-5.0 scale).
+
+    Returns:
+        SQL WHERE clause fragment as a string.
+    """
+    hard_negatives = "','".join(["reject", "low_signal"])
+    return (
+        f"sub_scores_json IS NOT NULL AND "
+        f"{_SUB_SCORE_MEAN_SQL} >= {float(fit_floor)} AND "
+        f"classification NOT IN ('{hard_negatives}')"
+    )
+
+
+def is_target_member(sub_scores: dict, classification: str | None, fit_floor: float) -> bool:
+    """Python companion to target_membership_sql — same predicate logic.
+
+    Args:
+        sub_scores: Dict of the six sub-scores (keys from SUB_SCORE_KEYS).
+        classification: Classification string (from CLASSIFICATIONS enum) or None.
+        fit_floor: Mean sub-score threshold (1.0-5.0 scale).
+
+    Returns:
+        True if the job is a target-set member, False otherwise.
+    """
+    if not sub_scores:
+        return False
+
+    # Compute mean over SUB_SCORE_KEYS (single source of truth)
+    values = [sub_scores.get(key) for key in SUB_SCORE_KEYS]
+    if None in values:
+        return False
+
+    mean = sum(values) / len(values)
+    if mean < float(fit_floor):
+        return False
+
+    # Exclude hard negatives (single source of truth from CLASSIFICATIONS)
+    return classification not in ("reject", "low_signal")
 
 
 def _classification_score_order(sort_dir: str) -> str:
