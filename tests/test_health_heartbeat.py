@@ -23,7 +23,7 @@ import pytest
 from flask import Flask
 
 from job_finder.web.activity_tracker import ACTION_SCHEDULED_HEALTH
-from job_finder.web.scheduler._runners import run_health_check
+from job_finder.web.scheduler._runners import _check_source_deadman, run_health_check
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -72,7 +72,7 @@ def events_file(tmp_path, monkeypatch):
 
 
 def test_degraded_writes_activity_row_and_run_end(migrated_db, events_file):
-    """Empty user_activity -> 'No ingestion in last 14h' (and more) -> degraded."""
+    """Empty user_activity -> 'No ingestion in last Xh' (and more) -> degraded."""
     db_path, conn = migrated_db
     app = _make_app(db_path)
 
@@ -89,9 +89,9 @@ def test_degraded_writes_activity_row_and_run_end(migrated_db, events_file):
     meta = json.loads(rows[0]["metadata"])
     assert meta["status"] == "degraded"
     assert isinstance(meta["issues"], list) and len(meta["issues"]) > 0
-    # At minimum we expect the two missing-cadence issues.
+    # At minimum we expect the two missing-cadence issues (now with derived windows).
     issue_text = " ; ".join(meta["issues"])
-    assert "No ingestion in last 14h" in issue_text
+    assert "No ingestion in last" in issue_text  # derived window, not hardcoded 14h
     assert "Stale detection missed last night" in issue_text
 
     events = _read_events(events_file)
@@ -349,3 +349,114 @@ def test_threshold_is_config_driven(migrated_db, events_file):
         assert fire.call_count == 0  # one run, threshold is 2
         run_health_check(app)
         assert fire.call_count == 1  # second run crosses the custom threshold
+
+
+# ---------------------------------------------------------------------------
+# Source deadman alarm (issue #588)
+# ---------------------------------------------------------------------------
+
+
+def test_source_deadman_disabled_when_tolerance_zero(migrated_db):
+    """source_deadman_tolerance <= 0 disables the check."""
+    db_path, conn = migrated_db
+    config = {"health": {"source_deadman_tolerance": 0}}
+    issues = _check_source_deadman(conn, config)
+    assert issues == []
+
+
+def test_source_deadman_returns_empty_when_fresh(migrated_db):
+    """Fresh timestamps in all recency classes → no issues."""
+    db_path, conn = migrated_db
+    config = {"health": {"source_deadman_tolerance": 2.0}, "scheduler": {"cadence_preset": "standard"}}
+
+    # Seed fresh data (within window)
+    now_iso = _utc_naive(-0.5)  # 30 minutes ago
+    conn.execute(
+        "INSERT INTO companies (name, name_raw, ats_probe_status, last_scanned_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+        ("Test Company", "Test Company", "hit", now_iso, now_iso, now_iso),
+    )
+    conn.execute(
+        "INSERT INTO user_activity (action, entity_id, metadata, occurred_at) VALUES (?, ?, ?, ?)",
+        ("scheduled_sync", None, "{}", now_iso),
+    )
+    conn.execute(
+        "INSERT INTO company_scan_log (company_id, scanned_at) VALUES (?, ?)",
+        (1, now_iso),
+    )
+    conn.commit()
+
+    issues = _check_source_deadman(conn, config)
+    assert issues == []
+
+
+def test_source_deadman_fires_when_stale(migrated_db):
+    """Old timestamps exceed window * tolerance → issues returned."""
+    db_path, conn = migrated_db
+    config = {"health": {"source_deadman_tolerance": 2.0}, "scheduler": {"cadence_preset": "standard"}}
+
+    # Seed stale data (standard preset = 8h window, tolerance 2.0 = 16h allowed)
+    # Use 20 hours ago to exceed the allowed window
+    old_iso = _utc_naive(-20)
+    conn.execute(
+        "INSERT INTO companies (name, name_raw, ats_probe_status, last_scanned_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+        ("Stale Company", "Stale Company", "hit", old_iso, old_iso, old_iso),
+    )
+    conn.execute(
+        "INSERT INTO user_activity (action, entity_id, metadata, occurred_at) VALUES (?, ?, ?, ?)",
+        ("scheduled_sync", None, "{}", old_iso),
+    )
+    conn.execute(
+        "INSERT INTO company_scan_log (company_id, scanned_at) VALUES (?, ?)",
+        (1, old_iso),
+    )
+    conn.commit()
+
+    issues = _check_source_deadman(conn, config)
+    assert len(issues) == 3
+    assert all(issue.startswith("Source deadman:") for issue in issues)
+    assert "ATS scanner fleet" in issues[0]
+    assert "feed ingestion" in issues[1]
+    assert "ATS scan log" in issues[2]
+
+
+def test_source_deadman_coverage_key_in_derived_keys(migrated_db):
+    """'Source deadman' issue prefix maps to 'coverage' key."""
+    from job_finder.web.scheduler._runners import _derive_degraded_keys
+
+    issues = ["Source deadman: ATS scanner fleet — no successful scan in 20.0h (window 8h)"]
+    keys = _derive_degraded_keys(issues, [])
+    assert "coverage" in keys
+
+
+def test_source_deadman_window_changes_with_cadence_preset(migrated_db):
+    """Derived window changes when cadence_preset flips standard → heavy."""
+    db_path, conn = migrated_db
+
+    # Standard preset: 8h window * 2.0 tolerance = 16h allowed
+    config_standard = {
+        "health": {"source_deadman_tolerance": 2.0},
+        "scheduler": {"cadence_preset": "standard"},
+    }
+
+    # Heavy preset: 4h window * 2.0 tolerance = 8h allowed
+    config_heavy = {
+        "health": {"source_deadman_tolerance": 2.0},
+        "scheduler": {"cadence_preset": "heavy"},
+    }
+
+    # Seed data 12 hours ago (exceeds heavy window, within standard window)
+    mid_iso = _utc_naive(-12)
+    conn.execute(
+        "INSERT INTO companies (name, name_raw, ats_probe_status, last_scanned_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+        ("Test Company", "Test Company", "hit", mid_iso, mid_iso, mid_iso),
+    )
+    conn.commit()
+
+    # Standard preset: within window → no issue
+    issues_standard = _check_source_deadman(conn, config_standard)
+    assert issues_standard == []
+
+    # Heavy preset: exceeds window → issue
+    issues_heavy = _check_source_deadman(conn, config_heavy)
+    assert len(issues_heavy) == 1
+    assert "ATS scanner fleet" in issues_heavy[0]
