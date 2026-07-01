@@ -303,6 +303,29 @@ def probe_single_company(
                 except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
                     _handle_scan_error(conn, company_id, company_name, str(e), now)
                     return {"status": "error", "detail": str(e)}
+            elif platform == "adp":
+                # ADP Workforce Now JSON feed — delegate to the probe function.
+                try:
+                    if _probe_adp(slug):
+                        conn.execute(
+                            "UPDATE companies SET ats_probe_status = 'hit' WHERE id = ?",
+                            (company_id,),
+                        )
+                        _reset_retry_state(conn, company_id, now)
+                        logger.info("probe_single_company: %s -> hit (adp)", company_name)
+                        return {"status": "hit", "jobs_found": 0}
+                    conn.execute(
+                        """UPDATE companies
+                           SET ats_probe_status = 'miss',
+                               miss_reason = 'platform_slug_404'
+                           WHERE id = ?""",
+                        (company_id,),
+                    )
+                    conn.commit()
+                    return {"status": "miss"}
+                except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
+                    _handle_scan_error(conn, company_id, company_name, str(e), now)
+                    return {"status": "error", "detail": str(e)}
             else:
                 # B4: platform value is set but not one we know how to probe —
                 # ATS catalog drift (probably the company's platform was
@@ -1090,4 +1113,37 @@ def _probe_successfactors(slug: str) -> bool:
         return "<Job-Listing" in content and ("<Job>" in content or "<JobTitle>" in content)
     except Exception as e:
         logger.debug("_probe_successfactors('%s') failed: %s", slug, e)
+        return False
+
+
+def _probe_adp(slug: str) -> bool:
+    """Return True if slug resolves to a live ADP Workforce Now job board.
+
+    Slug format: client ID UUID (e.g. ``"a6717ebc-f6a8-4a51-856b-f7ebd573645e"``).
+    Fetches the public JSON feed at
+    ``https://workforcenow.adp.com/mascsr/default/careercenter/public/events/staffing/v1/job-requisitions``
+    with ``cid={slug}`` and returns True only if the response contains at least one
+    ``jobRequisitions`` item. This avoids false positives on unrelated endpoints.
+
+    Args:
+        slug: ADP client ID UUID.
+    """
+    url = "https://workforcenow.adp.com/mascsr/default/careercenter/public/events/staffing/v1/job-requisitions"
+    params = {
+        "cid": slug,
+        "ccId": "19000101_000001",
+        "lang": "en_US",
+        "locale": "en_US",
+    }
+    try:
+        r = requests.get(url, params=params, timeout=_PROBE_TIMEOUT)
+        if r.status_code != 200:
+            return False
+        data = r.json()
+        if not isinstance(data, dict):
+            return False
+        reqs = data.get("jobRequisitions") or []
+        return isinstance(reqs, list) and len(reqs) > 0
+    except Exception as e:
+        logger.debug("_probe_adp('%s') failed: %s", slug, e)
         return False

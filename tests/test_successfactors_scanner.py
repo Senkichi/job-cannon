@@ -38,7 +38,7 @@ from job_finder.web.ats_platforms._platforms_successfactors import (
 
 def test_extractor_version_bumped_for_successfactors():
     """SuccessFactors added URL pattern -- the version string must be bumped."""
-    assert ATS_EXTRACTOR_VERSION == "m049-v10"
+    assert ATS_EXTRACTOR_VERSION == "m049-v11"
 
 
 # ---------------------------------------------------------------------------

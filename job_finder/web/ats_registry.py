@@ -138,6 +138,8 @@ _SPECS: tuple[PlatformSpec, ...] = (
     PlatformSpec(
         "successfactors", probe_attr="_probe_successfactors", url_fastpath=True, reconcilable=True
     ),
+    # ADP Workforce Now — public JSON feed, URL-fastpath eligible.
+    PlatformSpec("adp", probe_attr="_probe_adp", url_fastpath=True, reconcilable=True),
     # Playwright-fetch (no requests API); promotable via reconcile.
     PlatformSpec("icims", playwright_scanner=_ICIMS_SCANNER, probe_attr="_probe_icims"),
     # Phenom — Playwright scanner via sitemap, no public JSON API.

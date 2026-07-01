@@ -12,7 +12,13 @@ Tests cover:
 """
 
 import sqlite3
+import sys
 from datetime import UTC, datetime, timedelta
+
+import pytest
+
+from job_finder import json_utils
+from job_finder.web import claude_client
 
 # ---------------------------------------------------------------------------
 # Helper: insert scoring_costs rows
@@ -772,6 +778,46 @@ def _make_app_with_budget(tmp_db_path, daily_budget_usd: float):
     return app.test_client()
 
 
+# ---------------------------------------------------------------------------
+# Deterministic clock for the budget-pct class
+# ---------------------------------------------------------------------------
+#
+# get_cost_stats derives "today" from the LOCAL-day window (local_day_utc_window)
+# but "month" from the UTC calendar month.  Near a UTC month boundary those two
+# windows disagree: a row seeded at "month_start + 1s" (00:00:01Z on the 1st) can
+# fall inside the local-day "today" window whenever UTC has already rolled into a
+# new month while the local clock has not — which silently folds the "older"
+# month row into today's spend and breaks the today-vs-month assertions.  Pin the
+# wall clock to a fixed mid-month instant so both windows are unambiguous and the
+# seeded rows land in exactly one bucket each, independent of the runner's date or
+# timezone.
+
+# 12:30:00Z (not on any real UTC-offset's local midnight — no zone is ±11:30/±12:30)
+# keeps the "today" row strictly interior to its local-day window in every timezone.
+_FROZEN_INSTANT = datetime(2026, 6, 15, 12, 30, 0, tzinfo=UTC)
+
+
+class _FrozenDateTime(datetime):
+    """datetime subclass whose now()/utcnow() return a fixed instant.
+
+    Mirrors real semantics: now(tz) yields the frozen instant in tz (aware);
+    now() with no tz yields it as naive local time — exactly what
+    datetime.now() and datetime.now(UTC) return on the production code paths.
+    All returned objects are plain datetimes, so downstream arithmetic and
+    formatting are unaffected.
+    """
+
+    @classmethod
+    def now(cls, tz=None):
+        if tz is not None:
+            return _FROZEN_INSTANT.astimezone(tz)
+        return _FROZEN_INSTANT.astimezone().replace(tzinfo=None)
+
+    @classmethod
+    def utcnow(cls):
+        return _FROZEN_INSTANT.astimezone(UTC).replace(tzinfo=None)
+
+
 class TestBudgetPctDayVsDailyCap:
     """Acceptance criteria for issue #295.
 
@@ -779,6 +825,15 @@ class TestBudgetPctDayVsDailyCap:
     The percentage is computed once in the blueprint and both render sites
     (costs page + dashboard banner) must use the same value.
     """
+
+    @pytest.fixture(autouse=True)
+    def _freeze_clock(self, monkeypatch):
+        """Pin every wall-clock read on the get_cost_stats path to a mid-month
+        instant so the today/month windows are stable and the seeded rows are
+        deterministically bucketed regardless of the runner's date/timezone."""
+        monkeypatch.setattr(claude_client, "datetime", _FrozenDateTime)
+        monkeypatch.setattr(json_utils, "datetime", _FrozenDateTime)
+        monkeypatch.setattr(sys.modules[__name__], "datetime", _FrozenDateTime)
 
     def _seed_db(self, tmp_db_path, today_spend: float, older_spend: float) -> None:
         """Seed scoring_costs with a today row and a row from earlier this month.
