@@ -212,13 +212,13 @@ def test_gmail_source_with_override_empty_falls_through(tmp_path):
 
 def test_sender_label_maps_linkedin_addresses():
     """Both LinkedIn sender addresses map to the same label."""
-    from job_finder.sources.gmail_source import SENDER_LABEL
+    from job_finder.sources.email_senders import SENDER_LABEL
 
     assert SENDER_LABEL["jobalerts-noreply@linkedin.com"] == "linkedin"
     assert SENDER_LABEL["jobs-noreply@linkedin.com"] == "linkedin"
 
 
 def test_sender_label_maps_glassdoor():
-    from job_finder.sources.gmail_source import SENDER_LABEL
+    from job_finder.sources.email_senders import SENDER_LABEL
 
     assert SENDER_LABEL["noreply@glassdoor.com"] == "glassdoor"

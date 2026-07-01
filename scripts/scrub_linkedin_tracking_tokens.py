@@ -108,7 +108,7 @@ def verify_parse_equivalence(baseline: dict[str, list[dict]]) -> bool:
     import email.policy
 
     sys.path.insert(0, str(Path(__file__).parent.parent))
-    from job_finder.sources.gmail_source import SENDER_PARSERS
+    from job_finder.sources.email_senders import SENDER_PARSERS
     from job_finder.sources.imap_source import ImapSource
 
     _fixtures_by_sender: dict[str, list[str]] = {
@@ -168,7 +168,7 @@ def _capture_baseline() -> dict[str, list[dict]]:
     import email.policy
 
     sys.path.insert(0, str(Path(__file__).parent.parent))
-    from job_finder.sources.gmail_source import SENDER_PARSERS
+    from job_finder.sources.email_senders import SENDER_PARSERS
     from job_finder.sources.imap_source import ImapSource
 
     _fixtures_by_sender: dict[str, list[str]] = {

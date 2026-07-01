@@ -1,6 +1,6 @@
 """Tests for autoheal email capture: SENDER_LABEL completeness (Task 5)."""
 
-from job_finder.sources.gmail_source import SENDER_LABEL, SENDER_PARSERS
+from job_finder.sources.email_senders import SENDER_LABEL, SENDER_PARSERS
 
 
 def test_every_sender_has_a_canonical_label():

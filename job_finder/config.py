@@ -303,6 +303,70 @@ def normalize_profile_work_arrangement(cfg: dict) -> dict:
     return {**cfg, "profile": new_profile}
 
 
+def normalize_email_senders(cfg: dict) -> dict:
+    """Heal legacy configs where email sender config lives under sources.gmail.
+
+    Relocates ``sources.gmail.senders`` and ``sources.gmail.lookback_days`` to
+    ``sources.imap.senders`` and ``sources.imap.lookback_days``, and POPs the legacy
+    sub-keys (delete-after-move). The ``sources.gmail`` block itself is NOT deleted
+    (``sources.gmail.enabled`` stays). Idempotent. Never overwrites an existing
+    ``sources.imap`` value with a stale legacy one — if both blocks are populated
+    simultaneously (e.g. a hand-restored backup, a partially migrated file), the
+    current ``sources.imap`` value wins and the legacy key is still popped.
+
+    Args:
+        cfg: Full config dict (may be empty). Never mutated.
+
+    Returns:
+        New config dict; only modified when legacy keys are present.
+    """
+    sources = cfg.get("sources", {})
+    gmail = sources.get("gmail", {})
+
+    # Check if legacy keys exist
+    has_legacy_senders = "senders" in gmail
+    has_legacy_lookback = "lookback_days" in gmail
+
+    if not has_legacy_senders and not has_legacy_lookback:
+        # No legacy keys present — nothing to heal; return a shallow copy (immutability).
+        return {**cfg, "sources": dict(sources)}
+
+    # Build new sources dict with relocated keys
+    new_sources = {**sources}
+    new_gmail = {**gmail}
+
+    # Initialize sources.imap if it doesn't exist
+    if "imap" not in new_sources:
+        new_sources["imap"] = {}
+
+    new_imap = {**new_sources["imap"]}
+
+    # Relocate senders if present, but never clobber a value the current
+    # sources.imap key already holds — a config with both blocks populated
+    # (e.g. a hand-restored backup, a partially migrated file) must keep the
+    # current value, not silently revert to the stale legacy one on every load.
+    if has_legacy_senders:
+        if "senders" not in new_imap:
+            new_imap["senders"] = gmail["senders"]
+        new_gmail = {k: v for k, v in new_gmail.items() if k != "senders"}
+
+    # Relocate lookback_days if present, same non-clobber guard.
+    if has_legacy_lookback:
+        if "lookback_days" not in new_imap:
+            new_imap["lookback_days"] = gmail["lookback_days"]
+        new_gmail = {k: v for k, v in new_gmail.items() if k != "lookback_days"}
+
+    # Reassemble the config
+    new_sources["imap"] = new_imap
+    if new_gmail:  # Only keep gmail block if it still has keys (e.g., enabled)
+        new_sources["gmail"] = new_gmail
+    else:
+        # Remove empty gmail block
+        new_sources = {k: v for k, v in new_sources.items() if k != "gmail"}
+
+    return {**cfg, "sources": new_sources}
+
+
 def load_config(
     config_path: str | os.PathLike[str] | None = None,
     allow_missing: bool = False,
@@ -396,4 +460,6 @@ def load_config(
     # load silently and broke the LLM cascade for ~24h.
     validate_required_sections(cfg)
     # Heal legacy work-arrangement sentinel on every load (idempotent).
-    return normalize_profile_work_arrangement(cfg)
+    cfg = normalize_profile_work_arrangement(cfg)
+    # Heal legacy email-sender config (sources.gmail → sources.imap) on every load (idempotent).
+    return normalize_email_senders(cfg)

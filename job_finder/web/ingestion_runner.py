@@ -164,7 +164,7 @@ def _fetch_gmail(config: dict, conn: sqlite3.Connection, summary: dict) -> list[
         List of Job objects parsed from Gmail.
     """
     gmail_config = config.get("sources", {}).get("gmail", {})
-    if not gmail_config.get("enabled", True):
+    if not gmail_config.get("enabled", False):
         logger.debug("Gmail source disabled in config.")
         return []
 
@@ -967,12 +967,12 @@ def _prune_stale_data(conn: sqlite3.Connection, lookback_days: int = 7) -> None:
     - parse_failure rows older than 30 days are deleted
     - All rows older than 90 days are deleted
 
-    **email_parse_log table** — stores per-message Gmail dedup rows and
-    run-level summary rows (sender='gmail', message_id='gmail_run_...');
+    **email_parse_log table** — stores per-message dedup rows and
+    run-level summary rows (sender='gmail' or sender='imap', message_id='*_run_...');
     both are pruned at the same TTL:
-    - Rows with sender='gmail' older than ``max(lookback_days * 2, 14)`` days
-      are deleted. The TTL is at least 14 days and scales with lookback_days
-      so that dedup records are never pruned while Gmail still returns those
+    - Rows older than ``max(lookback_days * 2, 14)`` days are deleted.
+      The TTL is at least 14 days and scales with lookback_days so that
+      dedup records are never pruned while the source still returns those
       emails on the next sync.
 
     Non-fatal: any error is logged at Warning level and does not interrupt
@@ -980,7 +980,7 @@ def _prune_stale_data(conn: sqlite3.Connection, lookback_days: int = 7) -> None:
 
     Args:
         conn: Active SQLite connection.
-        lookback_days: Gmail lookback window (from config). Used to compute
+        lookback_days: Lookback window (from config). Used to compute
             the email_parse_log TTL as max(lookback_days * 2, 14).
     """
     email_parse_log_ttl = max(lookback_days * 2, 14)
@@ -992,13 +992,11 @@ def _prune_stale_data(conn: sqlite3.Connection, lookback_days: int = 7) -> None:
         )
         conn.execute("DELETE FROM runs WHERE timestamp < datetime('now', '-90 days')")
         # Trim email_parse_log rows (both per-message dedup rows and run-level
-        # summary rows with sender='gmail').  TTL scales with lookback_days so
-        # dedup records are never expired while Gmail still returns those emails.
+        # summary rows). TTL scales with lookback_days so dedup records are
+        # never expired while the source still returns those emails.
         # At ~300 rows/run × 3 runs/day that's ~109K rows/year without pruning.
         conn.execute(
-            "DELETE FROM email_parse_log"
-            " WHERE processed_at < datetime('now', ?)"
-            " AND sender = 'gmail'",
+            "DELETE FROM email_parse_log WHERE processed_at < datetime('now', ?)",
             (f"-{email_parse_log_ttl} days",),
         )
         conn.commit()

@@ -10,7 +10,7 @@ return maps equal to the module defaults — byte-for-byte identical behaviour.
 """
 
 from job_finder.parsers.glassdoor_parser import parse_glassdoor_alert
-from job_finder.sources.gmail_source import (
+from job_finder.sources.email_senders import (
     SENDER_LABEL,
     SENDER_PARSERS,
     resolve_sender_label,

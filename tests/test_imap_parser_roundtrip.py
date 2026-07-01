@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from job_finder.sources.gmail_source import SENDER_PARSERS
+from job_finder.sources.email_senders import SENDER_PARSERS
 from job_finder.sources.imap_source import ImapSource
 
 # Golden expected values for one representative fixture per sender.

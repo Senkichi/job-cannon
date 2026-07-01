@@ -51,7 +51,7 @@ class TestFetchJobsDedup:
         source._extract_body = MagicMock(return_value="")
         source._extract_date = MagicMock(return_value=None)
 
-        with patch("job_finder.sources.gmail_source.SENDER_PARSERS", _SINGLE_SENDER):
+        with patch("job_finder.sources.email_senders.SENDER_PARSERS", _SINGLE_SENDER):
             jobs, processed = source.fetch_jobs(processed_message_ids=known_ids)
 
         source._get_message.assert_called_once_with("msg3")
@@ -71,7 +71,7 @@ class TestFetchJobsDedup:
         source._extract_body = MagicMock(return_value="email body content")
         source._extract_date = MagicMock(return_value=None)
 
-        with patch("job_finder.sources.gmail_source.SENDER_PARSERS", _SINGLE_SENDER):
+        with patch("job_finder.sources.email_senders.SENDER_PARSERS", _SINGLE_SENDER):
             jobs, processed = source.fetch_jobs()
 
         assert set(processed) == {"msg1", "msg2"}
@@ -86,7 +86,7 @@ class TestFetchJobsDedup:
         source._extract_body = MagicMock(return_value="")
         source._extract_date = MagicMock(return_value=None)
 
-        with patch("job_finder.sources.gmail_source.SENDER_PARSERS", _SINGLE_SENDER):
+        with patch("job_finder.sources.email_senders.SENDER_PARSERS", _SINGLE_SENDER):
             jobs, processed = source.fetch_jobs()  # no processed_message_ids
 
         assert source._get_message.call_count == 3
@@ -98,7 +98,7 @@ class TestFetchJobsDedup:
         source._search_messages = MagicMock(return_value=search_results)
         source._get_message = MagicMock(return_value=None)  # All API calls fail
 
-        with patch("job_finder.sources.gmail_source.SENDER_PARSERS", _SINGLE_SENDER):
+        with patch("job_finder.sources.email_senders.SENDER_PARSERS", _SINGLE_SENDER):
             jobs, processed = source.fetch_jobs()
 
         assert processed == []
@@ -122,7 +122,7 @@ class TestFetchJobsDedup:
         source._extract_body = MagicMock(return_value="email body content")
         source._extract_date = MagicMock(return_value=None)
 
-        with patch("job_finder.sources.gmail_source.SENDER_PARSERS", _SINGLE_SENDER):
+        with patch("job_finder.sources.email_senders.SENDER_PARSERS", _SINGLE_SENDER):
             jobs, processed = source.fetch_jobs()
 
         assert set(processed) == {"msg1", "msg3"}
@@ -137,7 +137,7 @@ class TestFetchJobsDedup:
         source._extract_body = MagicMock(return_value=None)  # Body extraction failed
         source._extract_date = MagicMock(return_value=None)
 
-        with patch("job_finder.sources.gmail_source.SENDER_PARSERS", _SINGLE_SENDER):
+        with patch("job_finder.sources.email_senders.SENDER_PARSERS", _SINGLE_SENDER):
             jobs, processed = source.fetch_jobs()
 
         assert processed == [], "Empty-body message should not be marked as processed"
@@ -151,7 +151,7 @@ class TestFetchJobsDedup:
         source._extract_body = MagicMock(return_value="")
         source._extract_date = MagicMock(return_value=None)
 
-        with patch("job_finder.sources.gmail_source.SENDER_PARSERS", _SINGLE_SENDER):
+        with patch("job_finder.sources.email_senders.SENDER_PARSERS", _SINGLE_SENDER):
             jobs, processed = source.fetch_jobs(processed_message_ids=set())
 
         assert source._get_message.call_count == 2
@@ -177,7 +177,7 @@ class TestFetchJobsDedup:
 
         test_sender = {"test@example.com": _parser}
 
-        with patch("job_finder.sources.gmail_source.SENDER_PARSERS", test_sender):
+        with patch("job_finder.sources.email_senders.SENDER_PARSERS", test_sender):
             with patch("job_finder.sources.gmail_source._archive_parse_failure"):
                 jobs, processed = source.fetch_jobs()
 
@@ -201,7 +201,7 @@ class TestShouldArchiveFailure:
 
     def test_real_jobs_not_archived(self) -> None:
         from job_finder.models import Job
-        from job_finder.sources.gmail_source import _should_archive_failure
+        from job_finder.sources.email_senders import _should_archive_failure
 
         jobs = [
             Job(
@@ -215,13 +215,13 @@ class TestShouldArchiveFailure:
         assert _should_archive_failure(self._PAD, jobs, "x@y.com") is False
 
     def test_short_body_not_archived(self) -> None:
-        from job_finder.sources.gmail_source import _should_archive_failure
+        from job_finder.sources.email_senders import _should_archive_failure
 
         assert _should_archive_failure("too short", [], "x@y.com") is False
 
     def test_non_job_notification_not_archived(self) -> None:
         """No recognised job URL => non-job notification => not a failure."""
-        from job_finder.sources.gmail_source import _should_archive_failure
+        from job_finder.sources.email_senders import _should_archive_failure
 
         brand_follow = (
             "Check out recent updates from Achieve and stay on top of your "
@@ -231,7 +231,7 @@ class TestShouldArchiveFailure:
 
     def test_genuine_failure_with_job_url_archived(self) -> None:
         """Job URL present but zero jobs extracted => genuine failure => archive."""
-        from job_finder.sources.gmail_source import _should_archive_failure
+        from job_finder.sources.email_senders import _should_archive_failure
 
         drifted = self._PAD + " https://www.linkedin.com/jobs/view/4012345678"
         assert _should_archive_failure(drifted, [], "jobs-noreply@linkedin.com") is True
@@ -239,7 +239,7 @@ class TestShouldArchiveFailure:
     def test_digest_meta_email_not_archived(self) -> None:
         """Secondary guard preserved: a digest preamble is excluded even when
         the body contains job URLs."""
-        from job_finder.sources.gmail_source import _should_archive_failure
+        from job_finder.sources.email_senders import _should_archive_failure
 
         digest = (
             "Your job alert digest " + self._PAD + " https://www.linkedin.com/jobs/view/4012345678"
