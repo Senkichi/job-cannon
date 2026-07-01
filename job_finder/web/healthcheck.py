@@ -31,6 +31,7 @@ contract for a passive observer.
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime
@@ -39,6 +40,8 @@ from pathlib import Path
 import psutil
 
 from job_finder.json_utils import utc_now_iso
+
+logger = logging.getLogger(__name__)
 
 # Default staleness window for the daily ``scheduled_health`` heartbeat, in
 # hours. Matches the 26h window ``run_health_check`` uses for "missed last
@@ -348,4 +351,13 @@ def run_healthcheck(args) -> int:
     verdict = compute_verdict(liveness, heartbeat, degraded, checked_at_utc=utc_now_iso())
 
     print(json.dumps(verdict.to_dict()))
+
+    if getattr(args, "notify", False):
+        try:
+            from job_finder.web.healthcheck_notify import maybe_notify
+
+            maybe_notify(verdict, include_degraded=getattr(args, "degraded", False))
+        except Exception:
+            logger.exception("healthcheck notify path failed")
+
     return verdict.exit_code
