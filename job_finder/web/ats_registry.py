@@ -15,6 +15,17 @@ Every scattered list becomes a comprehension over :data:`PLATFORMS`, and
 CI failure (a scannable platform with no probe, a scanner missing from dispatch,
 etc.), exemptable only via an explicit capability flag — never a hardcoded skip.
 
+**Scatter map (all facets now derive from the registry):**
+- PR-4 (#650): URL detection metadata (patterns, extractors, specificity)
+- PR-5 (#655): Posting-id patterns (expiry_checker, ats_reconciler)
+- PR-6 (this PR): Domain facets (ATS_DOMAINS, redirect patterns, PRIORITY_DOMAINS)
+
+The one documented exception: PRIORITY_DOMAINS includes 4 non-ATS job boards
+(linkedin.com/jobs, builtin.com, workingnomads.com, ycombinator.com/companies)
+that have no PlatformSpec entry by design (they are not ATS platforms). These
+are kept as a residual constant in domain_policy.py (_NON_ATS_PRIORITY_DOMAINS)
+and appended to the registry-derived ATS portion.
+
 Import layering (acyclic): this module sits ABOVE the leaves it imports
 (``ats_platforms``, ``ats_prober``) and BELOW its consumers
 (``ats_identity_reconcile``, ``ats_scanner/_probe``, ``ats_reconciler``, ...).
@@ -138,6 +149,18 @@ class PlatformSpec:
     # (set-diff staleness detection). The pattern must match the URL shape
     # that the platform's single-posting endpoint accepts.
     posting_id_pattern: re.Pattern | None = None
+    # DOMAIN FACETS — bare careers-page domains and subdomain-qualified redirect patterns.
+    # domains: tuple of bare registrable domains (e.g. "greenhouse.io", "lever.co").
+    # redirect_domains: tuple of subdomain-qualified patterns for ATS-redirect detection
+    #   during careers-page scraping (e.g. "jobs.lever.co", "boards.greenhouse.io").
+    # jd_fetch_priority: int rank for JD-fetch ordering (lower = higher priority).
+    #   Only set for the 5 ATS platforms in PRIORITY_DOMAINS; None for all others.
+    # jd_fetch_domain: the exact domain string used in PRIORITY_DOMAINS for JD-fetch ordering.
+    #   May differ from bare domains (e.g. "myworkdayjobs.com" vs "workday.com").
+    domains: tuple[str, ...] = ()
+    redirect_domains: tuple[str, ...] = ()
+    jd_fetch_priority: int | None = None
+    jd_fetch_domain: str | None = None
 
 
 # --- The registry. ONE entry per platform; capability flags only here. ---------
@@ -153,6 +176,10 @@ _SPECS: tuple[PlatformSpec, ...] = (
         url_fastpath=True,
         reconcilable=True,
         posting_id_pattern=re.compile(r"jobs\.lever\.co/[^/]+/([a-f0-9-]+)", re.IGNORECASE),
+        domains=("lever.co",),
+        redirect_domains=("jobs.lever.co", "api.lever.co"),
+        jd_fetch_priority=1,
+        jd_fetch_domain="lever.co",
     ),
     PlatformSpec(
         "greenhouse",
@@ -162,6 +189,10 @@ _SPECS: tuple[PlatformSpec, ...] = (
         url_fastpath=True,
         reconcilable=True,
         posting_id_pattern=re.compile(r"boards\.greenhouse\.io/[^/]+/jobs/(\d+)", re.IGNORECASE),
+        domains=("greenhouse.io", "greenhouse-mail.io"),
+        redirect_domains=("boards.greenhouse.io", "boards-api.greenhouse.io"),
+        jd_fetch_priority=0,
+        jd_fetch_domain="greenhouse.io",
     ),
     PlatformSpec(
         "ashby",
@@ -171,6 +202,10 @@ _SPECS: tuple[PlatformSpec, ...] = (
         url_fastpath=True,
         reconcilable=True,
         posting_id_pattern=re.compile(r"jobs\.ashbyhq\.com/[^/]+/([a-f0-9-]+)"),
+        domains=("ashbyhq.com",),
+        redirect_domains=("jobs.ashbyhq.com",),
+        jd_fetch_priority=2,
+        jd_fetch_domain="ashbyhq.com",
     ),
     PlatformSpec(
         "jazzhr",
@@ -178,6 +213,7 @@ _SPECS: tuple[PlatformSpec, ...] = (
         speculative_safe=True,
         speculative_order=3,
         url_fastpath=True,
+        domains=("jazz.co",),
     ),
     PlatformSpec(
         "pinpoint",
@@ -185,6 +221,7 @@ _SPECS: tuple[PlatformSpec, ...] = (
         speculative_safe=True,
         speculative_order=4,
         url_fastpath=True,
+        domains=("pinpointhq.com",),
     ),
     PlatformSpec(
         "teamtailor",
@@ -202,6 +239,9 @@ _SPECS: tuple[PlatformSpec, ...] = (
         posting_id_pattern=re.compile(
             r"myworkdayjobs\.com/[^?#]*?/([^/?#]+)(?:/?(?:[?#]|$))", re.IGNORECASE
         ),
+        domains=("workday.com", "myworkday.com"),
+        jd_fetch_priority=3,
+        jd_fetch_domain="myworkdayjobs.com",
     ),
     PlatformSpec(
         "smartrecruiters",
@@ -211,32 +251,68 @@ _SPECS: tuple[PlatformSpec, ...] = (
         posting_id_pattern=re.compile(
             r"jobs\.smartrecruiters\.com/[^/]+/([A-Za-z0-9_]+)", re.IGNORECASE
         ),
+        domains=("smartrecruiters.com",),
+        jd_fetch_priority=4,
+        jd_fetch_domain="jobs.smartrecruiters.com",
     ),
     # FP-prone: evidence/URL-path promotable only (never speculative-guessed).
-    PlatformSpec("bamboohr", probe_attr="_probe_bamboohr", fp_prone=True, url_fastpath=True),
+    PlatformSpec(
+        "bamboohr",
+        probe_attr="_probe_bamboohr",
+        fp_prone=True,
+        url_fastpath=True,
+        domains=("bamboohr.com",),
+    ),
     PlatformSpec("personio", probe_attr="_probe_personio", fp_prone=True, url_fastpath=True),
-    PlatformSpec("recruitee", probe_attr="_probe_recruitee", fp_prone=True, url_fastpath=True),
-    PlatformSpec("breezy", probe_attr="_probe_breezy", fp_prone=True, url_fastpath=True),
+    PlatformSpec(
+        "recruitee",
+        probe_attr="_probe_recruitee",
+        fp_prone=True,
+        url_fastpath=True,
+        domains=("recruitee.com",),
+    ),
+    PlatformSpec(
+        "breezy",
+        probe_attr="_probe_breezy",
+        fp_prone=True,
+        url_fastpath=True,
+        domains=("breezy.hr",),
+    ),
     # Round-6 URL-fastpath additions.
-    PlatformSpec("workable", probe_attr="_probe_workable", url_fastpath=True),
+    PlatformSpec(
+        "workable", probe_attr="_probe_workable", url_fastpath=True, domains=("workable.com",)
+    ),
     PlatformSpec("paylocity", probe_attr="_probe_paylocity", url_fastpath=True),
-    PlatformSpec("rippling", probe_attr="_probe_rippling", url_fastpath=True),
+    PlatformSpec(
+        "rippling", probe_attr="_probe_rippling", url_fastpath=True, domains=("rippling.com",)
+    ),
     # Probe exists but reconcile-only (not in the speculative fast-path today).
     PlatformSpec("oracle_cloud", probe_attr="_probe_oracle_cloud"),
     PlatformSpec("ultipro", probe_attr="_probe_ultipro"),
     PlatformSpec("ibm", probe_attr="_probe_ibm"),
     # SuccessFactors — public XML feed, URL-fastpath eligible.
     PlatformSpec(
-        "successfactors", probe_attr="_probe_successfactors", url_fastpath=True, reconcilable=True
+        "successfactors",
+        probe_attr="_probe_successfactors",
+        url_fastpath=True,
+        reconcilable=True,
+        domains=("successfactors.com",),
     ),
     # ADP Workforce Now — public JSON feed, URL-fastpath eligible.
     PlatformSpec("adp", probe_attr="_probe_adp", url_fastpath=True, reconcilable=True),
     # Playwright-fetch (no requests API); promotable via reconcile.
-    PlatformSpec("icims", playwright_scanner=_ICIMS_SCANNER, probe_attr="_probe_icims"),
+    PlatformSpec(
+        "icims",
+        playwright_scanner=_ICIMS_SCANNER,
+        probe_attr="_probe_icims",
+        domains=("icims.com",),
+    ),
     # Phenom — Playwright scanner via sitemap, no public JSON API.
     PlatformSpec("phenom", playwright_scanner=_PHENOM_SCANNER, probe_attr="_probe_phenom"),
     # Registered stub with a probe but kept at 'miss' (careers_crawler owns it).
-    PlatformSpec("jobvite", probe_attr="_probe_jobvite", non_scannable=True),
+    PlatformSpec(
+        "jobvite", probe_attr="_probe_jobvite", non_scannable=True, domains=("jobvite.com",)
+    ),
     # Keyword-search adapters: scanner but no slug-probe and no URL form. The
     # explicit capability that exempts them from the scannable-must-have-probe
     # guard (never a hardcoded skip-list).
@@ -245,6 +321,12 @@ _SPECS: tuple[PlatformSpec, ...] = (
     PlatformSpec("eightfold", keyword_adapter=True),
     # Registered stub, no public API (returns []).
     PlatformSpec("google", non_scannable=True),
+    # ATS domains with no scanner/probe (email-sender/pipeline-signal matching only).
+    # These are in ATS_DOMAINS for domain-based classification but have no live platform entry.
+    PlatformSpec("taleo", non_scannable=True, domains=("taleo.net",)),
+    PlatformSpec("kronos", non_scannable=True, domains=("kronos.net",)),
+    PlatformSpec("modernloop", non_scannable=True, domains=("modernloop.io",)),
+    PlatformSpec("governmentjobs", non_scannable=True, domains=("governmentjobs.com",)),
 )
 
 
@@ -571,3 +653,24 @@ EXPIRY_CHECKER_POSTING_ID_PATTERNS: dict[str, re.Pattern] = {
     for n, s in PLATFORMS.items()
     if s.posting_id_pattern is not None and n in {"lever", "greenhouse", "ashby"}
 }
+
+# Domain facets derived from the registry (replaces legacy literals in
+# pipeline_detector._constants, careers_scraper, and domain_policy).
+ATS_DOMAINS: frozenset[str] = frozenset(
+    domain for spec in PLATFORMS.values() for domain in spec.domains
+)
+
+REDIRECT_DOMAINS: tuple[str, ...] = tuple(
+    domain for spec in PLATFORMS.values() for domain in spec.redirect_domains
+)
+
+# PRIORITY_DOMAINS derived from registry (ATS platforms by jd_fetch_priority order,
+# plus non-ATS job boards that have no PlatformSpec entry).
+# The non-ATS residual is kept in domain_policy.py as _NON_ATS_PRIORITY_DOMAINS.
+PRIORITY_DOMAINS_ATS: list[str] = [
+    spec.jd_fetch_domain
+    for spec in sorted(
+        (s for s in PLATFORMS.values() if s.jd_fetch_priority is not None),
+        key=lambda s: s.jd_fetch_priority,  # type: ignore
+    )
+]

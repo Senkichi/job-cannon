@@ -69,17 +69,26 @@ BLOCKED_DOMAINS: frozenset[str] = frozenset(
 # LinkedIn public job pages, then general job boards.
 # ---------------------------------------------------------------------------
 
-PRIORITY_DOMAINS: list[str] = [
-    "greenhouse.io",  # ATS — always full JD
-    "lever.co",  # ATS — always full JD
-    "ashbyhq.com",  # ATS — always full JD
-    "myworkdayjobs.com",  # ATS — full JD behind JS render
-    "jobs.smartrecruiters.com",  # ATS — full JD
+# Non-ATS job boards that have no PlatformSpec entry (kept as residual constant).
+# These are appended after the ATS platforms derived from the registry.
+_NON_ATS_PRIORITY_DOMAINS: list[str] = [
     "linkedin.com/jobs",  # LinkedIn public job pages (Playwright fetch)
     "builtin.com",  # Tech-focused job board
     "workingnomads.com",  # Remote-focused job board
     "ycombinator.com/companies",  # YC company listings with JDs
 ]
+
+
+# PRIORITY_DOMAINS is built from the registry-derived ATS domains (by priority order)
+# plus the non-ATS residual above. Import-time construction to avoid circular import.
+# The ATS portion is derived from ats_registry.PRIORITY_DOMAINS_ATS.
+def _build_priority_domains() -> list[str]:
+    from job_finder.web.ats_registry import PRIORITY_DOMAINS_ATS
+
+    return PRIORITY_DOMAINS_ATS + _NON_ATS_PRIORITY_DOMAINS
+
+
+PRIORITY_DOMAINS: list[str] = _build_priority_domains()
 
 
 # ---------------------------------------------------------------------------

@@ -25,7 +25,7 @@ from bs4 import BeautifulSoup
 
 from job_finder.web._http_constants import _HEADERS, _TIMEOUT
 from job_finder.web.ats_platforms import _title_matches
-from job_finder.web.careers_scraper import _ATS_DOMAINS
+from job_finder.web.ats_registry import REDIRECT_DOMAINS
 from job_finder.web.http_fetch import fetch_with_deadline
 
 logger = logging.getLogger(__name__)
@@ -530,7 +530,7 @@ def deduplicate_keywords(target_titles: list[str]) -> list[str]:
 def _is_ats_url(url: str) -> bool:
     """Check if a URL points to a known ATS domain."""
     netloc = urlparse(url).netloc.lower()
-    return any(ats in netloc for ats in _ATS_DOMAINS)
+    return any(ats in netloc for ats in REDIRECT_DOMAINS)
 
 
 # _find_job_array and _extract_field are imported from job_finder.web._field_alias

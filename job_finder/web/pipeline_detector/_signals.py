@@ -29,8 +29,8 @@ import logging
 import re
 from datetime import datetime
 
+from job_finder.web.ats_registry import ATS_DOMAINS
 from job_finder.web.pipeline_detector._constants import (
-    ATS_DOMAINS,
     COMPANY_STOP_WORDS,
     CONFIRMATION_KEYWORDS,
     INTERVIEW_KEYWORDS,

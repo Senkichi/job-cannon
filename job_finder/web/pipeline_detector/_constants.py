@@ -94,34 +94,6 @@ SIGNAL_KEYWORDS = {
     "confirmation": CONFIRMATION_KEYWORDS,
 }
 
-# ---------------------------------------------------------------------------
-# ATS domain list
-# ---------------------------------------------------------------------------
-
-ATS_DOMAINS = {
-    "greenhouse.io",
-    "greenhouse-mail.io",  # Greenhouse's outbound mail domain (no-reply@us.greenhouse-mail.io)
-    "lever.co",
-    "ashbyhq.com",
-    "workday.com",
-    "myworkday.com",
-    "taleo.net",
-    "icims.com",
-    "jobvite.com",
-    "smartrecruiters.com",
-    "breezy.hr",
-    "jazz.co",
-    "workable.com",
-    "recruitee.com",
-    "bamboohr.com",
-    "successfactors.com",
-    "kronos.net",
-    "rippling.com",
-    "pinpointhq.com",
-    "modernloop.io",  # Modern Loop interview scheduling — used by Upstart, others
-    "governmentjobs.com",  # NEOGOV / GovernmentJobs.com — public-sector ATS (counties, states, cities)
-}
-
 # Pipeline statuses that indicate a job is no longer active
 # Why "dismissed" is here: a manual dismissal is a deliberate user signal.
 # Auto-detect was previously allowed to resurrect dismissed jobs to "applied"
