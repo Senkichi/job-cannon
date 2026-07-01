@@ -211,6 +211,40 @@ class TestGreenhouseCapture:
         assert job["employment_type"] is None
         assert job["department"] is None
 
+    def test_ats_refreshed_at_present(self):
+        posting = {
+            "id": 1,
+            "title": "Staff Engineer",
+            "content": "<p>Build things.</p>",
+            "location": {"name": "New York"},
+            "updated_at": "2026-06-26T17:05:44-04:00",
+        }
+        job = greenhouse_posting_to_job(posting, "Co")
+        # Should normalize to naive UTC ISO
+        assert job["ats_refreshed_at"] == "2026-06-26T21:05:44"
+
+    def test_ats_refreshed_at_absent(self):
+        posting = {
+            "id": 1,
+            "title": "Engineer",
+            "content": "<p>Build things.</p>",
+            "location": {"name": "New York"},
+        }
+        job = greenhouse_posting_to_job(posting, "Co")
+        assert job["ats_refreshed_at"] is None
+
+    def test_ats_refreshed_at_malformed(self):
+        posting = {
+            "id": 1,
+            "title": "Engineer",
+            "content": "<p>Build things.</p>",
+            "location": {"name": "New York"},
+            "updated_at": "not-a-date",
+        }
+        job = greenhouse_posting_to_job(posting, "Co")
+        # Malformed timestamps should be NULL, not garbage
+        assert job["ats_refreshed_at"] is None
+
 
 # ---------------------------------------------------------------------------
 # Workday — CXS list payload rarely carries these; defensive reads → None

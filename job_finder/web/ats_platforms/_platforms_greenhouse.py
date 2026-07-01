@@ -24,7 +24,9 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import UTC, datetime
 
+from job_finder.json_utils import to_naive_utc_iso
 from job_finder.web._field_alias import resolve_title, resolve_url
 from job_finder.web.ats_platforms._registry import (
     PlatformScanner,
@@ -175,6 +177,20 @@ def _posting_to_job(posting: dict, _slug: str) -> dict:
     # worse than no date (D-08).
     posted_date: str | None = posting.get("first_published") or None
 
+    # ── ats_refreshed_at (mutable refresh timestamp, #575) ───────────────────
+    # ``updated_at`` is the mutable last-modified field (bumps on edits/reposts).
+    # Captured raw-as-provided and normalized to naive-UTC ISO for repost detection
+    # (divergence from posted_date). NULL when absent — no synthesis (epic #393).
+    ats_refreshed_at: str | None = None
+    refreshed_raw = posting.get("updated_at")
+    if refreshed_raw:
+        try:
+            dt = datetime.fromisoformat(refreshed_raw.replace("Z", "+00:00"))
+            ats_refreshed_at = to_naive_utc_iso(dt)
+        except (ValueError, TypeError):
+            # Malformed timestamp — leave NULL rather than storing garbage
+            pass
+
     # ── Description (JD Layer 2 step 2a) ─────────────────────────────────────
     # Greenhouse `content` is entity-escaped HTML (&lt;p&gt;…). Stored verbatim
     # it would send raw HTML to the scorer. Convert losslessly to plain text —
@@ -218,6 +234,7 @@ def _posting_to_job(posting: dict, _slug: str) -> dict:
         "comp_json": comp_json,
         "source_id": source_id,
         "posted_date": posted_date,
+        "ats_refreshed_at": ats_refreshed_at,
         "is_remote": None,
         "employment_type": None,
         "department": department,
