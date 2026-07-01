@@ -37,7 +37,7 @@ jobs:
     name: Build (ubuntu-latest)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - uses: astral-sh/setup-uv@v7
         with:
@@ -68,7 +68,7 @@ jobs:
       # Unlike install-validate.yml's smoke (wheel-only), this lane needs the
       # repo source on disk: scripts/install_smoke.py and config.example.yaml are
       # not packaged into the wheel.
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-python@v6
         with:

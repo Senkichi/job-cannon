@@ -18,7 +18,7 @@ jobs:
     name: Lint & Format
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - uses: astral-sh/setup-uv@v7
         with:
@@ -58,7 +58,7 @@ jobs:
           - { os: windows-latest, python_version: "3.13", name_suffix: " 3/4", pytest_args: "--splits 4 --group 3" }
           - { os: windows-latest, python_version: "3.13", name_suffix: " 4/4", pytest_args: "--splits 4 --group 4" }
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - uses: astral-sh/setup-uv@v7
         with:
@@ -132,7 +132,7 @@ jobs:
     name: Pre-commit
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-python@v6
         with:
