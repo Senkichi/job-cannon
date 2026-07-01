@@ -1,12 +1,14 @@
 """Dashboard blueprint — overview stats, activity feed, pipeline summary."""
 
 import logging
+import sqlite3
 
 from flask import Blueprint, current_app, render_template
 
 from job_finder.config import DEFAULT_DAILY_BUDGET_USD, get_fit_floor
 from job_finder.db import (
     compute_conversion_by_band,
+    get_crawl_latency_sli,
     get_dashboard_stats,
     get_liveness_stats,
     get_off_platform_miss_log,
@@ -15,6 +17,7 @@ from job_finder.db import (
     get_recent_activity,
     get_recent_pipeline_events,
     get_recent_runs,
+    get_surfaced_concentration,
 )
 from job_finder.web._htmx import htmx_fragment
 from job_finder.web.autoheal.health_monitor import degraded_sources
@@ -73,6 +76,8 @@ def _get_stats_context(conn, config):
     ats_ctx = _get_ats_context(conn)
     liveness_stats = get_liveness_stats(conn, config)
     off_platform_miss_log = get_off_platform_miss_log(conn, get_fit_floor(config))
+    crawl_latency_sli = get_crawl_latency_sli(conn, config)
+    surfaced_concentration = get_surfaced_concentration(conn)
     # TODO(M6 follow-up): per-case HTMX-expandable dashboard card listing each reachable miss
     # with its attributed discovery stage
     return {
@@ -85,12 +90,53 @@ def _get_stats_context(conn, config):
         "ats_tracked_count": ats_ctx["ats_tracked_count"],
         "liveness": liveness_stats,
         "off_platform_miss_log": off_platform_miss_log,
+        "crawl_latency_sli": crawl_latency_sli,
+        "surfaced_concentration": surfaced_concentration,
     }
 
 
 def _get_degraded_sources_context(conn) -> dict:
     """Return dict with list of currently-degraded parser sources (dashboard widget)."""
     return {"degraded": degraded_sources(conn)}
+
+
+def _get_funnel_drop_context(conn) -> dict:
+    """Return funnel drop-bucket breakdown from the most recent ingestion run.
+
+    Reads the persisted funnel metadata from runs.metadata and returns
+    the drop buckets. Returns empty dict if no run with funnel metadata exists.
+    """
+    import json
+
+    try:
+        row = conn.execute(
+            "SELECT metadata FROM runs WHERE source = 'ingestion' AND metadata IS NOT NULL "
+            "ORDER BY timestamp DESC LIMIT 1"
+        ).fetchone()
+        if not row:
+            return {"funnel": None}
+        funnel = json.loads(row[0])
+        if not isinstance(funnel, dict):
+            return {"funnel": None}
+        return {"funnel": funnel}
+    except (json.JSONDecodeError, sqlite3.OperationalError):
+        return {"funnel": None}
+
+
+def _get_score_rot_stratigraphy(conn) -> dict:
+    """Return score-rot stratigraphy: GROUP BY scoring_model breakdown.
+
+    Returns a list of (model, count) tuples ordered by count descending.
+    Returns empty list if no scored jobs exist.
+    """
+    try:
+        rows = conn.execute(
+            "SELECT scoring_model, COUNT(*) FROM jobs WHERE scoring_model IS NOT NULL "
+            "GROUP BY scoring_model ORDER BY COUNT(*) DESC"
+        ).fetchall()
+        return {"model_breakdown": [dict(row) for row in rows]}
+    except sqlite3.OperationalError:
+        return {"model_breakdown": []}
 
 
 # GitHub truncates very long GET URLs; keep the prefilled-issue link bounded.
@@ -233,6 +279,8 @@ def index():
     pipeline_events = get_recent_pipeline_events(conn, limit=10)
     inbox_banner = _get_inbox_banner(config, conn)
     conversion_by_band = compute_conversion_by_band(conn)
+    funnel_ctx = _get_funnel_drop_context(conn)
+    score_rot_ctx = _get_score_rot_stratigraphy(conn)
 
     return render_template(
         "dashboard/index.html",
@@ -247,6 +295,8 @@ def index():
         pipeline_events=pipeline_events,
         inbox_banner=inbox_banner,
         conversion_by_band=conversion_by_band,
+        **funnel_ctx,
+        **score_rot_ctx,
     )
 
 
@@ -405,4 +455,21 @@ def degraded_sources_fragment():
     return render_template(
         "dashboard/_degraded_sources.html",
         **_get_degraded_sources_context(conn),
+    )
+
+
+@dashboard_bp.route("/off-platform-misses", strict_slashes=False)
+@htmx_fragment("dashboard.index")
+def off_platform_misses_fragment():
+    """HTMX fragment — off-platform miss-log expandable card."""
+    from flask import request
+
+    conn = get_db()
+    config = current_app.config.get("JF_CONFIG", {})
+    off_platform_miss_log = get_off_platform_miss_log(conn, get_fit_floor(config))
+    detail = request.args.get("detail") == "1"
+    return render_template(
+        "dashboard/_off_platform_misses.html",
+        off_platform_miss_log=off_platform_miss_log,
+        detail=detail,
     )
