@@ -18,7 +18,10 @@ import logging
 import requests
 from bs4 import BeautifulSoup
 
-from job_finder.web.ats_platforms._registry import PlatformScanner
+from job_finder.web.ats_platforms._registry import (
+    PlatformScanner,
+    _auth_block_statuses,
+)
 from job_finder.web.ats_prober import _PROBE_TIMEOUT
 
 logger = logging.getLogger(__name__)
@@ -34,7 +37,14 @@ def _fetch_postings(slug: str) -> list[dict]:
         return []
 
     if resp.status_code != 200:
-        logger.debug("scan_bamboohr('%s') returned HTTP %d", slug, resp.status_code)
+        if resp.status_code in _auth_block_statuses():
+            logger.warning(
+                "scan_bamboohr('%s') possible auth/anti-bot wall: HTTP %d",
+                slug,
+                resp.status_code,
+            )
+        else:
+            logger.debug("scan_bamboohr('%s') returned HTTP %d", slug, resp.status_code)
         return []
 
     try:

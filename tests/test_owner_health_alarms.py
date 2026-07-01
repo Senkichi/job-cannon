@@ -239,6 +239,31 @@ def test_score_rot_disabled_when_floor_above_one():
     assert _check_score_rot(conn, cfg) is None
 
 
+def test_score_rot_report_includes_model_breakdown():
+    """When score-rot fires, the message includes a per-model count breakdown."""
+    conn = _jobs_conn()
+    # Seed drift rows across two scoring models
+    _add_job(conn, "a", "apply", _APPLY, scoring_model="qwen2.5:14b")
+    _add_job(conn, "b", "apply", _APPLY, scoring_model="qwen2.5:14b")
+    _add_job(conn, "c", "apply", _APPLY, scoring_model="groq/llama-3.3")
+    _add_job(conn, "d", "consider", _CONSIDER, scoring_model="groq/llama-3.3")
+    # Force drift via apply_mean_floor=3.6
+    issue = _check_score_rot(conn, {"scoring": {"apply_mean_floor": 3.6}})
+    assert issue is not None
+    assert "by model:" in issue
+    assert "qwen2.5:14b=2" in issue
+    assert "groq/llama-3.3=2" in issue
+
+
+def test_score_rot_no_breakdown_when_silent():
+    """When score-rot returns None (no drift), no breakdown is computed."""
+    conn = _jobs_conn()
+    _add_job(conn, "a", "apply", _APPLY, scoring_model="qwen2.5:14b")
+    _add_job(conn, "b", "consider", _CONSIDER, scoring_model="groq/llama-3.3")
+    # No drift → returns None, never computes/appends a breakdown
+    assert _check_score_rot(conn, {}) is None
+
+
 # ---------------------------------------------------------------------------
 # Integration through run_health_check
 # ---------------------------------------------------------------------------

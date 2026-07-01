@@ -37,6 +37,7 @@ from job_finder.web.ats_platforms._registry import (
     BOARD_GONE_STATUSES,
     BoardGoneError,
     PlatformScanner,
+    _auth_block_statuses,
     coerce_remote_bool,
     label_or_str,
 )
@@ -122,7 +123,14 @@ def _fetch_postings(slug: str) -> list[dict]:
         if offset == 0 and resp.status_code in BOARD_GONE_STATUSES:
             raise BoardGoneError(resp.status_code, slug)
         if resp.status_code != 200:
-            logger.debug("scan_oracle_cloud('%s') returned HTTP %d", slug, resp.status_code)
+            if resp.status_code in _auth_block_statuses():
+                logger.warning(
+                    "scan_oracle_cloud('%s') possible auth/anti-bot wall: HTTP %d",
+                    slug,
+                    resp.status_code,
+                )
+            else:
+                logger.debug("scan_oracle_cloud('%s') returned HTTP %d", slug, resp.status_code)
             break
 
         try:

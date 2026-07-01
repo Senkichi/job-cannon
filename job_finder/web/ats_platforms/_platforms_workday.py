@@ -37,6 +37,7 @@ from job_finder.web.ats_platforms._registry import (
     BOARD_GONE_STATUSES,
     BoardGoneError,
     PlatformScanner,
+    _auth_block_statuses,
     coerce_remote_bool,
     label_or_str,
 )
@@ -350,7 +351,14 @@ def _fetch_postings_with_completeness(
             # incomplete, exactly as before.
             if resp.status_code in BOARD_GONE_STATUSES and total_fetched == 0:
                 raise BoardGoneError(resp.status_code, slug)
-            logger.debug("scan_workday('%s') returned HTTP %d", slug, resp.status_code)
+            if resp.status_code in _auth_block_statuses():
+                logger.warning(
+                    "scan_workday('%s') possible auth/anti-bot wall: HTTP %d",
+                    slug,
+                    resp.status_code,
+                )
+            else:
+                logger.debug("scan_workday('%s') returned HTTP %d", slug, resp.status_code)
             break
 
         try:

@@ -393,6 +393,14 @@ def _check_score_rot(conn, config: dict) -> str | None:
     frac = drift / audited
     if frac < floor:
         return None
+
+    # Stratigraphy: per-model breakdown so the operator can see which scoring era is rotting
+    model_rows = conn.execute(
+        "SELECT scoring_model, COUNT(*) FROM jobs WHERE scoring_model IS NOT NULL GROUP BY scoring_model ORDER BY COUNT(*) DESC"
+    ).fetchall()
+    if model_rows:
+        model_breakdown = ", ".join(f"{model}={count}" for model, count in model_rows)
+        return f"Score rot: {drift}/{audited} stored verdicts ({frac:.1%}) differ from today's rule | by model: {model_breakdown}"
     return f"Score rot: {drift}/{audited} stored verdicts ({frac:.1%}) differ from today's rule"
 
 

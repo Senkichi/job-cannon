@@ -31,6 +31,7 @@ from dataclasses import dataclass
 from typing import Any
 
 import requests
+from flask import current_app
 
 from job_finder.web.ats_prober import _PROBE_TIMEOUT
 
@@ -40,6 +41,28 @@ logger = logging.getLogger(__name__)
 # HTTP statuses that mean an ATS board/slug no longer resolves (permanent),
 # as opposed to transient 5xx / rate-limit 403 / network blips.
 BOARD_GONE_STATUSES = frozenset({404, 410})
+
+
+def _auth_block_statuses() -> frozenset[int]:
+    """Return the set of HTTP statuses treated as auth/anti-bot walls.
+
+    Reads from ``health.auth_block_statuses`` in the app config when available
+    (scanners run under the scheduler which pushes an app context). Falls back
+    to the default ``{401, 403, 429}`` when no app context or key is present.
+
+    Returns:
+        Frozenset of HTTP status codes that should log at WARNING instead of
+        DEBUG when encountered by a scanner.
+    """
+    try:
+        return frozenset(
+            current_app.config.get("JF_CONFIG", {})
+            .get("health", {})
+            .get("auth_block_statuses", [401, 403, 429])
+        )
+    except (RuntimeError, AttributeError):
+        # No app context (e.g. tests) or key missing: use default
+        return frozenset({401, 403, 429})
 
 
 class BoardGoneError(Exception):
@@ -281,7 +304,15 @@ def _http_get_json(
         return None
 
     if resp.status_code != 200:
-        logger.debug("%s('%s') returned HTTP %d", log_label, slug, resp.status_code)
+        if resp.status_code in _auth_block_statuses():
+            logger.warning(
+                "%s('%s') possible auth/anti-bot wall: HTTP %d",
+                log_label,
+                slug,
+                resp.status_code,
+            )
+        else:
+            logger.debug("%s('%s') returned HTTP %d", log_label, slug, resp.status_code)
         return None
 
     try:

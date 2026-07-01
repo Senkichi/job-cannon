@@ -26,6 +26,7 @@ from job_finder.web.ats_platforms._registry import (
     BOARD_GONE_STATUSES,
     BoardGoneError,
     PlatformScanner,
+    _auth_block_statuses,
     label_or_str,
 )
 from job_finder.web.ats_prober import _PROBE_TIMEOUT
@@ -102,7 +103,14 @@ def _fetch_postings_with_completeness(slug: str) -> tuple[list[dict], bool]:
         if resp.status_code != 200:
             if resp.status_code in BOARD_GONE_STATUSES and total_fetched == 0:
                 raise BoardGoneError(resp.status_code, slug)
-            logger.debug("scan_eightfold('%s') returned HTTP %d", slug, resp.status_code)
+            if resp.status_code in _auth_block_statuses():
+                logger.warning(
+                    "scan_eightfold('%s') possible auth/anti-bot wall: HTTP %d",
+                    slug,
+                    resp.status_code,
+                )
+            else:
+                logger.debug("scan_eightfold('%s') returned HTTP %d", slug, resp.status_code)
             break
 
         try:

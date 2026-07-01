@@ -35,6 +35,7 @@ from job_finder.web.ats_platforms._registry import (
     BOARD_GONE_STATUSES,
     BoardGoneError,
     PlatformScanner,
+    _auth_block_statuses,
 )
 from job_finder.web.ats_prober import _PROBE_TIMEOUT
 from job_finder.web.location_parser import parse_locations
@@ -140,7 +141,14 @@ def _fetch_postings(slug: str) -> list[dict]:
         if skip == 0 and resp.status_code in BOARD_GONE_STATUSES:
             raise BoardGoneError(resp.status_code, slug)
         if resp.status_code != 200:
-            logger.debug("scan_ultipro('%s') returned HTTP %d", slug, resp.status_code)
+            if resp.status_code in _auth_block_statuses():
+                logger.warning(
+                    "scan_ultipro('%s') possible auth/anti-bot wall: HTTP %d",
+                    slug,
+                    resp.status_code,
+                )
+            else:
+                logger.debug("scan_ultipro('%s') returned HTTP %d", slug, resp.status_code)
             break
 
         try:

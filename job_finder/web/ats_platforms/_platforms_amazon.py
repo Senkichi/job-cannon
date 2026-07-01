@@ -20,7 +20,11 @@ from datetime import datetime
 
 import requests
 
-from job_finder.web.ats_platforms._registry import PlatformScanner, label_or_str
+from job_finder.web.ats_platforms._registry import (
+    PlatformScanner,
+    _auth_block_statuses,
+    label_or_str,
+)
 from job_finder.web.ats_prober import _PROBE_TIMEOUT
 from job_finder.web.description_formatter import html_to_plain_text
 from job_finder.web.location_parser import parse_locations
@@ -95,7 +99,14 @@ def _fetch_one_query(base_query: str, slug: str) -> list[dict]:
             break
 
         if resp.status_code != 200:
-            logger.debug("scan_amazon('%s') returned HTTP %d", slug, resp.status_code)
+            if resp.status_code in _auth_block_statuses():
+                logger.warning(
+                    "scan_amazon('%s') possible auth/anti-bot wall: HTTP %d",
+                    slug,
+                    resp.status_code,
+                )
+            else:
+                logger.debug("scan_amazon('%s') returned HTTP %d", slug, resp.status_code)
             break
 
         try:
