@@ -133,6 +133,11 @@ class PlatformSpec:
     reconcilable: bool = False
     non_scannable: bool = False
     keyword_adapter: bool = False
+    # POSTING-ID EXTRACTION — regex for extracting stable posting IDs from URLs.
+    # Used by expiry_checker (Signal 1 per-posting ATS API) and ats_reconciler
+    # (set-diff staleness detection). The pattern must match the URL shape
+    # that the platform's single-posting endpoint accepts.
+    posting_id_pattern: re.Pattern | None = None
 
 
 # --- The registry. ONE entry per platform; capability flags only here. ---------
@@ -147,6 +152,7 @@ _SPECS: tuple[PlatformSpec, ...] = (
         speculative_order=0,
         url_fastpath=True,
         reconcilable=True,
+        posting_id_pattern=re.compile(r"jobs\.lever\.co/[^/]+/([a-f0-9-]+)", re.IGNORECASE),
     ),
     PlatformSpec(
         "greenhouse",
@@ -155,6 +161,7 @@ _SPECS: tuple[PlatformSpec, ...] = (
         speculative_order=1,
         url_fastpath=True,
         reconcilable=True,
+        posting_id_pattern=re.compile(r"boards\.greenhouse\.io/[^/]+/jobs/(\d+)", re.IGNORECASE),
     ),
     PlatformSpec(
         "ashby",
@@ -163,6 +170,7 @@ _SPECS: tuple[PlatformSpec, ...] = (
         speculative_order=2,
         url_fastpath=True,
         reconcilable=True,
+        posting_id_pattern=re.compile(r"jobs\.ashbyhq\.com/[^/]+/([a-f0-9-]+)"),
     ),
     PlatformSpec(
         "jazzhr",
@@ -186,12 +194,23 @@ _SPECS: tuple[PlatformSpec, ...] = (
         url_fastpath=True,
     ),
     # Reconcile-only enterprise boards (POST APIs; not speculative-probed).
-    PlatformSpec("workday", probe_attr="_probe_workday", url_fastpath=True, reconcilable=True),
+    PlatformSpec(
+        "workday",
+        probe_attr="_probe_workday",
+        url_fastpath=True,
+        reconcilable=True,
+        posting_id_pattern=re.compile(
+            r"myworkdayjobs\.com/[^?#]*?/([^/?#]+)(?:/?(?:[?#]|$))", re.IGNORECASE
+        ),
+    ),
     PlatformSpec(
         "smartrecruiters",
         probe_attr="_probe_smartrecruiters",
         url_fastpath=True,
         reconcilable=True,
+        posting_id_pattern=re.compile(
+            r"jobs\.smartrecruiters\.com/[^/]+/([A-Za-z0-9_]+)", re.IGNORECASE
+        ),
     ),
     # FP-prone: evidence/URL-path promotable only (never speculative-guessed).
     PlatformSpec("bamboohr", probe_attr="_probe_bamboohr", fp_prone=True, url_fastpath=True),
@@ -531,3 +550,24 @@ SCANNABLE_PLATFORMS: frozenset[str] = frozenset(
 # ``_TARGET_PLATFORMS = (SCANNERS_BY_NAME - NON_SCANNABLE) | {icims}`` — a
 # careers link to a platform in this set is promotable; one to a stub is not.
 SCANNABLE_TARGET_PLATFORMS: frozenset[str] = SCANNABLE_PLATFORMS - NON_SCANNABLE_PLATFORMS
+
+# Posting-ID extraction patterns for ats_reconciler (set-diff staleness detection).
+# Greenhouse is excluded here — ats_reconciler._extract_posting_id special-cases
+# greenhouse with a 3-pattern try-in-order chain (_GREENHOUSE_PATH_RE / _GREENHOUSE_GH_JID_RE /
+# _GREENHOUSE_EMBED_RE) checked before any dict lookup. Workday and SmartRecruiters
+# are included but use completeness-gated paths in reconcile_company.
+RECONCILER_POSTING_ID_PATTERNS: dict[str, re.Pattern] = {
+    n: s.posting_id_pattern
+    for n, s in PLATFORMS.items()
+    if s.posting_id_pattern is not None and n in {"lever", "ashby", "workday", "smartrecruiters"}
+}
+
+# Posting-ID extraction patterns for expiry_checker (Signal 1 per-posting ATS API).
+# Covers the three platforms whose APIs accept a posting-id lookup. Workday and
+# SmartRecruiters don't expose equivalent single-posting endpoints; they rely on
+# Phase B batch reconciliation via ats_reconciler (per expiry_checker docstring).
+EXPIRY_CHECKER_POSTING_ID_PATTERNS: dict[str, re.Pattern] = {
+    n: s.posting_id_pattern
+    for n, s in PLATFORMS.items()
+    if s.posting_id_pattern is not None and n in {"lever", "greenhouse", "ashby"}
+}

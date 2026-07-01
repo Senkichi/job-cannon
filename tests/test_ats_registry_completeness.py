@@ -283,3 +283,94 @@ def test_parity_url_detection_order():
         )
         assert slug == expected_slug, f"URL {url}: expected slug {expected_slug}, got {slug}"
         assert spec == expected_spec, f"URL {url}: expected spec {expected_spec}, got {spec}"
+
+
+def test_equivalence_reconciler_posting_id_patterns():
+    """The registry's RECONCILER_POSTING_ID_PATTERNS must exactly match the legacy
+    _SIMPLE_POSTING_ID_PATTERNS from ats_reconciler (platform-key set and regex patterns).
+    Greenhouse is excluded — ats_reconciler special-cases it with a 3-pattern chain."""
+    import re
+
+    # Golden baseline from pre-PR-5 ats_reconciler._SIMPLE_POSTING_ID_PATTERNS
+    golden_patterns = {
+        "lever": re.compile(r"jobs\.lever\.co/[^/]+/([a-f0-9-]+)", re.IGNORECASE),
+        "ashby": re.compile(r"jobs\.ashbyhq\.com/[^/]+/([a-f0-9-]+)"),
+        "workday": re.compile(
+            r"myworkdayjobs\.com/[^?#]*?/([^/?#]+)(?:/?(?:[?#]|$))", re.IGNORECASE
+        ),
+        "smartrecruiters": re.compile(
+            r"jobs\.smartrecruiters\.com/[^/]+/([A-Za-z0-9_]+)", re.IGNORECASE
+        ),
+    }
+
+    derived = ats_registry.RECONCILER_POSTING_ID_PATTERNS
+
+    # Platform-key set must match exactly
+    assert set(derived.keys()) == set(golden_patterns.keys()), (
+        f"Platform key mismatch: derived={set(derived.keys())}, "
+        f"golden={set(golden_patterns.keys())}"
+    )
+
+    # Regex patterns must be byte-identical (pattern string + flags)
+    for platform in golden_patterns:
+        assert derived[platform].pattern == golden_patterns[platform].pattern, (
+            f"{platform}: pattern mismatch - derived={derived[platform].pattern}, "
+            f"golden={golden_patterns[platform].pattern}"
+        )
+        assert derived[platform].flags == golden_patterns[platform].flags, (
+            f"{platform}: flags mismatch - derived={derived[platform].flags}, "
+            f"golden={golden_patterns[platform].flags}"
+        )
+
+
+def test_equivalence_expiry_checker_posting_id_patterns():
+    """The registry's EXPIRY_CHECKER_POSTING_ID_PATTERNS must exactly match the legacy
+    _POSTING_PATTERNS from expiry_checker (platform-key set and regex patterns).
+    Workday and SmartRecruiters are excluded — they rely on Phase B batch reconciliation."""
+    import re
+
+    # Golden baseline from pre-PR-5 expiry_checker._POSTING_PATTERNS
+    golden_patterns = {
+        "lever": re.compile(r"jobs\.lever\.co/[^/]+/([a-f0-9-]+)", re.IGNORECASE),
+        "greenhouse": re.compile(r"boards\.greenhouse\.io/[^/]+/jobs/(\d+)", re.IGNORECASE),
+        "ashby": re.compile(r"jobs\.ashbyhq\.com/[^/]+/([a-f0-9-]+)"),
+    }
+
+    derived = ats_registry.EXPIRY_CHECKER_POSTING_ID_PATTERNS
+
+    # Platform-key set must match exactly
+    assert set(derived.keys()) == set(golden_patterns.keys()), (
+        f"Platform key mismatch: derived={set(derived.keys())}, "
+        f"golden={set(golden_patterns.keys())}"
+    )
+
+    # Regex patterns must be byte-identical (pattern string + flags)
+    for platform in golden_patterns:
+        assert derived[platform].pattern == golden_patterns[platform].pattern, (
+            f"{platform}: pattern mismatch - derived={derived[platform].pattern}, "
+            f"golden={golden_patterns[platform].pattern}"
+        )
+        assert derived[platform].flags == golden_patterns[platform].flags, (
+            f"{platform}: flags mismatch - derived={derived[platform].flags}, "
+            f"golden={golden_patterns[platform].flags}"
+        )
+
+
+def test_expiry_checker_excludes_workday_and_smartrecruiters():
+    """Regression test: expiry_checker must NOT resolve posting IDs for workday or
+    smartrecruiters (per its docstring: they rely on Phase B batch reconciliation).
+    This guards against a future refactor that might naively expose all posting_id_pattern
+    platforms to expiry_checker."""
+    from job_finder.web.expiry_checker import _extract_posting_id
+
+    # Workday URL with posting ID
+    workday_url = "https://testco.myworkdayjobs.com/en-US/testco/job/Senior-Data-Scientist_R-12345"
+    assert _extract_posting_id(workday_url, "workday") is None, (
+        "expiry_checker must return None for workday (relies on Phase B reconciliation)"
+    )
+
+    # SmartRecruiters URL with posting ID
+    sr_url = "https://jobs.smartrecruiters.com/testco/12345-senior-data-scientist"
+    assert _extract_posting_id(sr_url, "smartrecruiters") is None, (
+        "expiry_checker must return None for smartrecruiters (relies on Phase B reconciliation)"
+    )
