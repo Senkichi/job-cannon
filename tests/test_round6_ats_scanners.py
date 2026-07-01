@@ -453,12 +453,16 @@ class TestDispatcherWiring:
         assert "jobvite" not in _URL_FASTPATH_PLATFORMS
 
     def test_verify_fastpath_live_dispatches_to_each_probe(self):
+        # _verify_fastpath_live delegates to the registry SSOT, which resolves the probe by
+        # name from ats_prober at call time. So the patch target is ats_prober._probe_X (matching
+        # test_reconcile_verify_live_supports_round6_platforms below), NOT the _probe module's
+        # local re-export — the old if/elif ladder that resolved from _probe's namespace is gone.
         from job_finder.web.ats_scanner._probe import _verify_fastpath_live
 
         for platform, probe_target in (
-            ("workable", "job_finder.web.ats_scanner._probe._probe_workable"),
-            ("paylocity", "job_finder.web.ats_scanner._probe._probe_paylocity"),
-            ("rippling", "job_finder.web.ats_scanner._probe._probe_rippling"),
+            ("workable", "job_finder.web.ats_prober._probe_workable"),
+            ("paylocity", "job_finder.web.ats_prober._probe_paylocity"),
+            ("rippling", "job_finder.web.ats_prober._probe_rippling"),
         ):
             with patch(probe_target, return_value=True):
                 assert _verify_fastpath_live(platform, "any") is True

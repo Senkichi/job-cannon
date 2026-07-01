@@ -740,8 +740,10 @@ class TestCareersUrlFastPath:
 
         with (
             patch("job_finder.web.ats_scanner._probe.time.sleep"),
+            # Fast-path liveness resolves the probe through the registry SSOT (ats_prober),
+            # not the _probe module's local re-export; patch it at the resolution point.
             patch(
-                "job_finder.web.ats_scanner._probe._probe_ashby",
+                "job_finder.web.ats_prober._probe_ashby",
                 return_value=True,
             ),
         ):
@@ -791,8 +793,9 @@ class TestCareersUrlFastPath:
 
         with (
             patch("job_finder.web.ats_scanner._probe.time.sleep"),
+            # Fast-path liveness resolves the probe through the registry SSOT (ats_prober).
             patch(
-                "job_finder.web.ats_scanner._probe._probe_recruitee",
+                "job_finder.web.ats_prober._probe_recruitee",
                 return_value=True,
             ),
         ):
@@ -828,8 +831,10 @@ class TestCareersUrlFastPath:
 
         with (
             patch("job_finder.web.ats_scanner._probe.time.sleep"),
+            # Fast-path liveness resolves the probe through the registry SSOT (ats_prober);
+            # is_blocked_brand is still called in _probe's namespace, so it stays patched there.
             patch(
-                "job_finder.web.ats_scanner._probe._probe_ashby",
+                "job_finder.web.ats_prober._probe_ashby",
                 return_value=True,
             ),
             patch(
@@ -872,8 +877,10 @@ class TestCareersUrlFastPath:
                 "job_finder.web.ats_scanner._probe.is_blocked_brand",
                 return_value=False,
             ),
+            # Fast-path liveness resolves the probe through the registry SSOT (ats_prober);
+            # simulate the ashby tenant being dead there (hermetic — no real network probe).
             patch(
-                "job_finder.web.ats_scanner._probe._probe_ashby",
+                "job_finder.web.ats_prober._probe_ashby",
                 return_value=False,
             ),
             patch("job_finder.web.ats_prober._probe_lever", return_value=False),
@@ -1037,8 +1044,10 @@ class TestSpeculativeMissCategorization:
                 "job_finder.web.ats_scanner._probe.is_blocked_brand",
                 return_value=False,
             ),
+            # Fast-path liveness (careers_url is lever) resolves via the registry SSOT
+            # (ats_prober); force it False so the flow falls through to the speculative ladder.
             patch(
-                "job_finder.web.ats_scanner._probe._probe_lever",
+                "job_finder.web.ats_prober._probe_lever",
                 return_value=False,
             ),
             patch(
