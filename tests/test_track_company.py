@@ -6,6 +6,9 @@ Suggestions contract: untracked feed-frequent companies ranked by good-fit
 count then volume; tracked companies excluded via normalized-name match.
 Job-row contract: expanded row shows Track button (by name, not company_id);
 already-tracked companies render the ✓ state up front.
+
+Cold-start fallback (Issue #660): when owner history is empty, rank by
+profile match and ATS scannability instead.
 """
 
 import sqlite3
@@ -119,7 +122,7 @@ class TestSuggestions:
         conn = _conn(app)
         # BigCo: 3 jobs, 0 good. GoodCo: 2 jobs, 2 good. → GoodCo first.
         for i in range(3):
-            _insert_job(conn, f"bigco|{i}", "BigCo")
+            _insert_job(conn, f"bigco|{i}", "BigCo", classification="skip")
         for i in range(2):
             _insert_job(conn, f"goodco|{i}", "GoodCo", classification="apply")
         suggestions = get_suggested_companies(conn)
@@ -136,8 +139,8 @@ class TestSuggestions:
         # Tracked under a raw name that normalizes differently than the
         # job's raw company string — Python-side normalization must match.
         upsert_company(conn, name="Stripe, Inc.", ats_probe_status="hit")
-        _insert_job(conn, "stripe|1", "Stripe Inc.")
-        _insert_job(conn, "other|1", "Other Co")
+        _insert_job(conn, "stripe|1", "Stripe Inc.", classification="apply")
+        _insert_job(conn, "other|1", "Other Co", classification="apply")
         suggestions = get_suggested_companies(conn)
         conn.close()
         names = [s["company"] for s in suggestions]
@@ -149,7 +152,7 @@ class TestSuggestions:
 
         conn = _conn(app)
         cid = upsert_company(conn, name="Linked Co", ats_probe_status="hit")
-        _insert_job(conn, "linked|1", "Linked Co", company_id=cid)
+        _insert_job(conn, "linked|1", "Linked Co", company_id=cid, classification="apply")
         suggestions = get_suggested_companies(conn)
         conn.close()
         assert suggestions == []
@@ -157,10 +160,124 @@ class TestSuggestions:
     def test_limit_respected(self, app):
         conn = _conn(app)
         for i in range(12):
-            _insert_job(conn, f"co{i}|1", f"Company {i}")
+            _insert_job(conn, f"co{i}|1", f"Company {i}", classification="apply")
         suggestions = get_suggested_companies(conn, limit=8)
         conn.close()
         assert len(suggestions) == 8
+
+
+class TestColdStartSuggestions:
+    """Cold-start fallback ranking (Issue #660)."""
+
+    def test_cold_start_uses_profile_ranking_when_no_history(self, app):
+        """When no owner history exists, rank by profile match."""
+        conn = _conn(app)
+
+        # Insert jobs with no classification (no owner history)
+        _insert_job(conn, "co1|1", "DataCo", classification=None)
+        _insert_job(conn, "co2|1", "EngineerCo", classification=None)
+        _insert_job(conn, "co3|1", "RemoteCo", classification=None)
+
+        # Profile with target titles and locations
+        profile = {
+            "target_titles": ["Data Scientist", "Engineer"],
+            "target_locations": ["Remote"],
+            "skills": ["Python"],
+        }
+
+        suggestions = get_suggested_companies(conn, profile=profile)
+        conn.close()
+
+        # Should return suggestions with relevance_score and ats_boost
+        assert len(suggestions) > 0
+        # EngineerCo should rank higher (title match)
+        engineer_idx = next(
+            (i for i, s in enumerate(suggestions) if s["company"] == "EngineerCo"), None
+        )
+        assert engineer_idx is not None
+        # Check that cold-start fields are present
+        assert "relevance_score" in suggestions[engineer_idx]
+        assert "ats_boost" in suggestions[engineer_idx]
+
+    def test_cold_start_excludes_tracked_companies(self, app):
+        """Cold-start suggestions should exclude already-tracked companies."""
+        conn = _conn(app)
+        from job_finder.web.ats_scanner import upsert_company
+
+        # Track a company
+        upsert_company(conn, name="TrackedCo", ats_probe_status="pending")
+
+        # Insert jobs for tracked and untracked companies
+        _insert_job(conn, "tracked|1", "TrackedCo", classification=None)
+        _insert_job(conn, "untracked|1", "UntrackedCo", classification=None)
+
+        profile = {"target_titles": ["Engineer"], "target_locations": [], "skills": []}
+
+        suggestions = get_suggested_companies(conn, profile=profile)
+        conn.close()
+
+        # Should only include UntrackedCo
+        assert len(suggestions) == 1
+        assert suggestions[0]["company"] == "UntrackedCo"
+
+    def test_cold_start_falls_back_to_standard_ranking_with_history(self, app):
+        """When owner history exists, use standard good_cnt ranking."""
+        conn = _conn(app)
+
+        # Insert jobs with classification (owner history)
+        _insert_job(conn, "co1|1", "GoodCo", classification="apply")
+        _insert_job(conn, "co2|1", "BadCo", classification="reject")
+
+        profile = {"target_titles": ["Engineer"], "target_locations": [], "skills": []}
+
+        suggestions = get_suggested_companies(conn, profile=profile)
+        conn.close()
+
+        # Should use standard ranking (good_cnt DESC)
+        assert len(suggestions) == 2
+        # GoodCo should be first (good_cnt=1 vs 0)
+        assert suggestions[0]["company"] == "GoodCo"
+        assert suggestions[0]["good_cnt"] == 1
+        assert suggestions[1]["company"] == "BadCo"
+        assert suggestions[1]["good_cnt"] == 0
+        # Cold-start fields should NOT be present
+        assert "relevance_score" not in suggestions[0]
+        assert "ats_boost" not in suggestions[0]
+
+    def test_cold_start_disabled_when_profile_none(self, app):
+        """When profile is None, cold-start fallback is disabled."""
+        conn = _conn(app)
+
+        # Insert jobs with no classification
+        _insert_job(conn, "co1|1", "AnyCo", classification=None)
+
+        suggestions = get_suggested_companies(conn, profile=None)
+        conn.close()
+
+        # Should return empty (no history, no profile)
+        assert len(suggestions) == 0
+
+    def test_cold_start_ats_boost(self, app):
+        """Companies with known ATS platforms get boost."""
+        conn = _conn(app)
+        from job_finder.web.ats_scanner import upsert_company
+
+        # Insert a company with known ATS platform
+        upsert_company(conn, name="ATS Co", ats_platform="greenhouse", ats_slug="ats-co")
+
+        # Insert jobs for ATS and non-ATS companies
+        _insert_job(conn, "ats|1", "ATS Co", classification=None)
+        _insert_job(conn, "nonats|1", "NonATS Co", classification=None)
+
+        profile = {"target_titles": ["Engineer"], "target_locations": [], "skills": []}
+
+        suggestions = get_suggested_companies(conn, profile=profile)
+        conn.close()
+
+        # ATS Co should have ats_boost
+        ats_suggestion = next((s for s in suggestions if s["company"] == "ATS Co"), None)
+        if ats_suggestion:
+            assert ats_suggestion["ats_boost"] == 5
 
 
 class TestCompaniesPageCard:

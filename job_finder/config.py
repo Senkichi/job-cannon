@@ -85,6 +85,12 @@ DEFAULT_AGENTIC_BATCH_LIMIT = 50
 # mid-token and sat below the 10k the scorer would have accepted).
 JD_STORAGE_MAX_CHARS = 50_000
 
+# --- Cold-start watchlist seeding (Issue #660) ---
+# Number of companies to auto-seed into the watchlist from cold-start
+# suggestions when the user declares no target companies. This enables
+# day-1 watchlist population for new users.
+DEFAULT_COLD_START_WATCHLIST_SEED_COUNT = 3
+
 # --- Company denylist (single source of truth) ---
 # Company names that should not produce company records and should be excluded
 # from scoring. Two classes live here:
