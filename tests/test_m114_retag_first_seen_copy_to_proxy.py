@@ -15,7 +15,6 @@ import tempfile
 
 import pytest
 
-from job_finder.web.db_helpers import standalone_connection
 from job_finder.web.db_migrate import run_migrations
 from job_finder.web.migrations import MigrationContext
 from job_finder.web.migrations import m114_retag_first_seen_copy_to_proxy as m114
