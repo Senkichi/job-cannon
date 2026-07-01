@@ -52,7 +52,8 @@ import sqlite3
 from job_finder.web.location_canonical import (
     JobLocation,
     dedupe_locations,
-    from_json,
+)
+from job_finder.web.location_canonical import (
     to_json as _locations_to_json,
 )
 

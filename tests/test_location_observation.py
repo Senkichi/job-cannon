@@ -22,8 +22,8 @@ from job_finder.db import (
 )
 from job_finder.models import Job
 from job_finder.parsed_job import ParsedJob
-from job_finder.web.location_canonical import from_json as locations_from_json
 from job_finder.web.location_canonical import JobLocation
+from job_finder.web.location_canonical import from_json as locations_from_json
 
 
 def _careers_crawl_parsed(*, location: str = "", description: str | None = None) -> ParsedJob:

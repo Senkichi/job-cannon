@@ -27,8 +27,7 @@ from job_finder.web.location_canonical import to_json as _locations_to_json
 
 from ._jd_full import _is_jd_junk as _jd_is_junk
 from ._jd_full import set_jd_full as _set_jd_full
-from ._locations import merge_locations_raw
-from ._locations import merge_locations_structured
+from ._locations import merge_locations_raw, merge_locations_structured
 from ._persistence import update_pipeline_status
 
 _logger = logging.getLogger(__name__)
@@ -568,7 +567,9 @@ def upsert_job(
         # Delegated to merge_locations_structured — the single source of truth for this merge.
         existing_locs_structured = existing["locations_structured"]
         try:
-            prior_structured = _locations_from_json(existing_locs_structured) if existing_locs_structured else []
+            prior_structured = (
+                _locations_from_json(existing_locs_structured) if existing_locs_structured else []
+            )
         except (ValueError, json.JSONDecodeError, TypeError):
             prior_structured = []
         merged_structured = merge_locations_structured(prior_structured, _locs_structured)
@@ -679,9 +680,15 @@ def upsert_job(
         salary_clause = ("," + ", ".join(salary_set_parts)) if salary_set_parts else ""
 
         # Recompute denormalized columns from the merged structured set.
-        merged_locations_json = _locations_to_json(merged_structured) if merged_structured else None
-        merged_workplace_type = merged_structured[0].workplace_type if merged_structured else "UNSPECIFIED"
-        merged_primary_country_code = merged_structured[0].country_code if merged_structured else None
+        merged_locations_json = (
+            _locations_to_json(merged_structured) if merged_structured else None
+        )
+        merged_workplace_type = (
+            merged_structured[0].workplace_type if merged_structured else "UNSPECIFIED"
+        )
+        merged_primary_country_code = (
+            merged_structured[0].country_code if merged_structured else None
+        )
 
         try:
             conn.execute(

@@ -37,8 +37,8 @@ from job_finder.db import upsert_job
 from job_finder.models import Job
 from job_finder.parsed_job import ParsedJob, UnresolvedParsedJob
 from job_finder.web.db_migrate import run_migrations
-from job_finder.web.location_canonical import from_json as locations_from_json
 from job_finder.web.location_canonical import JobLocation
+from job_finder.web.location_canonical import from_json as locations_from_json
 
 
 @pytest.fixture()
@@ -281,9 +281,7 @@ def test_upsert_update_branch_recomputes_denormalized_from_merged(
             unresolved=False,
         )
     ]
-    parsed_first = _make_parsed(
-        company="TestCo", title="Senior Eng", locations_structured=nyc
-    )
+    parsed_first = _make_parsed(company="TestCo", title="Senior Eng", locations_structured=nyc)
     upsert_job(conn, parsed_first)
 
     sf = [
@@ -298,9 +296,7 @@ def test_upsert_update_branch_recomputes_denormalized_from_merged(
             unresolved=False,
         )
     ]
-    parsed_second = _make_parsed(
-        company="TestCo", title="Senior Eng", locations_structured=sf
-    )
+    parsed_second = _make_parsed(company="TestCo", title="Senior Eng", locations_structured=sf)
     upsert_job(conn, parsed_second)
 
     row = _select_loc_cols(conn, parsed_first.dedup_key)
