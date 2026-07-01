@@ -127,9 +127,19 @@ def index():
     health = _compute_health_metrics(conn)
 
     # Suggested companies (WP6): feed-frequent companies not tracked yet.
+    # Cold-start fallback (Issue #660): pass profile for cold-start ranking.
+    from job_finder.web import user_data_dirs
     from job_finder.web.company_suggestions import get_suggested_companies
 
-    suggested_companies = get_suggested_companies(conn)
+    profile = None
+    try:
+        profile_path = user_data_dirs.user_data_root() / "experience_profile.json"
+        with open(profile_path, encoding="utf-8") as f:
+            profile = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        pass
+
+    suggested_companies = get_suggested_companies(conn, profile=profile)
 
     # Detect any in-flight ATS scan so the polling progress fragment renders
     # on a fresh page load. Without this, clicking 'Scan ATS' then navigating

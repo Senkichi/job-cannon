@@ -55,6 +55,7 @@ from flask import (
 
 from job_finder import secrets as jf_secrets
 from job_finder.config import (
+    DEFAULT_COLD_START_WATCHLIST_SEED_COUNT,
     DEFAULT_DAILY_BUDGET_USD,
     ConfigError,
     ConfigNotFoundError,
@@ -62,6 +63,7 @@ from job_finder.config import (
 )
 from job_finder.web import user_data_dirs
 from job_finder.web.ats_scanner import upsert_company
+from job_finder.web.company_suggestions import get_suggested_companies
 from job_finder.web.db_helpers import get_db, refresh_jf_config
 from job_finder.web.onboarding import imap_test, resume_parser, state, system_check
 from job_finder.web.providers.detection import detect_available_providers, get_detection_extras
@@ -896,6 +898,63 @@ def done():
                         run_ingestion(db_path, cfg)
                     except Exception as e:
                         logger.error("wizard_first_ingest run_ingestion failed: %s", e)
+                        return
+
+                    # --- Cold-start watchlist seeding (Issue #660) ---
+                    # After first ingest, seed watchlist from cold-start suggestions
+                    # if user declared no target companies.
+                    import sqlite3
+
+                    try:
+                        with sqlite3.connect(db_path) as conn:
+                            # Check if user declared any target companies
+                            target_companies = cfg.get("profile", {}).get("target_companies", [])
+                            if not target_companies:
+                                # Load experience profile for cold-start ranking
+                                profile_path = (
+                                    user_data_dirs.user_data_root() / "experience_profile.json"
+                                )
+                                try:
+                                    with open(profile_path, encoding="utf-8") as f:
+                                        profile = json.load(f)
+                                except (OSError, json.JSONDecodeError):
+                                    profile = {}
+
+                                # Get cold-start suggestions
+                                seed_count = cfg.get(
+                                    "onboarding",
+                                    {},
+                                ).get(
+                                    "cold_start_watchlist_seed_count",
+                                    DEFAULT_COLD_START_WATCHLIST_SEED_COUNT,
+                                )
+                                suggestions = get_suggested_companies(
+                                    conn, limit=seed_count, profile=profile
+                                )
+
+                                # Seed top suggestions into watchlist
+                                seeded_count = 0
+                                for suggestion in suggestions:
+                                    company_name = suggestion.get("company")
+                                    if company_name:
+                                        company_id = upsert_company(conn, company_name)
+                                        if company_id is not None:
+                                            seeded_count += 1
+                                            logger.info(
+                                                "wizard_first_ingest: cold-start seeded company %r",
+                                                company_name,
+                                            )
+
+                                if seeded_count > 0:
+                                    logger.info(
+                                        "wizard_first_ingest: cold-start seeded %d companies into watchlist",
+                                        seeded_count,
+                                    )
+                    except Exception as e:
+                        logger.warning(
+                            "wizard_first_ingest: cold-start watchlist seeding failed: %s",
+                            e,
+                        )
 
             try:
                 scheduler.add_job(
