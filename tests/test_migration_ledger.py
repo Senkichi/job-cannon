@@ -98,7 +98,7 @@ def test_legacy_db_backfills_then_applies_pending(tmp_path):
     with closing(sqlite3.connect(db)) as conn:
         applied = applied_versions(conn)
     assert applied == _KNOWN_VERSIONS
-    assert all(v in applied for v in range(114, MAX_KNOWN_VERSION + 1))
+    assert applied == {m.version for m in MIGRATIONS}
     assert _uv(db) == MAX_KNOWN_VERSION
 
 

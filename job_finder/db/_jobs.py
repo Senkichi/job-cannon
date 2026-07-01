@@ -15,12 +15,13 @@ import json
 import logging
 import re
 import sqlite3
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from typing import TYPE_CHECKING, Literal
 
 from job_finder.config import JD_STORAGE_MAX_CHARS
 from job_finder.json_utils import safe_json_load, to_naive_utc_iso, utc_now_iso
 from job_finder.salary_normalizer import PROVENANCE_RANK
+from job_finder.web.ats_registry import is_direct_ats_platform
 from job_finder.web.location_canonical import JobLocation
 from job_finder.web.location_canonical import from_json as _locations_from_json
 from job_finder.web.location_canonical import to_json as _locations_to_json
@@ -29,6 +30,7 @@ from ._jd_full import _is_jd_junk as _jd_is_junk
 from ._jd_full import set_jd_full as _set_jd_full
 from ._locations import merge_locations_raw, merge_locations_structured
 from ._persistence import update_pipeline_status
+from ._postings import build_posting_descriptor, upsert_posting
 
 _logger = logging.getLogger(__name__)
 
@@ -51,7 +53,8 @@ JOBS_ALL_COLUMNS = (
     "locations_raw, locations_structured, description_reformatted, expiry_checked_at, scoring_provider, "
     "expiry_status, unresolved_reasons, computed_status, "
     "direct_url, direct_url_confidence, "
-    "is_remote, employment_type, department, ats_refreshed_at"
+    "is_remote, employment_type, department, ats_refreshed_at, "
+    "postings"
 )
 
 # Columns read by upsert_job() for merge logic — only what the UPDATE branch
@@ -59,7 +62,8 @@ JOBS_ALL_COLUMNS = (
 _UPSERT_MERGE_COLUMNS = (
     "sources, source_urls, locations_raw, locations_structured, description, jd_full, pipeline_status, "
     "salary_min, salary_max, salary_period, salary_currency, salary_provenance, "
-    "salary_observations, posted_date, posted_date_precision"
+    "salary_observations, posted_date, posted_date_precision, "
+    "postings"
 )
 
 # Posted-date provenance precedence (#363). A more trustworthy incoming date
@@ -403,6 +407,7 @@ def upsert_job(
     *,
     company_id: int | None = None,
     score_breakdown: dict | None = None,
+    ats_platform: str | None = None,
 ) -> UpsertResult:
     """Insert or update a job. Returns UpsertResult with kind in {"inserted","updated","unchanged"}.
 
@@ -417,6 +422,13 @@ def upsert_job(
     else gets the default {} written on INSERT and the UPDATE-branch overwrite
     that has always existed. (The legacy ``score`` column was dropped in m113 —
     the v3.0 "Plan 4" single-tier migration tail.)
+
+    ``ats_platform`` is the registry platform key (e.g. "ashby", "lever",
+    "greenhouse") for direct ATS sightings. When provided and the platform is
+    a direct ATS platform (not a keyword adapter or non-scannable stub), and
+    ``parsed.source_id`` is non-empty, a posting descriptor is upserted into
+    the ``jobs.postings`` JSON array (#640). Aggregator sightings and sightings
+    with empty ``source_id`` do NOT mint postings.
 
     Merges sources, locations (Remote/Hybrid first), and descriptions
     (keep longer; append divergent content with separator). Keeps first_seen
@@ -545,6 +557,28 @@ def upsert_job(
             if url and url not in urls:
                 urls.append(url)
                 source_merged = True
+
+        # Posting sub-entity upsert (#640): mint a posting descriptor for direct
+        # ATS sightings. The descriptor is keyed by (ats_platform, source_id), so
+        # re-sighting updates in place while new postings are appended.
+        postings = safe_json_load(existing["postings"], default=[])
+        if ats_platform and is_direct_ats_platform(ats_platform) and parsed.source_id:
+            # Build the 6-field descriptor (location_fit added in Phase 3)
+            apply_url = parsed.source_urls[0] if parsed.source_urls else ""
+            locations_structured_list = (
+                [asdict(loc) for loc in _locs_structured] if _locs_structured else []
+            )
+            descriptor = build_posting_descriptor(
+                ats_platform=ats_platform,
+                source_id=parsed.source_id,
+                apply_url=apply_url,
+                locations_structured=locations_structured_list,
+                workplace_type=workplace_type_col,
+            )
+            new_postings = upsert_posting(postings, descriptor)
+            if new_postings != postings:
+                canonical_changed = True
+            postings = new_postings
 
         # Smart location merge: maintain locations_raw array (Remote/Hybrid
         # first). Delegated to merge_locations_raw — the single source of truth
@@ -711,7 +745,8 @@ def upsert_job(
                     primary_country_code = COALESCE(?, primary_country_code),
                     company_id = COALESCE(?, company_id),
                     posted_date = CASE WHEN ? = 1 THEN ? ELSE posted_date END,
-                    posted_date_precision = CASE WHEN ? = 1 THEN ? ELSE posted_date_precision END{unresolved_clause}
+                    posted_date_precision = CASE WHEN ? = 1 THEN ? ELSE posted_date_precision END,
+                    postings = ?{unresolved_clause}
                 WHERE dedup_key = ?""",
                 (
                     json.dumps(sources),
@@ -730,6 +765,7 @@ def upsert_job(
                     pd_str,
                     1 if pd_wins else 0,
                     pd_precision,
+                    json.dumps(postings),
                     *unresolved_value,
                     matched_dedup_key,
                 ),
@@ -802,6 +838,24 @@ def upsert_job(
         # First-seen provenance: NULL when the caller did not rank its write
         # (legacy/unranked), so a later genuine writer can win the canonical slot.
         insert_provenance = parsed.salary_provenance
+
+        # Posting sub-entity upsert (#640): mint a posting descriptor for direct
+        # ATS sightings on INSERT as well.
+        postings: list[dict] = []
+        if ats_platform and is_direct_ats_platform(ats_platform) and parsed.source_id:
+            apply_url = parsed.source_urls[0] if parsed.source_urls else ""
+            locations_structured_list = (
+                [asdict(loc) for loc in _locs_structured] if _locs_structured else []
+            )
+            descriptor = build_posting_descriptor(
+                ats_platform=ats_platform,
+                source_id=parsed.source_id,
+                apply_url=apply_url,
+                locations_structured=locations_structured_list,
+                workplace_type=workplace_type_col,
+            )
+            postings = [descriptor]
+
         try:
             conn.execute(
                 """INSERT INTO jobs
@@ -812,8 +866,9 @@ def upsert_job(
                      first_seen, last_seen, score_breakdown, locations_raw,
                      jd_full, scoring_provider,
                      locations_structured, workplace_type, primary_country_code,
-                     company_id, posted_date, posted_date_precision, unresolved_reasons)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                     company_id, posted_date, posted_date_precision, unresolved_reasons,
+                     postings)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     parsed.dedup_key,
                     parsed.title,
@@ -842,6 +897,7 @@ def upsert_job(
                     pd_str,
                     pd_precision,
                     json.dumps(list(parsed.unresolved_reasons)),
+                    json.dumps(postings),
                 ),
             )
             conn.commit()

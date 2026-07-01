@@ -674,3 +674,33 @@ PRIORITY_DOMAINS_ATS: list[str] = [
         key=lambda s: s.jd_fetch_priority,  # type: ignore
     )
 ]
+
+
+# ---------------------------------------------------------------------------
+# Direct ATS platform predicate
+# ---------------------------------------------------------------------------
+
+
+def is_direct_ats_platform(platform_key: str) -> bool:
+    """True iff ``platform_key`` is a direct ATS platform (not a keyword adapter).
+
+    A source is a direct ATS platform iff its ``PlatformSpec`` has a real scanner
+    (``requests_scanner`` or ``playwright_scanner``), is not a keyword adapter,
+    and is not marked ``non_scannable``. This is equivalent to
+    ``SCANNABLE_TARGET_PLATFORMS - KEYWORD_ADAPTER_PLATFORMS``.
+
+    This predicate is used by the posting sub-entity upsert logic (#640) to
+    determine which sightings should mint a posting descriptor. Keyword adapters
+    (Amazon, Microsoft, Eightfold) and non-scannable stubs (jobvite, google,
+    taleo, etc.) do NOT mint postings.
+
+    Args:
+        platform_key: The lowercase platform key (e.g. "ashby", "lever", "greenhouse").
+
+    Returns:
+        True if the platform is a direct ATS platform, False otherwise.
+    """
+    return (
+        platform_key in SCANNABLE_TARGET_PLATFORMS
+        and platform_key not in KEYWORD_ADAPTER_PLATFORMS
+    )

@@ -470,6 +470,7 @@ def _scan_one_company_via_ats_api(
                     summary,
                     all_new_job_keys,
                     company_id=company_id,
+                    ats_platform=platform,
                 )
 
         # Log company scan
@@ -560,6 +561,7 @@ def _upsert_one_ats_api_job(
     all_new_job_keys: list,
     *,
     company_id: int | None = None,
+    ats_platform: str | None = None,
 ) -> None:
     """Upsert a single ATS-API-discovered job; promote jd_full + comp_data_json on first-seen."""
     try:
@@ -654,6 +656,7 @@ def _upsert_one_ats_api_job(
             scan_conn,
             parsed,
             company_id=company_id,
+            ats_platform=ats_platform,
         )
 
         # Promote ATS description to jd_full (DQ-03) — only when jd_full is NULL,
