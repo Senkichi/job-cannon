@@ -406,6 +406,12 @@ def main() -> int:
         action="store_true",
         help="Check and log without writing to DB",
     )
+    parser.add_argument(
+        "--start-id",
+        type=int,
+        default=0,
+        help="Resume from the first company with id greater than this value (checkpoint for long runs)",
+    )
     args = parser.parse_args()
 
     db_path = Path(args.db).resolve()
@@ -430,12 +436,15 @@ def main() -> int:
         rows = conn.execute(
             """SELECT id, name_raw, careers_url, homepage_url
                FROM companies
-               WHERE careers_url IS NOT NULL AND careers_url != ''
-               ORDER BY id"""
+               WHERE careers_url IS NOT NULL AND careers_url != '' AND id > ?
+               ORDER BY id""",
+            (args.start_id,),
         ).fetchall()
 
         summary["total_companies"] = len(rows)
-        log.info("Checking %d companies for dead careers URLs", len(rows))
+        log.info(
+            "Checking %d companies for dead careers URLs (start_id=%d)", len(rows), args.start_id
+        )
 
         for row in rows:
             company_id = row["id"]
