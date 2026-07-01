@@ -226,6 +226,16 @@
                   {% include "companies/_track_button.html" %}
                 {% endwith %}
               {% endif %}
+              {# Prepare application — gated on jd_full (no meaningful package without the JD). #}
+              {% if job.jd_full %}
+              <button type="button"
+                      hx-post="{{ url_for('jobs.prepare_application', dedup_key=job.dedup_key) }}"
+                      hx-target="closest tr" hx-swap="afterend" hx-disable-elt="this"
+                      class="flex w-full items-center gap-2.5 px-3 py-2 text-[13px] text-slate-300 hover:bg-slate-750 hover:text-slate-100 transition-colors">
+                <svg class="w-4 h-4 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.5 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><path d="M16 13H8"/><path d="M16 17H8"/><path d="M10 9H8"/></svg>
+                Prepare application
+              </button>
+              {% endif %}
             </div>
           </details>
         </div>

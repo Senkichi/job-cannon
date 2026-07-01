@@ -22,6 +22,7 @@ from flask import (
 
 from job_finder.config import JD_STORAGE_MAX_CHARS
 from job_finder.db import (
+    get_application,
     get_distinct_country_codes,
     get_distinct_locations,
     get_distinct_sources,
@@ -31,7 +32,9 @@ from job_finder.db import (
     get_pipeline_events,
     load_job_context,
     persist_job_notes,
+    resolve_application,
     update_pipeline_status,
+    upsert_application,
     upsert_job,
 )
 from job_finder.db._jd_full import set_jd_full as _set_jd_full
@@ -57,6 +60,7 @@ def _get_stale_count(conn) -> int:
     return row[0] if row else 0
 
 
+from job_finder.web.application_prepare import prepare_application_package
 from job_finder.web.blueprints import PIPELINE_STATUSES
 from job_finder.web.data_enricher import enrich_job
 from job_finder.web.db_helpers import get_db
@@ -765,6 +769,64 @@ def update_status(dedup_key: str):
         resp = make_response(status_html)
 
     return resp
+
+
+@jobs_bp.route("/<path:dedup_key>/prepare-application", methods=["POST"], strict_slashes=False)
+def prepare_application(dedup_key: str):
+    """Assemble + store an application package, render the review card. Submits nothing."""
+    conn = get_db()
+    job = get_job(conn, dedup_key)
+    if job is None:
+        return "", 404
+    pkg = prepare_application_package(conn, current_app.config, job)  # assemble
+    app_id = upsert_application(
+        conn,
+        dedup_key,
+        pkg["resume_content"],
+        pkg["form_mapping"],
+        pkg["drafted_answers"],
+    )
+    application = get_application(conn, app_id)
+    return render_template(
+        "jobs/_application_review.html", job=job, application=application
+    )  # 200
+
+
+@jobs_bp.route(
+    "/applications/<int:application_id>/approve", methods=["POST"], strict_slashes=False
+)
+def approve_application(application_id: int):
+    """Owner approves: flip the job to 'applied' (dual-write) + resolve the package."""
+    conn = get_db()
+    application = get_application(conn, application_id)
+    if application is None:
+        return "", 404
+    update_pipeline_status(
+        conn,
+        application["job_id"],
+        "applied",
+        source="manual",
+        evidence="application package approved",
+    )
+    resolve_application(conn, application_id, "approved")
+    job = get_job(conn, application["job_id"])
+    return render_template(
+        "jobs/_application_approved.html", job=job, application=application
+    )  # 200
+
+
+@jobs_bp.route("/applications/<int:application_id>/reject", methods=["POST"], strict_slashes=False)
+def reject_application(application_id: int):
+    """Owner rejects the prepared package: resolve as rejected, pipeline_status unchanged."""
+    conn = get_db()
+    application = get_application(conn, application_id)
+    if application is None:
+        return "", 404
+    resolve_application(conn, application_id, "rejected")
+    return (
+        "",
+        200,
+    )  # empty primary swap removes the card; HTMX needs 200 not 204
 
 
 @jobs_bp.route("/<path:dedup_key>/detail-inline", strict_slashes=False)

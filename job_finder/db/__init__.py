@@ -32,6 +32,12 @@ the two coexist by design and S7d does NOT collapse them.
 
 from __future__ import annotations
 
+# Application package persistence (prepare-layer review queue).
+from ._applications import get_application as get_application
+from ._applications import get_application_by_job as get_application_by_job
+from ._applications import resolve_application as resolve_application
+from ._applications import upsert_application as upsert_application
+
 # v3.0 scoring-rule cluster — pure logic, no DB deps.
 # PEP 484 explicit re-export form (`as X`) documents the contract and
 # silences pyright's reportUnusedImport.

@@ -1,0 +1,74 @@
+{# Application review card — rendered after prepare-application POST. #}
+<tr class="bg-slate-800/80 border-t border-slate-700">
+  <td colspan="12" class="p-4">
+    <div class="max-w-4xl mx-auto space-y-4">
+      {# Header #}
+      <div class="flex items-center justify-between">
+        <h3 class="text-lg font-semibold text-slate-100">Application Package Review</h3>
+        <div class="flex gap-2">
+          <button type="button"
+                  hx-post="{{ url_for('jobs.approve_application', application_id=application.id) }}"
+                  hx-target="closest tr" hx-swap="outerHTML" hx-disable-elt="this"
+                  class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-sm rounded-md transition-colors">
+            Approve
+          </button>
+          <button type="button"
+                  hx-post="{{ url_for('jobs.reject_application', application_id=application.id) }}"
+                  hx-target="closest tr" hx-swap="outerHTML" hx-disable-elt="this"
+                  class="px-3 py-1.5 bg-slate-600 hover:bg-slate-500 text-white text-sm rounded-md transition-colors">
+            Reject
+          </button>
+        </div>
+      </div>
+
+      {# Apply target #}
+      {% if application.form_mapping.apply_url %}
+      <div class="bg-slate-750 rounded-lg p-3 border border-slate-600">
+        <div class="text-sm text-slate-400 mb-1">Apply at:</div>
+        <a href="{{ application.form_mapping.apply_url }}" target="_blank" rel="noopener noreferrer"
+           class="text-emerald-400 hover:text-emerald-300 text-sm break-all">
+          {{ application.form_mapping.apply_url }}
+        </a>
+      </div>
+      {% endif %}
+
+      {# Tailored resume #}
+      <div class="bg-slate-750 rounded-lg p-4 border border-slate-600">
+        <h4 class="text-sm font-medium text-slate-300 mb-2">Tailored Resume</h4>
+        <pre class="text-xs text-slate-300 whitespace-pre-wrap font-mono bg-slate-800 rounded p-3 max-h-96 overflow-y-auto">{{ application.resume_content }}</pre>
+      </div>
+
+      {# Form mapping #}
+      {% if application.form_mapping %}
+      <div class="bg-slate-750 rounded-lg p-4 border border-slate-600">
+        <h4 class="text-sm font-medium text-slate-300 mb-2">Form Fields</h4>
+        <div class="grid grid-cols-2 gap-2 text-sm">
+          {% for field, value in application.form_mapping.items() %}
+            {% if field != 'apply_url' %}
+            <div class="bg-slate-800 rounded p-2">
+              <div class="text-slate-400 text-xs">{{ field | replace('_', ' ') | title }}</div>
+              <div class="text-slate-200 mt-1 break-words">{{ value }}</div>
+            </div>
+            {% endif %}
+          {% endfor %}
+        </div>
+      </div>
+      {% endif %}
+
+      {# Drafted answers #}
+      {% if application.drafted_answers %}
+      <div class="bg-slate-750 rounded-lg p-4 border border-slate-600">
+        <h4 class="text-sm font-medium text-slate-300 mb-2">Drafted Answers</h4>
+        <div class="space-y-3">
+          {% for question, answer in application.drafted_answers.items() %}
+          <div class="bg-slate-800 rounded p-3">
+            <div class="text-slate-400 text-xs mb-1">{{ question }}</div>
+            <div class="text-slate-200 text-sm">{{ answer }}</div>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+      {% endif %}
+    </div>
+  </td>
+</tr>
