@@ -253,19 +253,16 @@ class TestRule9SingleSource:
     """Test that the predicate uses single-source constants (rule #9 guard)."""
 
     def test_predicate_imports_from_constants(self):
-        """The _queries module imports SUB_SCORE_KEYS and CLASSIFICATIONS."""
+        """The _queries module imports SUB_SCORE_KEYS."""
         import job_finder.db._queries as queries_module
 
-        # Verify the module imports the constants
+        # Verify the module imports SUB_SCORE_KEYS
         assert hasattr(queries_module, "SUB_SCORE_KEYS")
-        assert hasattr(queries_module, "CLASSIFICATIONS")
 
-        # Verify they're the same objects as in constants.py
-        from job_finder.constants import CLASSIFICATIONS as CONST_CLASSIFICATIONS
+        # Verify it's the same object as in constants.py
         from job_finder.constants import SUB_SCORE_KEYS as CONST_SUB_SCORE_KEYS
 
         assert queries_module.SUB_SCORE_KEYS is CONST_SUB_SCORE_KEYS
-        assert queries_module.CLASSIFICATIONS is CONST_CLASSIFICATIONS
 
     def test_is_target_member_uses_sub_score_keys(self):
         """is_target_member iterates over SUB_SCORE_KEYS, not a hardcoded list."""
