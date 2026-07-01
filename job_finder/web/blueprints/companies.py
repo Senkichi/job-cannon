@@ -838,10 +838,23 @@ def retry(company_id):
             400,
         )
 
-    try:
-        probe_single_company(company_id, conn, config)
-    except Exception as e:
-        logger.error("Retry probe failed for company %d: %s", company_id, e)
+    # Route probe through background thread to avoid blocking the Flask request thread
+    # (Finding 6: fallthrough can chain 40-50s of fetches + Playwright)
+    if not current_app.config.get("TESTING", False):
+        db_path = current_app.config["DB_PATH"]
+        t = threading.Thread(
+            target=_probe_company_bg,
+            args=(db_path, company_id, config),
+            daemon=True,
+        )
+        t.start()
+        logger.info("Retry probe for company %d dispatched to background thread", company_id)
+    else:
+        # In testing mode, run synchronously for test determinism
+        try:
+            probe_single_company(company_id, conn, config)
+        except Exception as e:
+            logger.error("Retry probe failed for company %d: %s", company_id, e)
 
     # Fetch updated company with job count for re-rendering
     updated_company = conn.execute(
