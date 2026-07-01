@@ -4,11 +4,12 @@ import logging
 
 from flask import Blueprint, current_app, render_template
 
-from job_finder.config import DEFAULT_DAILY_BUDGET_USD
+from job_finder.config import DEFAULT_DAILY_BUDGET_USD, get_fit_floor
 from job_finder.db import (
     compute_conversion_by_band,
     get_dashboard_stats,
     get_liveness_stats,
+    get_off_platform_miss_log,
     get_pending_detections,
     get_pipeline_summary,
     get_recent_activity,
@@ -71,6 +72,9 @@ def _get_stats_context(conn, config):
     pending_count = stats.get("pending_detections", 0)
     ats_ctx = _get_ats_context(conn)
     liveness_stats = get_liveness_stats(conn, config)
+    off_platform_miss_log = get_off_platform_miss_log(conn, get_fit_floor(config))
+    # TODO(M6 follow-up): per-case HTMX-expandable dashboard card listing each reachable miss
+    # with its attributed discovery stage
     return {
         "stats": stats,
         "cost_stats": cost_stats,
@@ -80,6 +84,7 @@ def _get_stats_context(conn, config):
         "company_count": ats_ctx["company_count"],
         "ats_tracked_count": ats_ctx["ats_tracked_count"],
         "liveness": liveness_stats,
+        "off_platform_miss_log": off_platform_miss_log,
     }
 
 
