@@ -117,6 +117,12 @@ def _fetch_careers_html(url: str, timeout: int = _FETCH_TIMEOUT_S) -> str | None
 
     Tolerant by design: any network error, non-200, or empty body yields None
     (the company is simply left frozen for this pass). No exception escapes.
+
+    Hard total-deadline (issue #561 Part A): ``fetch_with_deadline`` enforces a
+    wall-clock budget (``_DEFAULT_TOTAL_DEADLINE_S``) on top of the per-read
+    ``timeout``, so a slow-trickle host that dribbles a byte under the read
+    timeout cannot wedge the batch — it is abandoned at the total deadline
+    (proven by ``tests/test_http_fetch.py::test_caller_unblocks_at_deadline_...``).
     """
     try:
         resp = fetch_with_deadline(
