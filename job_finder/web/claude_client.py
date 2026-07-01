@@ -410,7 +410,9 @@ def get_cost_stats(conn: sqlite3.Connection, budget_cap: float | None = None) ->
         f"ORDER BY spend DESC",
         free,
     ).fetchall()
-    by_provider = [{"provider": row[0], "calls": row[1], "spend": float(row[2])} for row in provider_rows]
+    by_provider = [
+        {"provider": row[0], "calls": row[1], "spend": float(row[2])} for row in provider_rows
+    ]
 
     return {
         "today": today_spend,
