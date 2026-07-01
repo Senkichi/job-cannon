@@ -360,6 +360,64 @@ def score_and_persist_job(
     return result
 
 
+def _render_location_targeting(
+    work_arrangement: str | None, target_locations: list[str]
+) -> list[str]:
+    """Render work-arrangement + geographies as a PREFERENCE HIERARCHY.
+
+    The candidate's ``work_arrangement`` is their *preferred* arrangement (a
+    ranking, not a hard filter), and the geographic ``target_locations`` are the
+    places where a *non-remote* role is acceptable. Two rules keep this honest:
+
+    - The ``"remote"`` token is stripped from the geography list. "Remote" is a
+      modality, not a place; it is already carried by ``work_arrangement``. This
+      single-sources the treatment with ``location_fit._target_loc_matches``,
+      which likewise excludes ``"remote"`` from geography matching.
+    - When remote is preferred, a fully-remote role is stated as the IDEAL
+      location match and explicitly disqualified from being a "gap".
+
+    This exists because the prior flat rendering ("Target locations: San
+    Francisco, Remote") gave the scorer no ordering, so ``qwen2.5:14b`` read the
+    first-listed geography as the candidate's preference and inverted it —
+    flagging a fully-remote role as the gap "Remote role, candidate prefers San
+    Francisco location". Making the hierarchy explicit removes the ambiguity the
+    model was resolving incorrectly.
+    """
+    wa = (work_arrangement or "remote").strip().lower()
+    # Keep only real places: drop blanks/None AND the "remote" modality token.
+    # This mirrors location_fit._target_loc_matches, which _norm-coerces every
+    # entry (None → "") and skips falsy tokens — so a bare "- " list item in a
+    # hand-edited config (PyYAML yields None) or an eval-harness config renders
+    # cleanly instead of crashing the ", ".join below.
+    geos = [
+        t.strip()
+        for t in target_locations
+        if (t or "").strip() and (t or "").strip().lower() != "remote"
+    ]
+    geo_str = ", ".join(geos) if geos else "Not specified"
+
+    lines: list[str] = [f"- Preferred work arrangement: {wa}"]
+    if wa == "remote":
+        lines.append(
+            "- A fully remote role is the candidate's IDEAL location match "
+            "(location_fit 5). Remote is the top preference, NOT a shortcoming — "
+            "never list a remote role as a location gap."
+        )
+        lines.append(
+            f"- Acceptable on-site/hybrid geographies (relevant ONLY when the role "
+            f"is not remote): {geo_str}. On-site/hybrid in one of these is "
+            "acceptable — geography membership overrides the on-site penalty for "
+            "location_fit — but a remote role is still preferred over any of them."
+        )
+    else:
+        lines.append(
+            f"- Target geographies: {geo_str}. On-site/hybrid in one of these is a "
+            "match — geography membership overrides the on-site penalty for "
+            "location_fit. A fully remote role is also a strong match."
+        )
+    return lines
+
+
 def build_candidate_context(config: dict, profile: dict) -> str:
     """Merge config.yaml [profile] (targeting) and experience_profile.json
     (resume) into a prompt-ready candidate-context string.
@@ -404,16 +462,7 @@ def build_candidate_context(config: dict, profile: dict) -> str:
             "Data Scientist' for 'Senior Data Scientist' — count as title matches "
             "and should score title_fit >= 4. Score 5 only for exact-or-stronger matches.)"
         )
-    parts.append(f"- Work arrangement: {work_arrangement}")
-    parts.append(
-        f"- Target locations: {', '.join(target_locations) if target_locations else 'Not specified'}"
-    )
-    if target_locations:
-        parts.append(
-            "  (A JD location is a match if it appears in this list. "
-            "On-site/hybrid in a listed geography is a match — geography membership "
-            "overrides on-site penalty for location_fit.)"
-        )
+    parts += _render_location_targeting(work_arrangement, target_locations)
     parts.append(
         f"- Compensation floor: ${min_salary:,}"
         if min_salary
