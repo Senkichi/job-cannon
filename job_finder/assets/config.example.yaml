@@ -439,6 +439,14 @@ application:
     - "Why do you want to work here?"
     - "Summarize your relevant experience for this role."
     - "What is your greatest professional achievement?"
+  # Auto-submit spine (issue #604). Mechanism-agnostic submit orchestrator with
+  # config gating, idempotency, target-URL safety, rate limiting, and audit logging.
+  # The actual submission mechanism (e.g., MV3 browser extension) is a separate issue.
+  auto_submit:
+    enabled: false            # master gate, DEFAULT OFF
+    daily_limit: 5            # per-day submit cap, reconstructed from the audit ledger
+    mechanism: "extension"    # selects the sender behind the seam (separate issue provides it)
+    require_strict_target: true
 
 # --- Direct company-posting link (primary-source resolution) ---
 direct_link:
