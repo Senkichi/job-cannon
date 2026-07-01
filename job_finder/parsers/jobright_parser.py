@@ -1,35 +1,49 @@
 """Parse JobRight (jobright.ai) job-match alert emails into Job objects.
 
-JobRight is an AI job-search copilot that emails a daily/periodic digest of
-ranked job matches from ``noreply@jobright.ai``. Each match links to a job
-detail page on ``jobright.ai`` (path ``/jobs/info/<id>`` or ``/job/<id>``).
+JobRight is an AI job-search copilot that emails a periodic digest of ranked job
+matches from ``noreply@jobright.ai`` (display name "Jobright Job Alert"). Each
+match links to a job detail page ``jobright.ai/jobs/info/<id>`` where ``<id>`` is
+a 24-char hex object id.
 
-Meta-email handling differs from most parsers here on purpose. The shared
-``is_meta_email`` BASE patterns reject preambles like "you have N new jobs" /
-"N new jobs match" — but for JobRight *that digest IS the job-bearing email*,
-so gating on it at the top could silently drop real matches (Indeed only dodges
-this because its "N new <role> jobs in <loc>" header happens not to match those
-patterns; JobRight's preamble is unknown, so we must not assume). Instead we
-parse job links first and *never* reject a job-bearing email on a preamble
-false-positive. The zero-yield WARNING (issue #259 convention) is suppressed
-only for narrow, genuinely-non-job "account" preambles (verify/confirm/reset).
+Structure (grounded on a real captured alert, ``tests/fixtures/emails/jobright.eml``)
+--------------------------------------------------------------------------------
+The email is a single-part ``text/html`` message. Each job card is a nested
+table wrapped in ONE outer ``<a href=".../jobs/info/<id>">`` (its visible text is
+a "blob": ``<Company> <Industry> · <Stage> <NN> % <Title> [<Salary>]``). Inside
+that wrapper are additional anchors with the SAME href — a clean **title-only**
+anchor and an ``APPLY NOW`` CTA — plus the card fields as styled leaf elements:
 
-Heuristics were written WITHOUT a captured real email (none were in the inbox
-at authoring time), so — like ``ziprecruiter_parser`` — they are unverified
-against a live message. To harden them, drop a sanitized real alert at
-``tests/fixtures/emails/jobright.eml``; the round-trip test in
-``tests/test_imap_parser_roundtrip.py`` then exercises this parser against it.
-Until then a runtime zero-yield WARNING fires when a live email matches nothing,
-so a heuristic mismatch is observable in the logs.
+* company   — bold ``<p>`` (``font-weight:600``)
+* industry · funding-stage — muted ``<p>`` (``font-weight:400``, gray)
+* match score — ``<span>`` ``NN %``
+* title     — inner leaf ``<a>`` (no ``%`` in its text)
+* salary    — ``<p>`` ``$138K/yr - $198K/yr`` (absent on some cards)
+* location  — ``<p>`` ``City, ST`` / ``City, US`` / ``Remote``
+* chrome    — ``N+ referrals``, ``16 minutes ago``, ``Be an early applicant``
 
-This parser is HTML-only. Both GmailSource and ImapSource ``_extract_body``
-prefer the ``text/plain`` alternative when a multipart email carries one, so a
-real JobRight email whose plaintext part is non-empty yields 0 jobs here plus
-the zero-yield WARNING (an honest "capture a sample" signal) — NOT a silent
-mis-parse. JobRight is intentionally excluded from the generic positional
-URL-fallback (``_positional_fallback._JOB_URL_RE``) because that line-based
-heuristic mis-attributes JobRight's plaintext layout; ingesting nothing beats
-ingesting garbage rows.
+Extraction therefore groups anchors by canonical job id (the ``/jobs/info/<hex>``
+segment), scopes each card to the smallest single-job subtree, and pulls the
+title from the clean inner anchor and the remaining fields from the card's leaf
+elements. A ``jobright.ai/jobs/recommend`` "View More Opportunities" footer link
+is NOT a posting (no hex id) and is ignored.
+
+Meta-email handling
+-------------------
+The shared ``is_meta_email`` BASE patterns reject preambles like "you have N new
+jobs" — but for JobRight *that digest IS the job-bearing email*, so gating on it
+at the top would silently drop real matches. Instead we parse job links first and
+never reject a job-bearing email on a preamble false-positive. The zero-yield
+WARNING (issue #259 convention) fires only for a non-trivial body that yielded no
+jobs and is not a narrow account preamble (verify/confirm/reset/welcome) — an
+honest "the format changed, capture a fresh sample" signal.
+
+This parser is HTML-only. Both GmailSource and ImapSource ``_extract_body`` prefer
+the ``text/plain`` alternative when a multipart email carries one; the captured
+real alert has no text/plain part, but a future variant might. JobRight is
+intentionally excluded from the generic positional URL-fallback
+(``_positional_fallback._JOB_URL_RE``) because that line-based heuristic
+mis-attributes JobRight's layout — ingesting nothing (plus the zero-yield
+WARNING) beats ingesting garbage rows.
 
 If the structure is unrecognized, an empty list is returned (graceful
 degradation) rather than raising.
@@ -38,7 +52,6 @@ degradation) rather than raising.
 import logging
 import re
 from datetime import datetime
-from urllib.parse import urlparse
 
 from bs4 import BeautifulSoup
 
@@ -48,12 +61,20 @@ from job_finder.parsers._common import _PLACEHOLDER_STRINGS, parse_salary_range
 logger = logging.getLogger(__name__)
 
 
-# JobRight job-detail links. Matches direct links on the jobright.ai domain
-# (and any subdomain, e.g. click./email.) whose path is a job page:
-# ``/jobs/info/<id>``, ``/jobs/<id>``, or ``/job/<id>``. Requires a trailing
-# path segment so the bare ``/jobs`` listing/CTA link does not match.
+# Canonical JobRight posting id: the hex object-id after ``/jobs/info/`` (also
+# tolerates a hypothetical ``/jobs/<hex>`` without the ``info/`` marker). The
+# 16+ hex-char requirement is what distinguishes a real posting from listing/CTA
+# links like ``/jobs/recommend`` or a bare ``/jobs``. Also captures the inner id
+# out of an unencoded click-tracker (``click.jobright.ai/CL0/https://jobright.ai/
+# jobs/info/<hex>/1/x``).
+_JOB_ID_RE = re.compile(r"jobright\.ai/jobs/(?:info/)?([0-9a-f]{16,})", re.IGNORECASE)
+
+# Anchor-href matcher for "this links to a JobRight posting" (used by
+# ``find_all``). Mirrors ``_JOB_ID_RE`` but anchored at the scheme so it matches
+# the href attribute value; requires the hex id so listing/CTA links do not
+# match.
 JOBRIGHT_JOB_URL_RE = re.compile(
-    r"https?://\S*jobright\.ai/jobs?/\S+",
+    r"https?://\S*jobright\.ai/jobs/(?:info/)?[0-9a-f]{16,}",
     re.IGNORECASE,
 )
 
@@ -68,7 +89,8 @@ _JOBRIGHT_ACCOUNT_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"welcome to jobright", re.IGNORECASE),
 )
 
-# Link texts that are navigation/CTA, never a job title.
+# Link / chrome texts that are navigation or card furniture, never a job title
+# or company. Kept lowercase for case-insensitive membership tests.
 _GENERIC_LINK_TEXTS: frozenset[str] = frozenset(
     {
         "apply",
@@ -77,6 +99,8 @@ _GENERIC_LINK_TEXTS: frozenset[str] = frozenset(
         "view job",
         "view jobs",
         "view all jobs",
+        "view more",
+        "view more opportunities",
         "browse jobs",
         "see more",
         "learn more",
@@ -90,26 +114,31 @@ _GENERIC_LINK_TEXTS: frozenset[str] = frozenset(
 
 # Location cues, split into two patterns because case sensitivity differs:
 #  - keywords (remote/hybrid/onsite) are case-insensitive;
-#  - "City, ST" / ZIP MUST stay case-sensitive, else IGNORECASE degrades the
-#    two-letter state code [A-Z]{2} into "any two letters" and misclassifies
-#    company names ending in ", Co" / ", In" as locations (the Indeed sibling
-#    parser deliberately keeps its location regex case-sensitive for this reason).
+#  - "City, ST" / "City, US" / ZIP MUST stay case-sensitive, else IGNORECASE
+#    degrades the trailing [A-Z]{2} into "any two letters" and misclassifies a
+#    company ending in ", Co" / ", In" as a location (the Indeed sibling parser
+#    keeps its location regex case-sensitive for the same reason). The trailing
+#    token is a US state OR a 2-letter country code (real cards show both, e.g.
+#    "Mountain View, CA" and "Mountain View, US").
 _LOCATION_KEYWORD_RE = re.compile(r"\b(remote|hybrid|onsite|on-site)\b", re.IGNORECASE)
 _LOCATION_CITYSTATE_RE = re.compile(
     r"[A-Z][a-zA-Z]+(?:[\s.\-]+[A-Za-z]+)*,\s*[A-Z]{2}\b|\b[A-Z]{2}\s*\d{5}\b"
 )
 
-# Non-company badges JobRight renders inside a card (its AI match score is the
-# product's signature and often precedes the company). These must never be
-# mistaken for the company. Kept content-based (not class-based) so it does not
-# overfit the synthetic fixture; "%" / "match score" avoids false-rejecting a
-# real employer literally named "Match Group".
+# JobRight card chrome that must never be mistaken for a company. Content-based
+# (not class-based) so it does not overfit; "%" / "match score" avoids
+# false-rejecting a real employer literally named "Match Group". Covers the AI
+# match score, funding-stage tag, posted-age, referral count, and the
+# early-applicant badge observed on every real card.
 _BADGE_RE = re.compile(
     r"\d+\s*%"
     r"|\bmatch\s+score\b"
     r"|\b(?:strong|good|fair|weak)\s+match\b"
-    r"|\b\d+\+?\s+(?:day|days|hour|hours|week|weeks|month|months)\s+ago\b"
+    r"|\b\d+\+?\s+(?:day|days|hour|hours|minute|minutes|week|weeks|month|months)\s+ago\b"
     r"|\bjust\s+posted\b"
+    r"|\b\d+\+?\s+referrals?\b"
+    r"|\bbe an early applicant\b"
+    r"|\b(?:public\s+company|growth\s+stage|late\s+stage|early\s+stage|seed)\b"
     r"|\b(?:full|part)[\s-]?time\b"
     r"|\binternship\b|\btemporary\b",
     re.IGNORECASE,
@@ -117,8 +146,34 @@ _BADGE_RE = re.compile(
 
 _MIN_WARN_BODY_LEN = 500
 
+# JobRight renders pay as "$138K/yr - $198K/yr" — the period is glued to each
+# amount, which the shared salary parser's range regex can't tokenize. Strip the
+# per-amount suffixes and re-append a SINGLE trailing cue instead. The cue must
+# be a form ``salary_normalizer._PERIOD_CUES`` actually recognizes (``/hr``,
+# ``/yr``, ``/mo``, ``/wk`` — abbreviated only; it does NOT match spelled-out
+# "/ hour" etc.), otherwise the period resolves to 'unknown' and hourly/monthly/
+# weekly pay is mis-annualized (or dropped as sub-floor) instead of correctly
+# annualized.
+_SALARY_PERIOD_ABBREV = {
+    "yr": "yr",
+    "year": "yr",
+    "hr": "hr",
+    "hour": "hr",
+    "mo": "mo",
+    "month": "mo",
+    "wk": "wk",
+    "week": "wk",
+}
+_SALARY_PERIOD_RE = re.compile(r"/\s*(yr|year|hr|hour|mo|month|wk|week)\b", re.IGNORECASE)
 
-def parse_jobright_alert(body: str, email_date: datetime | None = None) -> list[Job]:
+
+def _href(tag) -> str:
+    """Return a tag's ``href`` as a plain string ("" if missing/multi-valued)."""
+    value = tag.get("href", "")
+    return value if isinstance(value, str) else ""
+
+
+def parse_jobright_alert(body: str | None, email_date: datetime | None = None) -> list[Job]:
     """Parse a JobRight job-match alert email (HTML) into Job objects.
 
     Best-effort: if the structure is unrecognized, logs a warning (for
@@ -138,9 +193,26 @@ def parse_jobright_alert(body: str, email_date: datetime | None = None) -> list[
     try:
         soup = BeautifulSoup(body, "html.parser")
 
-        jobs = _parse_with_link_strategy(soup, email_date)
-        if not jobs:
-            jobs = _parse_with_card_strategy(soup, email_date)
+        # Group every posting anchor by canonical job id, preserving first-seen
+        # (document) order. All of a card's anchors (blob wrapper, title, CTA)
+        # share one href/id, so this collapses them into a single card.
+        order: list[str] = []
+        by_id: dict[str, list] = {}
+        for link in soup.find_all("a", href=True):
+            match = _JOB_ID_RE.search(_href(link))
+            if not match:
+                continue
+            jid = match.group(1).lower()
+            if jid not in by_id:
+                by_id[jid] = []
+                order.append(jid)
+            by_id[jid].append(link)
+
+        jobs: list[Job] = []
+        for jid in order:
+            job = _build_job(jid, by_id[jid], email_date)
+            if job:
+                jobs.append(job)
 
         if not jobs and len(body.strip()) > _MIN_WARN_BODY_LEN and not _is_account_email(body):
             logger.warning(
@@ -166,230 +238,214 @@ def _is_account_email(body: str) -> bool:
     return any(pat.search(preamble) for pat in _JOBRIGHT_ACCOUNT_PATTERNS)
 
 
-def _parse_with_link_strategy(soup: BeautifulSoup, email_date: datetime | None) -> list[Job]:
-    """Strategy 1: one Job per distinct anchor pointing at a JobRight job page."""
-    jobs: list[Job] = []
-    seen_urls: set[str] = set()
-
-    for link in soup.find_all("a", href=JOBRIGHT_JOB_URL_RE):
-        href = link.get("href", "")
-        if not href or href in seen_urls:
-            continue
-        seen_urls.add(href)
-
-        job = _extract_job_from_link(link, href, email_date)
-        if job:
-            jobs.append(job)
-
-    return jobs
-
-
-def _parse_with_card_strategy(soup: BeautifulSoup, email_date: datetime | None) -> list[Job]:
-    """Strategy 2 (fallback): find td/div cards that contain a JobRight job link.
-
-    Used when the link text alone isn't a usable title — the surrounding
-    container text supplies the fields instead.
-    """
-    jobs: list[Job] = []
-    seen_urls: set[str] = set()
-
-    for el in soup.find_all(["td", "div"], limit=200):
-        links = el.find_all("a", href=JOBRIGHT_JOB_URL_RE)
-        if not links:
-            continue
-
-        href = links[0].get("href", "")
-        if not href or href in seen_urls:
-            continue
-
-        text = el.get_text(separator="\n", strip=True)
-        if len(text) < 5 or len(text) > 3000:
-            continue
-
-        job = _extract_job_from_container(el, links[0], href, email_date)
-        if job:
-            seen_urls.add(href)
-            jobs.append(job)
-
-    return jobs
-
-
-def _card_container(link_tag):
-    """Return the smallest ancestor scoped to THIS job's card.
-
-    Prefer tr → td → div, but reject any candidate that also wraps a *different*
-    JobRight job link: a shared multi-column row (two cards as sibling <td> in
-    one <tr>) would otherwise bleed a sibling card's company/location/salary into
-    this one (the first-DOM-match field heuristics can't tell the cards apart).
-    Distinct hrefs are counted so a card's own title link + "View job" CTA (same
-    href) still reads as one card. Falls back to the link's immediate parent.
-    """
-    for name in ("tr", "td", "div"):
-        cand = link_tag.find_parent(name)
-        if cand is None:
-            continue
-        hrefs = {a.get("href") for a in cand.find_all("a", href=JOBRIGHT_JOB_URL_RE)}
-        if len(hrefs) <= 1:
-            return cand
-    return link_tag.parent
-
-
-def _extract_job_from_link(link_tag, href: str, email_date: datetime | None) -> Job | None:
-    """Extract a Job from a job-link anchor and its surrounding container."""
-    title = _extract_title_from_link(link_tag)
+def _build_job(jid: str, anchors: list, email_date: datetime | None) -> Job | None:
+    """Build one Job from all anchors that share a canonical job id."""
+    title = _extract_title(anchors)
     if not title:
         return None
 
-    container = _card_container(link_tag)
-
-    company = _extract_company_from_context(container, title) if container else "Unknown"
-    location = _extract_location_from_context(container) if container else "Unknown"
-    salary_text = container.get_text(separator=" ", strip=True) if container else ""
-    salary_min, salary_max = parse_salary_range(salary_text)
+    container = _card_container(anchors, jid)
+    company = _extract_company(container, title)
+    location = _extract_location(container)
+    salary_min, salary_max = _extract_salary(container)
 
     return Job(
         title=title,
-        company=company,
-        location=location,
+        company=company or "Unknown",
+        location=location or "Unknown",
         source="jobright",
-        source_url=href,
-        source_id=_extract_job_id(href),
+        # Reconstruct the canonical detail URL from the id: the raw href carries
+        # per-email utm/imp_id tracking noise that would defeat dedup, while the
+        # id is stable across every alert that surfaces this posting.
+        source_url=f"https://jobright.ai/jobs/info/{jid}",
+        source_id=jid,
         salary_min=salary_min,
         salary_max=salary_max,
         posted_date=email_date,
     )
 
 
-def _extract_job_from_container(
-    container, link_tag, href: str, email_date: datetime | None
-) -> Job | None:
-    """Extract a Job from a card container when the link text isn't a title."""
-    # Re-scope to this link's own card so a broad matched container (or a shared
-    # multi-column row) can't bleed a sibling card's fields in.
-    container = _card_container(link_tag) or container
-    title = _extract_title_from_link(link_tag)
-    if not title:
-        lines = [
-            line.strip()
-            for line in container.get_text(separator="\n", strip=True).split("\n")
-            if len(line.strip()) > 3
-        ]
-        title = lines[0] if lines else None
-        if (
-            not title
-            or len(title) > 120
-            or title.lower() in _PLACEHOLDER_STRINGS
-            or title.lower() in _GENERIC_LINK_TEXTS
-        ):
-            return None
+def _card_container(anchors: list, jid: str):
+    """Return the smallest ancestor subtree scoped to THIS job's card.
 
-    company = _extract_company_from_context(container, title)
-    location = _extract_location_from_context(container)
-    salary_min, salary_max = parse_salary_range(container.get_text(separator=" ", strip=True))
-
-    return Job(
-        title=title,
-        company=company,
-        location=location,
-        source="jobright",
-        source_url=href,
-        source_id=_extract_job_id(href),
-        salary_min=salary_min,
-        salary_max=salary_max,
-        posted_date=email_date,
-    )
+    Climb from the card's first anchor while every posting anchor still under the
+    parent belongs to this job id — stop before a parent that also contains a
+    *different* job (which would bleed a sibling card's company/location/salary
+    into this one). Because the whole card is wrapped in one outer job anchor,
+    this typically climbs to the enclosing table cell. Falls back to the anchor
+    itself if it has no parent.
+    """
+    base = anchors[0]
+    container = base
+    el = base
+    while el.parent is not None:
+        parent = el.parent
+        if _job_ids_under(parent) - {jid}:
+            break
+        el = parent
+        container = parent
+    return container
 
 
-def _extract_title_from_link(link_tag) -> str | None:
-    """Pull a job title from an anchor: heading child, link text, then aria-label."""
-    for tag in ("h1", "h2", "h3", "h4", "strong", "b"):
-        el = link_tag.find(tag)
-        if el:
-            text = el.get_text(strip=True)
-            if text and 3 <= len(text) <= 120 and text.lower() not in _PLACEHOLDER_STRINGS:
-                return text
-
-    link_text = link_tag.get_text(strip=True)
-    if (
-        link_text
-        and 3 <= len(link_text) <= 120
-        and link_text.lower() not in _GENERIC_LINK_TEXTS
-        and link_text.lower() not in _PLACEHOLDER_STRINGS
-    ):
-        return link_text
-
-    aria = link_tag.get("aria-label", "")
-    if aria and 3 <= len(aria) <= 120 and aria.lower() not in _GENERIC_LINK_TEXTS:
-        return aria
-
-    return None
+def _job_ids_under(el) -> set[str]:
+    """Set of distinct JobRight posting ids among an element's descendant links."""
+    ids: set[str] = set()
+    for a in el.find_all("a", href=True):
+        match = _JOB_ID_RE.search(_href(a))
+        if match:
+            ids.add(match.group(1).lower())
+    return ids
 
 
-def _extract_company_from_context(container, title_text: str) -> str:
-    """Find the company name in elements near the job link."""
-    if container is None:
-        return "Unknown"
+def _extract_title(anchors: list) -> str | None:
+    """Pull the job title from a card's anchors.
 
-    title_lower = title_text.lower()
-    for el in container.find_all(["span", "td", "div", "p"]):
-        # Skip card-wrapper elements: an element that contains the job link is
-        # the whole card, not a single field — its aggregated text would win the
-        # length filter and swallow every field.
-        if el.find("a", href=JOBRIGHT_JOB_URL_RE):
+    The title lives in a clean **leaf** anchor (no nested ``<a>``) whose text is
+    the role name — distinct from the outer "blob" wrapper anchor (which nests
+    other anchors and carries the ``NN %`` match score) and the ``APPLY NOW``
+    CTA. Only generic CTA text and placeholders are excluded as candidates: a
+    "%" or location-shaped SUBSTRING is used merely as a tiebreak preference
+    (defends against a hypothetical variant where the match score or location
+    shares a leaf anchor with the title), never as a hard reject — a real title
+    can legitimately read "100% Remote Data Engineer" or "Sales Manager, TX",
+    and every such candidate must still be extracted, not silently dropped.
+    """
+    candidates: list[str] = []
+    for a in anchors:
+        # The blob wrapper nests the title/CTA anchors; skip it.
+        if a.find("a"):
             continue
-        text = el.get_text(strip=True)
-        if not text or len(text) < 2 or len(text) > 60:
+        text = a.get_text(" ", strip=True)
+        if not text:
             continue
         low = text.lower()
-        if low == title_lower or low in _PLACEHOLDER_STRINGS or low in _GENERIC_LINK_TEXTS:
+        if low in _GENERIC_LINK_TEXTS or low in _PLACEHOLDER_STRINGS:
             continue
-        if _looks_like_location(text) or _BADGE_RE.search(text):
-            continue
-        if "http" in low or "www." in low or "$" in text:
-            continue
-        return text
+        candidates.append(text)
 
-    return "Unknown"
+    if not candidates:
+        return None
+
+    clean = [c for c in candidates if "%" not in c and not _looks_like_location(c)]
+    pool = clean or candidates
+    title = min(pool, key=len)
+    if len(title) > 160:
+        return None
+    return title
 
 
-def _extract_location_from_context(container) -> str:
-    """Find location text in elements near the job link."""
+def _extract_company(container, title: str) -> str:
+    """Find the employer name within a card container.
+
+    Primary signal: JobRight renders the employer as a bold ``<p>``
+    (``font-weight:600``). The line beneath it ("industry · funding stage") is
+    weight 400, and the "Be an early applicant" badge is a ``<span>`` — so
+    scoping to a bold ``<p>`` uniquely selects the company on every observed
+    card. Falls back to the first plausible short leaf text, then "Unknown".
+    """
     if container is None:
         return "Unknown"
 
-    for el in container.find_all(["span", "td", "div", "p"]):
-        if el.find("a", href=JOBRIGHT_JOB_URL_RE):
+    for p in container.find_all("p"):
+        style = (p.get("style") or "").replace(" ", "").lower()
+        if "font-weight:600" in style or "font-weight:700" in style or "font-weight:bold" in style:
+            text = p.get_text(" ", strip=True)
+            if _plausible_company(text, title):
+                return text
+
+    for el in container.find_all(["p", "span", "td", "div"]):
+        # Skip wrapper elements that contain the job link — their aggregated
+        # text is the whole card, not a single field.
+        if el.find("a"):
             continue
-        text = el.get_text(strip=True)
-        if text and len(text) < 100 and _looks_like_location(text):
+        text = el.get_text(" ", strip=True)
+        if _plausible_company(text, title):
             return text
 
     return "Unknown"
 
 
+def _plausible_company(text: str, title: str) -> bool:
+    """True if *text* could be a company name (not title/badge/location/salary)."""
+    if not text or len(text) < 2 or len(text) > 80:
+        return False
+    low = text.lower()
+    if low == title.lower() or low in _PLACEHOLDER_STRINGS or low in _GENERIC_LINK_TEXTS:
+        return False
+    if _looks_like_location(text) or _BADGE_RE.search(text):
+        return False
+    if "$" in text or "http" in low or "www." in low:
+        return False
+    # The muted "industry · stage" line carries a middle-dot / bullet separator.
+    return "·" not in text and "•" not in text
+
+
+def _extract_location(container) -> str:
+    """Find the location among a card's leaf elements (City, ST / US / Remote).
+
+    ``find_all`` yields ancestor cells before their leaves, and an aggregate
+    like "$138K/yr - $198K/yr Mountain View, CA 5+ referrals" also matches the
+    City,ST pattern — so pick the SHORTEST matching text (the tight leaf ``<p>``)
+    and skip any candidate carrying a "$" (salary bleed).
+    """
+    if container is None:
+        return "Unknown"
+
+    best: str | None = None
+    for el in container.find_all(["p", "span", "td", "div"]):
+        if el.find("a"):
+            continue
+        text = el.get_text(" ", strip=True)
+        if not text or len(text) > 60 or "$" in text:
+            continue
+        if _looks_like_location(text) and (best is None or len(text) < len(best)):
+            best = text
+
+    return best or "Unknown"
+
+
+def _extract_salary(container) -> tuple[int | None, int | None]:
+    """Parse the salary range from the card's ``$…`` leaf element, if present.
+
+    Prefers the SHORTEST ``$``-bearing text (the tight salary ``<p>``, not an
+    aggregate cell) and normalizes JobRight's glued ``/yr`` before delegating.
+    """
+    if container is None:
+        return None, None
+
+    best: str | None = None
+    for el in container.find_all(["p", "span", "td", "div"]):
+        if el.find("a"):
+            continue
+        text = el.get_text(" ", strip=True)
+        if "$" in text and (best is None or len(text) < len(best)):
+            best = text
+
+    if best is None:
+        return None, None
+    return parse_salary_range(_normalize_salary_text(best))
+
+
+def _normalize_salary_text(text: str) -> str:
+    """Rewrite ``$138K/yr - $198K/yr`` into ``$138K - $198K / yr``.
+
+    Strips the per-amount period suffix the shared parser's range regex can't
+    tokenize and re-appends the unit ONCE at the end, in the ABBREVIATED form
+    (``/yr``, ``/hr``, ``/mo``, ``/wk``) that ``salary_normalizer._PERIOD_CUES``
+    actually matches. A spelled-out cue like "/ hour" is invisible to that
+    regex and silently resolves to period='unknown', which mis-annualizes
+    hourly/monthly/weekly pay (or drops it as implausible) instead of
+    annualizing it correctly.
+    """
+    match = _SALARY_PERIOD_RE.search(text)
+    stripped = re.sub(r"\s{2,}", " ", _SALARY_PERIOD_RE.sub(" ", text)).strip()
+    if match:
+        abbrev = _SALARY_PERIOD_ABBREV.get(match.group(1).lower())
+        if abbrev:
+            return f"{stripped} / {abbrev}"
+    return stripped
+
+
 def _looks_like_location(text: str) -> bool:
     """Return True if *text* matches a common location pattern."""
     return bool(_LOCATION_KEYWORD_RE.search(text) or _LOCATION_CITYSTATE_RE.search(text))
-
-
-def _extract_job_id(url: str) -> str:
-    """Extract the JobRight job id from a job URL.
-
-    JobRight detail URLs look like ``jobright.ai/jobs/info/<id>`` (also
-    ``/jobs/<id>`` / ``/job/<id>``). The id is the segment right after the
-    ``jobs/info`` / ``job(s)`` marker — NOT blindly the last path segment, which
-    would return an ``/apply`` action suffix or a click-tracker hash for wrapped
-    URLs like ``click.jobright.ai/CL0/https://jobright.ai/jobs/info/<id>/1/abc``.
-    Falls back to the last path segment only if the marker isn't found.
-    """
-    try:
-        markers = re.findall(r"jobright\.ai/jobs?/(?:info/)?([^/?#\s]+)", url, re.IGNORECASE)
-        if markers:
-            return markers[-1]
-        parsed = urlparse(url)
-        path_parts = [p for p in parsed.path.split("/") if p]
-        if path_parts:
-            return path_parts[-1]
-    except Exception:
-        logger.debug("jobright source_id extraction failed", exc_info=True)
-    return ""
