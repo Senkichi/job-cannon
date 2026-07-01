@@ -13,10 +13,17 @@ from __future__ import annotations
 
 import json
 
-from job_finder.db import apply_location_observation, get_job, merge_locations_raw, upsert_job
+from job_finder.db import (
+    apply_location_observation,
+    get_job,
+    merge_locations_raw,
+    merge_locations_structured,
+    upsert_job,
+)
 from job_finder.models import Job
 from job_finder.parsed_job import ParsedJob
 from job_finder.web.location_canonical import from_json as locations_from_json
+from job_finder.web.location_canonical import JobLocation
 
 
 def _careers_crawl_parsed(*, location: str = "", description: str | None = None) -> ParsedJob:
@@ -57,6 +64,124 @@ def test_merge_locations_raw_does_not_mutate_inputs() -> None:
 
 def test_merge_locations_raw_drops_empty_entries() -> None:
     assert merge_locations_raw(["", "NYC"], ["", "Austin, TX"]) == ["NYC", "Austin, TX"]
+
+
+# ---------------------------------------------------------------------------
+# merge_locations_structured — pure helper
+# ---------------------------------------------------------------------------
+
+
+def test_merge_locations_structured_unions_without_dupes() -> None:
+    """Merging [NYC] existing with [SF] incoming returns [NYC, SF] (both present, first-seen order)."""
+    existing = [
+        JobLocation(
+            city="New York",
+            region="New York",
+            region_code="NY",
+            country="United States",
+            country_code="US",
+            workplace_type="HYBRID",
+            raw="New York, NY",
+            unresolved=False,
+        )
+    ]
+    incoming = [
+        JobLocation(
+            city="San Francisco",
+            region="California",
+            region_code="CA",
+            country="United States",
+            country_code="US",
+            workplace_type="HYBRID",
+            raw="San Francisco, CA",
+            unresolved=False,
+        )
+    ]
+    merged = merge_locations_structured(existing, incoming)
+    assert len(merged) == 2
+    assert merged[0].city == "New York"
+    assert merged[1].city == "San Francisco"
+
+
+def test_merge_locations_structured_dedups_identical_key() -> None:
+    """Merging [SF] with a second [SF] that differs only in raw collapses to one entry (dedup key ignores raw)."""
+    existing = [
+        JobLocation(
+            city="San Francisco",
+            region="California",
+            region_code="CA",
+            country="United States",
+            country_code="US",
+            workplace_type="HYBRID",
+            raw="San Francisco, CA",
+            unresolved=False,
+        )
+    ]
+    incoming = [
+        JobLocation(
+            city="San Francisco",
+            region="California",
+            region_code="CA",
+            country="United States",
+            country_code="US",
+            workplace_type="HYBRID",
+            raw="SF, CA",  # Different raw, same dedup key
+            unresolved=False,
+        )
+    ]
+    merged = merge_locations_structured(existing, incoming)
+    assert len(merged) == 1
+    assert merged[0].raw == "San Francisco, CA"  # First-seen raw preserved
+
+
+def test_merge_locations_structured_does_not_mutate_inputs() -> None:
+    """Neither existing nor incoming list is mutated after the call."""
+    existing = [
+        JobLocation(
+            city="New York",
+            region="New York",
+            region_code="NY",
+            country="United States",
+            country_code="US",
+            workplace_type="HYBRID",
+            raw="New York, NY",
+            unresolved=False,
+        )
+    ]
+    incoming = [
+        JobLocation(
+            city="San Francisco",
+            region="California",
+            region_code="CA",
+            country="United States",
+            country_code="US",
+            workplace_type="HYBRID",
+            raw="San Francisco, CA",
+            unresolved=False,
+        )
+    ]
+    existing_copy = existing[:]
+    incoming_copy = incoming[:]
+    merge_locations_structured(existing, incoming)
+    assert existing == existing_copy
+    assert incoming == incoming_copy
+
+
+def test_merge_locations_structured_resighting_single_posting_keeps_all() -> None:
+    """Re-merging the same single-location set is a no-op (no dropped locations, no dupes)."""
+    loc = JobLocation(
+        city="San Francisco",
+        region="California",
+        region_code="CA",
+        country="United States",
+        country_code="US",
+        workplace_type="HYBRID",
+        raw="San Francisco, CA",
+        unresolved=False,
+    )
+    merged = merge_locations_structured([loc], [loc])
+    assert len(merged) == 1
+    assert merged[0].city == "San Francisco"
 
 
 # ---------------------------------------------------------------------------

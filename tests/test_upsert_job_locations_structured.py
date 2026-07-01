@@ -9,13 +9,18 @@ Covers:
 - Layer 2 (parsed.locations_structured empty): parse_locations(job.location)
   auto-derives.
 - Legacy columns (location, locations_raw) untouched — back-compat.
-- UPDATE branch overwrites the m066 cols (last-seen wins for structured).
+- UPDATE branch unions the m066 cols (issue #639: merge_locations_structured).
+  Denormalized cols derive from merged set's index 0 (first-seen location).
 - Empty list / parse failure → 3 cols NULL (not crashes).
 
 Phase 48.07 update: the former ``upsert_job(..., locations_structured=...)``
 kwarg is gone; structured locations are carried into ParsedJob.from_job
 via the ``source_meta`` parameter and read off ``parsed.locations_structured``
 inside upsert_job. Same coverage, different boundary.
+
+Issue #639 update: UPDATE branch now unions locations_structured instead of
+overwriting. The merge uses merge_locations_structured which dedups by
+(country_code, region_code, city, workplace_type) and preserves first-seen order.
 """
 
 from __future__ import annotations
@@ -32,6 +37,7 @@ from job_finder.db import upsert_job
 from job_finder.models import Job
 from job_finder.parsed_job import ParsedJob, UnresolvedParsedJob
 from job_finder.web.db_migrate import run_migrations
+from job_finder.web.location_canonical import from_json as locations_from_json
 from job_finder.web.location_canonical import JobLocation
 
 
@@ -211,11 +217,134 @@ def test_legacy_location_and_locations_raw_preserved_with_structured(conn: sqlit
     assert "Remote" in row["locations_raw"]
 
 
-# ---------- UPDATE branch: last-seen wins ----------
+# ---------- UPDATE branch: union merge (issue #639) ----------
 
 
-def test_update_branch_overwrites_structured_cols(conn: sqlite3.Connection):
-    """Second upsert with different structured → overwrites the 3 m066 cols."""
+def test_upsert_update_branch_unions_locations_structured(conn: sqlite3.Connection):
+    """Insert with NYC, upsert same company|title with SF → stored locations_structured decodes to both NYC and SF (the Brigit fix)."""
+    nyc = [
+        JobLocation(
+            city="New York",
+            region="New York",
+            region_code="NY",
+            country="United States",
+            country_code="US",
+            workplace_type="HYBRID",
+            raw="New York, NY",
+            unresolved=False,
+        )
+    ]
+    parsed_first = _make_parsed(
+        company="Brigit", title="Lead Data Scientist", locations_structured=nyc
+    )
+    result_first = upsert_job(conn, parsed_first)
+    assert result_first.kind == "inserted"
+
+    sf = [
+        JobLocation(
+            city="San Francisco",
+            region="California",
+            region_code="CA",
+            country="United States",
+            country_code="US",
+            workplace_type="HYBRID",
+            raw="San Francisco, CA",
+            unresolved=False,
+        )
+    ]
+    parsed_second = _make_parsed(
+        company="Brigit", title="Lead Data Scientist", locations_structured=sf
+    )
+    result_second = upsert_job(conn, parsed_second)
+    assert result_second.kind == "updated"
+
+    row = _select_loc_cols(conn, parsed_first.dedup_key)
+    structured = locations_from_json(row["locations_structured"])
+    assert len(structured) == 2
+    city_names = {loc.city for loc in structured}
+    assert city_names == {"New York", "San Francisco"}
+
+
+def test_upsert_update_branch_recomputes_denormalized_from_merged(
+    conn: sqlite3.Connection,
+):
+    """After the union above, workplace_type / primary_country_code reflect the merged set's index 0 (not the incoming-only value)."""
+    nyc = [
+        JobLocation(
+            city="New York",
+            region="New York",
+            region_code="NY",
+            country="United States",
+            country_code="US",
+            workplace_type="HYBRID",
+            raw="New York, NY",
+            unresolved=False,
+        )
+    ]
+    parsed_first = _make_parsed(
+        company="TestCo", title="Senior Eng", locations_structured=nyc
+    )
+    upsert_job(conn, parsed_first)
+
+    sf = [
+        JobLocation(
+            city="San Francisco",
+            region="California",
+            region_code="CA",
+            country="United States",
+            country_code="US",
+            workplace_type="REMOTE",
+            raw="San Francisco, CA",
+            unresolved=False,
+        )
+    ]
+    parsed_second = _make_parsed(
+        company="TestCo", title="Senior Eng", locations_structured=sf
+    )
+    upsert_job(conn, parsed_second)
+
+    row = _select_loc_cols(conn, parsed_first.dedup_key)
+    # Denormalized cols derive from merged set's index 0 (NYC, the first-seen location)
+    assert row["workplace_type"] == "HYBRID"
+    assert row["primary_country_code"] == "US"
+    structured = locations_from_json(row["locations_structured"])
+    assert len(structured) == 2
+
+
+def test_upsert_update_branch_idempotent_on_same_structured(
+    conn: sqlite3.Connection,
+):
+    """Re-sighting the identical structured location does not add a duplicate entry and the structured merge alone does not report "updated"."""
+    loc = [
+        JobLocation(
+            city="San Francisco",
+            region="California",
+            region_code="CA",
+            country="United States",
+            country_code="US",
+            workplace_type="HYBRID",
+            raw="San Francisco, CA",
+            unresolved=False,
+        )
+    ]
+    parsed = _make_parsed(company="TestCo", title="Senior Eng", locations_structured=loc)
+    result_first = upsert_job(conn, parsed)
+    assert result_first.kind == "inserted"
+
+    result_second = upsert_job(conn, parsed)
+    # No canonical change from structured merge alone (same location re-sighted)
+    assert result_second.kind in {"touched", "unchanged"}
+
+    row = _select_loc_cols(conn, parsed.dedup_key)
+    structured = locations_from_json(row["locations_structured"])
+    assert len(structured) == 1
+
+
+# ---------- UPDATE branch: legacy overwrite tests (updated for union merge) ----------
+
+
+def test_update_branch_unions_structured_cols(conn: sqlite3.Connection):
+    """Second upsert with different structured → unions the locations (not overwrite). Denormalized cols derive from merged index 0."""
     first = [
         JobLocation(
             city="Tokyo",
@@ -234,7 +363,7 @@ def test_update_branch_overwrites_structured_cols(conn: sqlite3.Connection):
     assert row_before["primary_country_code"] == "JP"
     assert row_before["workplace_type"] == "ONSITE"
 
-    # Second ingestion with REMOTE workplace_type
+    # Second ingestion with REMOTE workplace_type (different location)
     second = [
         JobLocation(
             city=None,
@@ -249,14 +378,22 @@ def test_update_branch_overwrites_structured_cols(conn: sqlite3.Connection):
     ]
     parsed_second = _make_parsed(location="Tokyo, Japan", locations_structured=second)
     result = upsert_job(conn, parsed_second)
-    assert result.kind != "inserted"  # update branch
+    assert result.kind == "updated"  # canonical changed (new location added)
     row_after = _select_loc_cols(conn, parsed_first.dedup_key)
-    assert row_after["primary_country_code"] == "US"
-    assert row_after["workplace_type"] == "REMOTE"
+
+    # Under union-merge, both locations are present
+    structured = locations_from_json(row_after["locations_structured"])
+    assert len(structured) == 2
+    country_codes = {loc.country_code for loc in structured}
+    assert country_codes == {"JP", "US"}
+
+    # Denormalized cols derive from merged set's index 0 (Tokyo, the first-seen location)
+    assert row_after["primary_country_code"] == "JP"
+    assert row_after["workplace_type"] == "ONSITE"
 
 
 def test_update_branch_layer2_fallback_when_structured_empty(conn: sqlite3.Connection):
-    """UPDATE without structured also runs Layer 2 — symmetric with INSERT."""
+    """UPDATE without structured also runs Layer 2 — symmetric with INSERT. Under union-merge, both locations are present."""
     parsed_first = _make_parsed(location="Berlin, Germany")
     upsert_job(conn, parsed_first)  # insert via Layer 2
     row_before = _select_loc_cols(conn, parsed_first.dedup_key)
@@ -266,4 +403,11 @@ def test_update_branch_layer2_fallback_when_structured_empty(conn: sqlite3.Conne
     parsed_second = _make_parsed(location="Madrid, Spain")
     upsert_job(conn, parsed_second)  # update branch (same dedup_key)
     row_after = _select_loc_cols(conn, parsed_first.dedup_key)
-    assert row_after["primary_country_code"] == "ES"
+
+    # Under union-merge with recompute-from-merged-index-0, the merged set is [DE, ES]
+    # so index-0 stays DE (first-seen location)
+    structured = locations_from_json(row_after["locations_structured"])
+    assert len(structured) == 2
+    country_codes = {loc.country_code for loc in structured}
+    assert country_codes == {"DE", "ES"}
+    assert row_after["primary_country_code"] == "DE"  # First-seen location stays primary

@@ -22,11 +22,13 @@ from job_finder.config import JD_STORAGE_MAX_CHARS
 from job_finder.json_utils import safe_json_load, to_naive_utc_iso, utc_now_iso
 from job_finder.salary_normalizer import PROVENANCE_RANK
 from job_finder.web.location_canonical import JobLocation
+from job_finder.web.location_canonical import from_json as _locations_from_json
 from job_finder.web.location_canonical import to_json as _locations_to_json
 
 from ._jd_full import _is_jd_junk as _jd_is_junk
 from ._jd_full import set_jd_full as _set_jd_full
 from ._locations import merge_locations_raw
+from ._locations import merge_locations_structured
 from ._persistence import update_pipeline_status
 
 _logger = logging.getLogger(__name__)
@@ -56,7 +58,7 @@ JOBS_ALL_COLUMNS = (
 # Columns read by upsert_job() for merge logic — only what the UPDATE branch
 # needs plus salary_min/salary_max for "changed" detection (Phase 47.02).
 _UPSERT_MERGE_COLUMNS = (
-    "sources, source_urls, locations_raw, description, jd_full, pipeline_status, "
+    "sources, source_urls, locations_raw, locations_structured, description, jd_full, pipeline_status, "
     "salary_min, salary_max, salary_period, salary_currency, salary_provenance, "
     "salary_observations, posted_date, posted_date_precision"
 )
@@ -465,6 +467,9 @@ def upsert_job(
         )
 
     locations_json = _locations_to_json(_locs_structured) if _locs_structured else None
+    # Note: workplace_type_col and primary_country_code are recomputed from the merged set
+    # in the UPDATE branch (after merge_locations_structured). For the INSERT branch,
+    # they derive from the incoming-only set (no stored set to merge against).
     workplace_type_col = _locs_structured[0].workplace_type if _locs_structured else "UNSPECIFIED"
     primary_country_code = _locs_structured[0].country_code if _locs_structured else None
 
@@ -558,6 +563,17 @@ def upsert_job(
             canonical_changed = True
 
         merged_location = ", ".join(dict.fromkeys(locs_list))
+
+        # Smart structured-location merge: union by (country_code, region_code, city, workplace_type).
+        # Delegated to merge_locations_structured — the single source of truth for this merge.
+        existing_locs_structured = existing["locations_structured"]
+        try:
+            prior_structured = _locations_from_json(existing_locs_structured) if existing_locs_structured else []
+        except (ValueError, json.JSONDecodeError, TypeError):
+            prior_structured = []
+        merged_structured = merge_locations_structured(prior_structured, _locs_structured)
+        if merged_structured != prior_structured:
+            canonical_changed = True
 
         # Smart description merge
         merged_description = merge_description(existing["description"], parsed.description)
@@ -662,6 +678,11 @@ def upsert_job(
             salary_params.append(json.dumps(merged_observations))
         salary_clause = ("," + ", ".join(salary_set_parts)) if salary_set_parts else ""
 
+        # Recompute denormalized columns from the merged structured set.
+        merged_locations_json = _locations_to_json(merged_structured) if merged_structured else None
+        merged_workplace_type = merged_structured[0].workplace_type if merged_structured else "UNSPECIFIED"
+        merged_primary_country_code = merged_structured[0].country_code if merged_structured else None
+
         try:
             conn.execute(
                 f"""UPDATE jobs SET
@@ -686,9 +707,9 @@ def upsert_job(
                     merged_description,
                     json.dumps(locs_list),
                     merged_location,
-                    locations_json,
-                    workplace_type_col,
-                    primary_country_code,
+                    merged_locations_json,
+                    merged_workplace_type,
+                    merged_primary_country_code,
                     company_id,
                     1 if pd_wins else 0,
                     pd_str,

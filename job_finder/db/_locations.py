@@ -31,6 +31,11 @@ merge_locations_raw(existing, incoming) -> list[str]
     Shared by ``upsert_job`` (UPDATE branch) and ``apply_location_observation``
     so the merge semantics are defined in exactly one place.
 
+merge_locations_structured(existing, incoming) -> list[JobLocation]
+    Pure helper: Union by ``(country_code, region_code, city, workplace_type)``.
+    Shared by ``upsert_job`` (UPDATE branch) so the merge semantics are defined
+    in exactly one place. Mirrors the design of ``merge_locations_raw``.
+
 apply_location_observation(conn, dedup_key, raw_location, *, source) -> bool
     The single funnel. Merges one observed location string into a job's
     canonical location columns and rewrites all five together in one UPDATE.
@@ -44,7 +49,12 @@ import logging
 import re
 import sqlite3
 
-from job_finder.web.location_canonical import to_json as _locations_to_json
+from job_finder.web.location_canonical import (
+    JobLocation,
+    dedupe_locations,
+    from_json,
+    to_json as _locations_to_json,
+)
 
 _logger = logging.getLogger(__name__)
 
@@ -85,6 +95,37 @@ def merge_locations_raw(existing: list[str], incoming: list[str]) -> list[str]:
         else:
             merged.append(normalized)
     return merged
+
+
+def merge_locations_structured(
+    existing: list[JobLocation], incoming: list[JobLocation]
+) -> list[JobLocation]:
+    """Union by ``(country_code, region_code, city, workplace_type)`` (pure).
+
+    Single source of truth for the ``locations_structured`` merge semantics
+    shared by ``upsert_job`` (UPDATE branch). Mirrors the design of
+    ``merge_locations_raw`` — pure, immutable, single source of truth.
+
+    Deduplication uses the existing ``dedupe_locations`` helper from
+    ``location_canonical`` so the semantics are defined in exactly one place.
+    The dedup key is ``(country_code, region_code, city, workplace_type)`` —
+    two locations that differ only in ``raw`` collapse to the first occurrence.
+
+    Preserves first-seen order: existing entries first (in their stored order),
+    then genuinely-new incoming entries appended in arrival order.
+
+    Args:
+        existing: The structured-location list already stored on the row.
+        incoming: Newly observed structured locations to merge in.
+
+    Returns:
+        A new list — neither input is mutated (immutability).
+    """
+    # Concatenate existing + incoming, then dedupe via the canonical helper.
+    # dedupe_locations preserves first-seen order, so existing entries stay
+    # at the front and new entries are appended in arrival order.
+    combined = existing + incoming
+    return dedupe_locations(combined)
 
 
 def apply_location_observation(
