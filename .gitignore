@@ -11,6 +11,7 @@ config.yaml.prefix-restore.*
 experience_profile.json
 experience_reference.md
 resume_style_guide.json
+!job_finder/web/scoring_prompts/resume_style_guide.json
 
 # Database
 *.db

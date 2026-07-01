@@ -1,0 +1,19 @@
+{
+  "confidentiality_rules": "Source fidelity: only include skills, tools, and experiences that exist in the candidate's source material — this is the single most important rule and constitutes resume fraud if violated",
+  "jd_mirroring_rules": "Extract the top 5–7 keywords/themes from the JD and ensure each appears at least once",
+  "anti_patterns": [
+    "Fabricating skills or tools to match the JD… this is the single most important rule and constitutes resume fraud",
+    "Inventing achievements or metrics not present in the source material",
+    "Changing dates, titles, or companies to better align with the job requirements",
+    "Adding certifications or education not actually obtained",
+    "Exaggerating scope or impact beyond what the source material supports",
+    "Copying language directly from the JD without grounding it in real experience"
+  ],
+  "brand_guidelines": "Professional, concise, and achievement-focused. Use strong action verbs and quantified impact where available.",
+  "typography_rules": {
+    "fonts": "Use clean, professional fonts (e.g., Arial, Calibri, Helvetica)",
+    "margins": "Standard 1-inch margins",
+    "spacing": "Consistent line spacing (1.15-1.5)",
+    "headings": "Clear hierarchy with bold section headers"
+  }
+}
