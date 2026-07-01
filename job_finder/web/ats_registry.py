@@ -134,6 +134,7 @@ _SPECS: tuple[PlatformSpec, ...] = (
     # Probe exists but reconcile-only (not in the speculative fast-path today).
     PlatformSpec("oracle_cloud", probe_attr="_probe_oracle_cloud"),
     PlatformSpec("ultipro", probe_attr="_probe_ultipro"),
+    PlatformSpec("ibm", probe_attr="_probe_ibm"),
     # SuccessFactors — public XML feed, URL-fastpath eligible.
     PlatformSpec(
         "successfactors", probe_attr="_probe_successfactors", url_fastpath=True, reconcilable=True

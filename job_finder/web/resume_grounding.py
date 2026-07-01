@@ -388,10 +388,16 @@ def _check_prohibited_items(
                 )
             )
 
-    # 6. Years-of-experience figure smaller than min_years_anchor
+    # 6. Years-of-experience figure smaller than min_years_anchor (total-career self-claims only)
     min_years = prohibited_config.get("min_years_anchor")
     if min_years is not None:
-        for year_match in re.finditer(r"\b(\d+)\+?\s*(?:years|yrs)\b", full_text, re.IGNORECASE):
+        # Match only total-career experience self-claims (e.g., "5 years of experience", "8+ years professional experience")
+        # NOT role/project durations (e.g., "4 years leading ML", "2 years at [company]")
+        for year_match in re.finditer(
+            r"\b(\d+)\+?\s*(?:years|yrs)\s+(?:of\s+)?(?:[A-Za-z-]+\s+){0,3}experience\b",
+            full_text,
+            re.IGNORECASE,
+        ):
             years = int(year_match.group(1))
             if years < min_years:
                 violations.append(

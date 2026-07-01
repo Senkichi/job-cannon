@@ -287,8 +287,9 @@ def score_and_persist_job(
     - Persists: classification (Python-derived), sub_scores_json,
       fit_analysis (rationale payload), scoring_provider, scoring_model.
     - Returns the underlying ScoringResult (status='ok'/'skipped'/'error')
-      or None if the scorer returned nothing. Missing dedup_key rows are
-      silent no-ops (matches SQLite UPDATE-no-match semantics).
+      or None if the scorer returned nothing. Jobs missing ``dedup_key`` are
+      rejected before scoring runs (returns None) — there is no row to key
+      a persisted assessment against, so scoring would be wasted work.
     - run_id: optional correlation id from the scheduler / harness run
       wrapper. When supplied, the per-job ``score`` event emitted onto the
       ``run_events`` stream after a successful persist carries it; ad-hoc
@@ -310,6 +311,10 @@ def score_and_persist_job(
         scorer_fn = _default_scorer
 
     dedup_key = job.get("dedup_key")
+    if not dedup_key:
+        logger.warning("score_and_persist_job: missing dedup_key, skipping score+persist")
+        return None
+
     candidate_context = _resolve_candidate_context(config)
     result = scorer_fn(job, conn, config, candidate_context=candidate_context)
 
@@ -385,7 +390,12 @@ def _render_location_targeting(
       single-sources the treatment with ``location_fit._target_loc_matches``,
       which likewise excludes ``"remote"`` from geography matching.
     - When remote is preferred, a fully-remote role is stated as the IDEAL
-      location match and explicitly disqualified from being a "gap".
+      location match, AND an on-site/hybrid role in a target geography is stated
+      as an *equally* full location match (location_fit 5) — both are explicitly
+      disqualified from being a location "gap". Remote is the candidate's top
+      *overall* preference, but on the location_fit axis a target-geography
+      on-site/hybrid role scores the same as remote (5): geography membership
+      overrides the on-site penalty.
 
     This exists because the prior flat rendering ("Target locations: San
     Francisco, Remote") gave the scorer no ordering, so ``qwen2.5:14b`` read the
@@ -393,6 +403,15 @@ def _render_location_targeting(
     flagging a fully-remote role as the gap "Remote role, candidate prefers San
     Francisco location". Making the hierarchy explicit removes the ambiguity the
     model was resolving incorrectly.
+
+    The remote branch deliberately does NOT tell the model a remote role is
+    "preferred over" a target-geography on-site/hybrid role *for location_fit*.
+    That earlier wording applied downward pressure to the location_fit sub-score
+    of an in-geography hybrid role in the LLM-judged branch (when the
+    deterministic override abstains — e.g. a job whose city failed to parse into
+    ``locations_structured``), contradicting the override's own Row 5 (which
+    scores a target-geography on-site/hybrid role a 5). Keeping the two branches'
+    location_fit guidance symmetric single-sources the axis with the override.
     """
     wa = (work_arrangement or "remote").strip().lower()
     # Keep only real places: drop blanks/None AND the "remote" modality token.
@@ -416,9 +435,13 @@ def _render_location_targeting(
         )
         lines.append(
             f"- Acceptable on-site/hybrid geographies (relevant ONLY when the role "
-            f"is not remote): {geo_str}. On-site/hybrid in one of these is "
-            "acceptable — geography membership overrides the on-site penalty for "
-            "location_fit — but a remote role is still preferred over any of them."
+            f"is not remote): {geo_str}. An on-site or hybrid role in one of these "
+            "is an EQUALLY full location match (location_fit 5) — geography "
+            "membership overrides the on-site penalty, so score it the same as a "
+            "remote role on location_fit and never treat its on-site/hybrid "
+            "arrangement as a location gap. (A remote role remains the top overall "
+            "preference, but that ranking must not lower this on-site/hybrid "
+            "role's location_fit.)"
         )
     else:
         lines.append(

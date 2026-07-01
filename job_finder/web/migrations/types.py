@@ -66,9 +66,15 @@ class Migration:
         py: Optional Python helper invoked with a `MigrationContext` after
             `sql` runs. Used by migrations that need filesystem or env state
             (Migration 41's backup-recency gate).
+        name: Module basename (e.g. ``m096_staleness_consistency``), injected
+            by the discovery pass in ``migrations/__init__.py`` via
+            ``dataclasses.replace``. Recorded in the ``schema_migrations``
+            ledger for forensics. Defaults to "" for hand-built Migration
+            objects (tests); the ledger falls back to ``m{version}`` then.
     """
 
     version: int
     description: str
     sql: list[str] = field(default_factory=list)
     py: Callable[[MigrationContext], None] | None = None
+    name: str = ""
