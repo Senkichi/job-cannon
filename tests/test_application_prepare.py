@@ -75,8 +75,9 @@ def app_with_migrations(_migrated_template_db, tmp_path):
         """INSERT INTO jobs
             (dedup_key, title, company, location, sources, source_urls,
              source_id, salary_min, salary_max, description, jd_full,
-             first_seen, last_seen, score_breakdown, user_interest, pipeline_status)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+             first_seen, last_seen, score_breakdown, user_interest, pipeline_status,
+             direct_url, direct_url_confidence)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             "test|job|remote",
             "Test Job",
@@ -94,6 +95,8 @@ def app_with_migrations(_migrated_template_db, tmp_path):
             "{}",
             "interested",
             "new",
+            "https://company.com/careers/123",
+            "strict",
         ),
     )
     conn.commit()
@@ -117,7 +120,12 @@ def app_with_migrations(_migrated_template_db, tmp_path):
                 "Why do you want to work here?",
                 "Summarize your relevant experience for this role.",
                 "What is your greatest professional achievement?",
-            ]
+            ],
+            "auto_submit": {
+                "enabled": True,
+                "require_strict_target": True,
+                "daily_limit": 5,
+            },
         },
         "providers": {
             "primary": "ollama",
@@ -199,7 +207,8 @@ def test_prepare_application_end_to_end(app_with_migrations):
                     assert form_mapping["full_name"] == "PROFILE-NAME-SENTINEL"
                     assert form_mapping["email"] == "sentinel@example.com"
                     assert "apply_url" in form_mapping
-                    assert form_mapping["apply_url"] == "https://example.com/apply"
+                    # apply_url_for now prefers strict direct_url over source_url
+                    assert form_mapping["apply_url"] == "https://company.com/careers/123"
 
                     # ASSERT: drafted_answers contain DRAFT-SENTINEL (proves call_model ran)
                     assert len(drafted_answers) > 0
@@ -223,33 +232,48 @@ def test_prepare_application_end_to_end(app_with_migrations):
                     assert "PROFILE-NAME-SENTINEL" in response_text
                     assert "DRAFT-SENTINEL" in response_text
 
-                    # ACT: Approve application
+                    # ACT: Approve application (mock submit seam to return 'submitted')
+                    from job_finder.web.submit_orchestrator import SubmitResult
+
                     application_id = row["id"]
-                    response = client.post(f"/jobs/applications/{application_id}/approve")
-                    assert response.status_code == 200
+                    # Ensure auto_submit is enabled in app config for this test
+                    if "application" not in app.config:
+                        app.config["application"] = {}
+                    if "auto_submit" not in app.config["application"]:
+                        app.config["application"]["auto_submit"] = {}
+                    app.config["application"]["auto_submit"]["enabled"] = True
+                    app.config["application"]["auto_submit"]["require_strict_target"] = True
+                    app.config["application"]["auto_submit"]["daily_limit"] = 5
 
-                    # ASSERT: Dual-write (pipeline_status + pipeline_events)
-                    job_row = conn.execute(
-                        "SELECT pipeline_status FROM jobs WHERE dedup_key = ?", (dedup_key,)
-                    ).fetchone()
-                    assert job_row is not None
-                    assert job_row["pipeline_status"] == "applied"
+                    with patch(
+                        "job_finder.web.submit_orchestrator.submit_application",
+                        return_value=SubmitResult(outcome="submitted"),
+                    ):
+                        response = client.post(f"/jobs/applications/{application_id}/approve")
+                        assert response.status_code == 200
 
-                    event_count = conn.execute(
-                        """SELECT COUNT(*) FROM pipeline_events
-                           WHERE job_id = ? AND to_status = 'applied'""",
-                        (dedup_key,),
-                    ).fetchone()[0]
-                    assert event_count >= 1
+                        # ASSERT: Dual-write (pipeline_status + pipeline_events)
+                        job_row = conn.execute(
+                            "SELECT pipeline_status FROM jobs WHERE dedup_key = ?", (dedup_key,)
+                        ).fetchone()
+                        assert job_row is not None
+                        assert job_row["pipeline_status"] == "applied"
 
-                    # ASSERT: Application row resolved
-                    app_row = conn.execute(
-                        "SELECT status, resolved_at FROM applications WHERE id = ?",
-                        (application_id,),
-                    ).fetchone()
-                    assert app_row is not None
-                    assert app_row["status"] == "approved"
-                    assert app_row["resolved_at"] is not None
+                        event_count = conn.execute(
+                            """SELECT COUNT(*) FROM pipeline_events
+                               WHERE job_id = ? AND to_status = 'applied'""",
+                            (dedup_key,),
+                        ).fetchone()[0]
+                        assert event_count >= 1
+
+                        # ASSERT: Application row resolved
+                        app_row = conn.execute(
+                            "SELECT status, resolved_at FROM applications WHERE id = ?",
+                            (application_id,),
+                        ).fetchone()
+                        assert app_row is not None
+                        assert app_row["status"] == "submitted"
+                        assert app_row["resolved_at"] is not None
 
                     conn.close()
 
