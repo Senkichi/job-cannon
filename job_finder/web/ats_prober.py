@@ -259,7 +259,7 @@ def _try_static_first_fallthrough(
             # Compute reenable_scan based on company state (Fix 3)
             # Only re-enable for the m074 cohort: no known platform, prior miss
             reenable = (
-                company.get("ats_platform") is None and company.get("ats_probe_status") == "miss"
+                company["ats_platform"] is None and company["ats_probe_status"] == "miss"
             )
             res = promote_from_careers_link(
                 conn,
@@ -313,8 +313,8 @@ def _try_static_first_fallthrough(
                         # Compute reenable_scan based on company state (Fix 3)
                         # Only re-enable for the m074 cohort: no known platform, prior miss
                         reenable = (
-                            company.get("ats_platform") is None
-                            and company.get("ats_probe_status") == "miss"
+                            company["ats_platform"] is None
+                            and company["ats_probe_status"] == "miss"
                         )
                         res = promote_from_careers_link(
                             conn,
@@ -523,7 +523,7 @@ def _try_static_first_fallthrough(
                         # This is NOT an ATS 'hit' (no platform+slug), so we mark as 'miss' with
                         # scan_enabled=1 and a specific miss_reason, so careers_crawler picks it up.
                         if db_path:
-                            summary = {"jobs_found": 0, "jobs_new": 0, "errors": []}
+                            summary = _new_summary()
                             all_new_job_keys = []
                             _upsert_and_log(
                                 playwright_jobs,
